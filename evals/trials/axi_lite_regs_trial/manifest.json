@@ -1,0 +1,15 @@
+{
+  "name": "axi_lite_regs_trial",
+  "top": "tb",
+  "sources": [
+    "axi_lite_regs.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS axi lite regs"
+    ]
+  },
+  "timeout_seconds": 10
+}

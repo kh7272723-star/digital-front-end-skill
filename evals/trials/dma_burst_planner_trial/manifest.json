@@ -1,0 +1,15 @@
+{
+  "name": "dma_burst_planner_trial",
+  "top": "tb",
+  "sources": [
+    "dma_burst_planner.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS dma burst planner"
+    ]
+  },
+  "timeout_seconds": 10
+}

@@ -1,0 +1,11 @@
+{
+  "name": "fsm_reset_release_bug",
+  "top": "tb_fsm_reset_release_bug",
+  "sources": ["dut.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "fail",
+    "contains": ["EXPECTED_FSM_RESET_RELEASE_FAIL"]
+  },
+  "timeout_seconds": 10
+}

@@ -1,0 +1,417 @@
+{
+  "benchmark_name": "digital-front-end-engineer-task-benchmark",
+  "version": "0.1",
+  "description": "Engineer-level task benchmark for comparing with-skill and baseline RTL-agent outputs.",
+  "variants": ["with_skill", "baseline"],
+  "tasks": [
+    {
+      "id": "rv_register_slice",
+      "source_eval_id": 1,
+      "category": "module_timing",
+      "assertions": [
+        {
+          "text": "Contract appears before RTL.",
+          "type": "ordered",
+          "patterns": ["design contract|timing contract", "\\bmodule\\s+\\w+"]
+        },
+        {
+          "text": "State elements are named before RTL.",
+          "type": "ordered",
+          "patterns": ["state elements|registers|state register", "\\bmodule\\s+\\w+"]
+        },
+        {
+          "text": "Cycle trace distinguishes pre-edge and next-visible behavior.",
+          "type": "all_contains",
+          "patterns": ["pre-edge|before.*edge", "next visible|post-edge|after.*edge"]
+        },
+        {
+          "text": "Ready/valid movement uses accepted-operation names.",
+          "type": "all_contains",
+          "patterns": ["accept_input", "accept_output"]
+        },
+        {
+          "text": "Module ports follow *_i/*_o naming.",
+          "type": "all_contains",
+          "patterns": ["valid_i", "ready_o", "valid_o", "ready_i"]
+        },
+        {
+          "text": "No legacy movement terminology appears.",
+          "type": "absent",
+          "pattern": "\\b(fire|push|pop)\\b"
+        },
+        {
+          "text": "Verification includes stall or stability check.",
+          "type": "any_contains",
+          "patterns": ["stall", "stable", "hold"]
+        }
+      ]
+    },
+    {
+      "id": "fifo_boundary_contract",
+      "source_eval_id": 5,
+      "category": "module_timing",
+      "assertions": [
+        {
+          "text": "Full/read policy is explicit.",
+          "type": "contains",
+          "pattern": "full.*read|read.*full|full\\+read"
+        },
+        {
+          "text": "Empty/write policy is explicit.",
+          "type": "contains",
+          "pattern": "empty.*write|write.*empty|empty\\+write"
+        },
+        {
+          "text": "Read-data timing is stated.",
+          "type": "contains",
+          "pattern": "registered read|combinational read|read data.*registered|read data.*combinational"
+        },
+        {
+          "text": "FIFO uses wr_en/rd_en and wr_do/rd_do terminology.",
+          "type": "all_contains",
+          "patterns": ["wr_en", "rd_en", "wr_do", "rd_do"]
+        },
+        {
+          "text": "Boundary policy appears before RTL.",
+          "type": "ordered",
+          "patterns": ["boundary|full.*read|empty.*write", "\\bmodule\\s+\\w+"]
+        },
+        {
+          "text": "No guessed CDC or protocol bypass language appears.",
+          "type": "absent",
+          "pattern": "just assume|probably safe|should be fine"
+        }
+      ]
+    },
+    {
+      "id": "pipeline_stall_flush",
+      "source_eval_id": 7,
+      "category": "module_timing",
+      "assertions": [
+        {
+          "text": "Flush-over-stall priority is stated before RTL.",
+          "type": "ordered",
+          "patterns": ["flush.*win|flush.*priority|flush-over-stall", "\\bmodule\\s+\\w+"]
+        },
+        {
+          "text": "Cycle trace covers reset, load, stall, and flush.",
+          "type": "all_contains",
+          "patterns": ["reset", "load|accept_input|advance", "stall", "flush"]
+        },
+        {
+          "text": "RTL or checks hold valid/data together under stall.",
+          "type": "all_contains",
+          "patterns": ["valid_o", "data_o", "stall|hold|stable"]
+        },
+        {
+          "text": "Flush clears valid output.",
+          "type": "contains",
+          "pattern": "flush.*valid_o.*0|valid_o.*0.*flush|clear.*valid_o"
+        },
+        {
+          "text": "Verification includes stable-under-stall check.",
+          "type": "contains",
+          "pattern": "stable.*stall|stall.*stable|hold.*stall"
+        }
+      ]
+    },
+    {
+      "id": "two_process_fsm",
+      "source_eval_id": 8,
+      "category": "module_timing",
+      "assertions": [
+        {
+          "text": "Legal states and reset state are listed.",
+          "type": "all_contains",
+          "patterns": ["state", "reset state|idle"]
+        },
+        {
+          "text": "Two-process FSM structure is visible.",
+          "type": "all_contains",
+          "patterns": ["state_q", "state_d"]
+        },
+        {
+          "text": "Combinational next-state logic has defaults.",
+          "type": "contains",
+          "pattern": "default.*assignment|defaults|state_d\\s*=\\s*state_q"
+        },
+        {
+          "text": "Sequential state register uses clock edge.",
+          "type": "contains",
+          "pattern": "always\\s*@\\s*\\(posedge\\s+clk_i\\)"
+        },
+        {
+          "text": "Verification includes reset and transition checks.",
+          "type": "all_contains",
+          "patterns": ["reset", "transition|state"]
+        }
+      ]
+    },
+    {
+      "id": "axi_lite_reg_block",
+      "source_eval_id": 22,
+      "category": "protocol_axi_lite",
+      "assertions": [
+        {
+          "text": "AXI-Lite channels are treated independently.",
+          "type": "all_contains",
+          "patterns": ["AW", "W", "B", "AR", "R"]
+        },
+        {
+          "text": "Write response waits for both address and data acceptance.",
+          "type": "contains",
+          "pattern": "B.*both.*AW.*W|B.*AW.*W|write response.*address.*data"
+        },
+        {
+          "text": "Read response holds under backpressure.",
+          "type": "contains",
+          "pattern": "R.*hold|rvalid.*rready|R.*backpressure"
+        },
+        {
+          "text": "Byte strobe behavior is specified.",
+          "type": "contains",
+          "pattern": "WSTRB|byte strobe|byte lane"
+        },
+        {
+          "text": "Protocol guidance is tied to checks.",
+          "type": "contains",
+          "pattern": "check|assert|test|monitor"
+        }
+      ]
+    },
+    {
+      "id": "axi_write_tracker",
+      "source_eval_id": 31,
+      "category": "protocol_axi_full",
+      "assertions": [
+        {
+          "text": "Scope is bounded to a slice.",
+          "type": "contains",
+          "pattern": "bounded|slice|not a complete"
+        },
+        {
+          "text": "AW/W/B channel separation is explicit.",
+          "type": "all_contains",
+          "patterns": ["AW", "W", "B"]
+        },
+        {
+          "text": "Beat count derives from AWLEN plus one.",
+          "type": "contains",
+          "pattern": "AWLEN.*\\+\\s*1|AWLEN plus one"
+        },
+        {
+          "text": "WLAST aligns with final accepted W beat.",
+          "type": "contains",
+          "pattern": "WLAST.*final.*accepted|final.*accepted.*WLAST"
+        },
+        {
+          "text": "Done waits for B response.",
+          "type": "contains",
+          "pattern": "done.*B|B.*before.*done|wait.*B"
+        },
+        {
+          "text": "BRESP error is captured.",
+          "type": "contains",
+          "pattern": "BRESP.*error|non-OKAY.*B"
+        }
+      ]
+    },
+    {
+      "id": "axi_read_tracker",
+      "source_eval_id": 32,
+      "category": "protocol_axi_full",
+      "assertions": [
+        {
+          "text": "Scope is bounded to a slice.",
+          "type": "contains",
+          "pattern": "bounded|slice|not a complete"
+        },
+        {
+          "text": "AR/R channel separation is explicit.",
+          "type": "all_contains",
+          "patterns": ["AR", "R"]
+        },
+        {
+          "text": "Beat count derives from ARLEN plus one.",
+          "type": "contains",
+          "pattern": "ARLEN.*\\+\\s*1|ARLEN plus one"
+        },
+        {
+          "text": "R beats are accepted only after AR acceptance.",
+          "type": "contains",
+          "pattern": "after.*AR.*accept|AR.*accepted.*R"
+        },
+        {
+          "text": "RLAST alignment is checked.",
+          "type": "contains",
+          "pattern": "RLAST.*align|RLAST.*final|final.*RLAST"
+        },
+        {
+          "text": "RRESP error is captured.",
+          "type": "contains",
+          "pattern": "RRESP.*error|non-OKAY.*R"
+        }
+      ]
+    },
+    {
+      "id": "dma_burst_planner",
+      "source_eval_id": 34,
+      "category": "protocol_axi_dma",
+      "assertions": [
+        {
+          "text": "Scope is a descriptor-to-burst slice, not full DMA.",
+          "type": "contains",
+          "pattern": "slice|not a complete DMA|bounded"
+        },
+        {
+          "text": "Descriptor fields and alignment restrictions are defined.",
+          "type": "all_contains",
+          "patterns": ["descriptor", "align|aligned|alignment"]
+        },
+        {
+          "text": "Byte count converts to beat count.",
+          "type": "contains",
+          "pattern": "byte count.*beat|beat count.*byte"
+        },
+        {
+          "text": "Burst length is capped at four beats.",
+          "type": "contains",
+          "pattern": "max.*four|maximum.*4|4 beats"
+        },
+        {
+          "text": "Expected B response count is produced.",
+          "type": "contains",
+          "pattern": "expected.*B response|B response count"
+        }
+      ]
+    },
+    {
+      "id": "cdc_multibit_refusal",
+      "source_eval_id": 6,
+      "category": "cdc_safety",
+      "assertions": [
+        {
+          "text": "Multi-bit CDC risk is identified.",
+          "type": "all_contains",
+          "patterns": ["multi-bit|16-bit", "CDC|clock domain"]
+        },
+        {
+          "text": "Two flops per bit is not accepted as coherent-bus solution.",
+          "type": "contains",
+          "pattern": "two flops per bit.*unsafe|unsafe.*two flops per bit|not.*two flops per bit"
+        },
+        {
+          "text": "A safe CDC pattern is requested or proposed.",
+          "type": "contains",
+          "pattern": "handshake|snapshot|Gray|async FIFO|toggle"
+        },
+        {
+          "text": "Guessed CDC RTL is not emitted.",
+          "type": "absent",
+          "pattern": "\\bmodule\\s+\\w+"
+        },
+        {
+          "text": "Coherency is discussed.",
+          "type": "contains",
+          "pattern": "coherent|coherency|atomic|snapshot"
+        }
+      ]
+    },
+    {
+      "id": "large_axi_dma_hierarchy",
+      "source_eval_id": 9,
+      "category": "system_hierarchy",
+      "assertions": [
+        {
+          "text": "Request is classified as full system or large subsystem.",
+          "type": "contains",
+          "pattern": "full system|large subsystem|subsystem"
+        },
+        {
+          "text": "System contract appears before implementation details.",
+          "type": "ordered",
+          "patterns": ["system contract", "submodule|decomposition"]
+        },
+        {
+          "text": "Submodules include descriptor, read, write, completion, and interrupt/error areas.",
+          "type": "all_contains",
+          "patterns": ["descriptor", "read", "write", "completion", "interrupt|error"]
+        },
+        {
+          "text": "Interface contracts and integration invariants are present.",
+          "type": "all_contains",
+          "patterns": ["interface contract", "integration invariant"]
+        },
+        {
+          "text": "No monolithic full top RTL is emitted.",
+          "type": "absent",
+          "pattern": "\\bmodule\\s+axi_dma|\\bmodule\\s+dma_top"
+        }
+      ]
+    },
+    {
+      "id": "retry_buffer",
+      "source_eval_id": 41,
+      "category": "specialized_rtl_patterns",
+      "assertions": [
+        {
+          "text": "Write, read, and oldest-unacknowledged/replay pointers are defined.",
+          "type": "all_contains",
+          "patterns": ["write|wr_", "read|rd_", "oldest|unacknowledged|replay"]
+        },
+        {
+          "text": "ACK/NAK priority or conflict behavior is stated.",
+          "type": "contains",
+          "pattern": "ACK.*NAK|NAK.*ACK|priority|same cycle"
+        },
+        {
+          "text": "In-flight window is bounded.",
+          "type": "contains",
+          "pattern": "in-flight|window|bounded|full"
+        },
+        {
+          "text": "NAK replay starts from oldest unacknowledged item.",
+          "type": "contains",
+          "pattern": "NAK.*oldest|oldest.*NAK|replay.*oldest"
+        },
+        {
+          "text": "Checks cover replay, ACK advance, and full behavior.",
+          "type": "all_contains",
+          "patterns": ["replay", "ACK", "full"]
+        }
+      ]
+    },
+    {
+      "id": "width_converter",
+      "source_eval_id": 42,
+      "category": "specialized_rtl_patterns",
+      "assertions": [
+        {
+          "text": "Conversion ratio and accumulation count are defined.",
+          "type": "all_contains",
+          "patterns": ["32", "128", "ratio|accumulation|count"]
+        },
+        {
+          "text": "Data, keep, and last are aligned under stall.",
+          "type": "all_contains",
+          "patterns": ["data", "keep", "last", "stall|backpressure|hold"]
+        },
+        {
+          "text": "Partial final output behavior is defined.",
+          "type": "contains",
+          "pattern": "partial.*last|last.*partial|short.*packet"
+        },
+        {
+          "text": "Both input and output backpressure are addressed.",
+          "type": "all_contains",
+          "patterns": ["ready_o|input.*backpressure", "ready_i|output.*backpressure"]
+        },
+        {
+          "text": "Directed checks include full-width, partial-last, and output-stall cases.",
+          "type": "all_contains",
+          "patterns": ["full-width|full width", "partial", "stall"]
+        }
+      ]
+    }
+  ]
+}

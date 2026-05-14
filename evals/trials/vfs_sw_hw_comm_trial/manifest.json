@@ -1,0 +1,15 @@
+{
+  "name": "vfs_sw_hw_comm_trial",
+  "top": "tb",
+  "sources": [
+    "vfs_sw_hw_comm_slice.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS vfs sw hw comm slice"
+    ]
+  },
+  "timeout_seconds": 10
+}

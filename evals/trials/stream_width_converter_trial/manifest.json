@@ -1,0 +1,15 @@
+{
+  "name": "stream_width_converter_trial",
+  "top": "tb",
+  "sources": [
+    "stream_width_converter.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS stream width converter"
+    ]
+  },
+  "timeout_seconds": 10
+}

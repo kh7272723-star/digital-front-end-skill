@@ -1,0 +1,15 @@
+{
+  "name": "multi_bank_scheduler_trial",
+  "top": "tb",
+  "sources": [
+    "multi_bank_scheduler.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS multi bank scheduler"
+    ]
+  },
+  "timeout_seconds": 10
+}

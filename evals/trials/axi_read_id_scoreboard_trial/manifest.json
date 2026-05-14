@@ -1,0 +1,15 @@
+{
+  "name": "axi_read_id_scoreboard_trial",
+  "top": "tb",
+  "sources": [
+    "axi_read_id_scoreboard.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS axi read id scoreboard"
+    ]
+  },
+  "timeout_seconds": 10
+}

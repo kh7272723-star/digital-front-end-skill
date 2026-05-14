@@ -1,0 +1,15 @@
+{
+  "name": "rr_arbiter_trial",
+  "top": "tb",
+  "sources": [
+    "rr_ready_valid_arbiter.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS round robin arbiter"
+    ]
+  },
+  "timeout_seconds": 10
+}

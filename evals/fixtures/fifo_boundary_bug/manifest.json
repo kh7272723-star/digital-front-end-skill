@@ -1,0 +1,11 @@
+{
+  "name": "fifo_boundary_bug",
+  "top": "tb_fifo_boundary_bug",
+  "sources": ["dut.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "fail",
+    "contains": ["EXPECTED_FIFO_BOUNDARY_FAIL"]
+  },
+  "timeout_seconds": 10
+}

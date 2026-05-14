@@ -1,0 +1,18 @@
+{
+  "name": "vfs_sw_hw_comm_hierarchy_trial",
+  "top": "tb",
+  "sources": [
+    "sqe_read_cmd_gen.v",
+    "cqe_write_cmd_gen.v",
+    "irq_aggregator.v",
+    "vfs_sw_hw_comm_core.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS vfs sw hw comm hierarchy"
+    ]
+  },
+  "timeout_seconds": 10
+}

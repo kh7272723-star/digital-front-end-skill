@@ -1,0 +1,16 @@
+{
+  "name": "vfs_sw_hw_axi_handlers_trial",
+  "top": "tb",
+  "sources": [
+    "sqe_axi_read_handler.v",
+    "cqe_axi_write_handler.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS vfs sw hw axi handlers"
+    ]
+  },
+  "timeout_seconds": 10
+}

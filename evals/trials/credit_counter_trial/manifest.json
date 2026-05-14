@@ -1,0 +1,15 @@
+{
+  "name": "credit_counter_trial",
+  "top": "tb",
+  "sources": [
+    "credit_counter.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS credit counter"
+    ]
+  },
+  "timeout_seconds": 10
+}

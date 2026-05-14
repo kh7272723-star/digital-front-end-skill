@@ -1,0 +1,15 @@
+{
+  "name": "axis_buffer_trial",
+  "top": "tb",
+  "sources": [
+    "axis_two_entry_buffer.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS axis buffer"
+    ]
+  },
+  "timeout_seconds": 10
+}

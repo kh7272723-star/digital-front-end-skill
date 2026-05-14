@@ -1,0 +1,157 @@
+{
+  "benchmark_name": "digital-front-end-skill-benchmark",
+  "version": "1.0",
+  "minimum_eval_count": 30,
+  "required_assertions_per_eval": 4,
+  "minimum_executable_trials": 18,
+  "task_benchmark_file": "evals/task_benchmark.json",
+  "minimum_task_benchmark_tasks": 10,
+  "minimum_task_benchmark_assertions_per_task": 5,
+  "dimensions": [
+    {
+      "name": "module_timing",
+      "description": "Leaf RTL timing contracts, state elements, cycle traces, and checks.",
+      "min_count": 6,
+      "eval_ids": [1, 5, 7, 8, 13, 17, 20, 35]
+    },
+    {
+      "name": "protocol_axi_full",
+      "description": "Full AXI channel, burst, outstanding, response, and error semantics.",
+      "min_count": 2,
+      "eval_ids": [24, 29, 31, 32, 33]
+    },
+    {
+      "name": "protocol_axi_lite",
+      "description": "AXI-Lite register and small-slave behavior.",
+      "min_count": 1,
+      "eval_ids": [22]
+    },
+    {
+      "name": "protocol_axi_dma",
+      "description": "AXI DMA ordering, response tracking, completion, and slice planning.",
+      "min_count": 5,
+      "eval_ids": [9, 15, 16, 23, 24, 25, 34]
+    },
+    {
+      "name": "protocol_apb",
+      "description": "APB setup/access phase, wait, byte strobe, and error behavior.",
+      "min_count": 1,
+      "eval_ids": [26]
+    },
+    {
+      "name": "protocol_ahb_lite",
+      "description": "AHB-Lite address/data phase alignment and HREADY behavior.",
+      "min_count": 1,
+      "eval_ids": [27]
+    },
+    {
+      "name": "protocol_axi_stream",
+      "description": "AXI-Stream payload, sideband, packet, and backpressure behavior.",
+      "min_count": 1,
+      "eval_ids": [28]
+    },
+    {
+      "name": "system_hierarchy",
+      "description": "Large-system decomposition, interface contracts, invariants, and safe slicing.",
+      "min_count": 3,
+      "eval_ids": [9, 15, 23]
+    },
+    {
+      "name": "verification_closure",
+      "description": "Verification matrices, tool evidence, and signoff boundary discipline.",
+      "min_count": 4,
+      "eval_ids": [14, 19, 21, 30, 37]
+    },
+    {
+      "name": "debug_review",
+      "description": "First-divergent-cycle reasoning and protocol bug review.",
+      "min_count": 3,
+      "eval_ids": [2, 12, 24]
+    },
+    {
+      "name": "cdc_safety",
+      "description": "CDC refusal, safe pattern selection, and coherency warnings.",
+      "min_count": 1,
+      "eval_ids": [6]
+    },
+    {
+      "name": "project_adaptation",
+      "description": "Existing repository style, reset, lint, and local convention adaptation.",
+      "min_count": 1,
+      "eval_ids": [18, 38]
+    },
+    {
+      "name": "synthesis_timing",
+      "description": "Synthesis inference, constraints, micro-architecture, and timing-closure awareness.",
+      "min_count": 2,
+      "eval_ids": [36, 39]
+    },
+    {
+      "name": "specialized_rtl_patterns",
+      "description": "Reusable RTL/IP patterns such as credits, retry buffers, width conversion, data integrity, and multi-bank memory.",
+      "min_count": 4,
+      "eval_ids": [40, 41, 42, 43, 44]
+    }
+  ],
+  "official_protocol_sources": [
+    {
+      "protocol": "AXI full and AXI-Lite",
+      "owner": "Arm",
+      "document": "AMBA AXI and ACE Protocol Specification, Arm IHI 0022",
+      "reference_files": [
+        "references/axi-full-guidelines.md",
+        "references/axi-multi-outstanding-guidelines.md",
+        "references/axi-lite-guidelines.md",
+        "references/axi-dma-channel-guidelines.md"
+      ],
+      "eval_ids": [22, 24, 25, 29, 31, 32, 33, 34]
+    },
+    {
+      "protocol": "APB",
+      "owner": "Arm",
+      "document": "AMBA APB Protocol Specification, Arm IHI 0024",
+      "reference_files": [
+        "references/apb-guidelines.md"
+      ],
+      "eval_ids": [26]
+    },
+    {
+      "protocol": "AHB-Lite",
+      "owner": "Arm",
+      "document": "AMBA AHB Protocol Specification, Arm IHI 0033",
+      "reference_files": [
+        "references/ahb-lite-guidelines.md"
+      ],
+      "eval_ids": [27]
+    },
+    {
+      "protocol": "AXI-Stream",
+      "owner": "Arm",
+      "document": "AMBA AXI4-Stream Protocol Specification, Arm IHI 0051",
+      "reference_files": [
+        "references/axi-stream-guidelines.md"
+      ],
+      "eval_ids": [28]
+    }
+  ],
+  "executable_trials": [
+    "evals/trials/ahb_lite_regs_trial",
+    "evals/trials/apb_regs_trial",
+    "evals/trials/axis_buffer_trial",
+    "evals/trials/axi_read_tracker_trial",
+    "evals/trials/axi_read_id_scoreboard_trial",
+    "evals/trials/axi_write_tracker_trial",
+    "evals/trials/axi_lite_regs_trial",
+    "evals/trials/dma_completion_slice_trial",
+    "evals/trials/dma_burst_planner_trial",
+    "evals/trials/vfs_sw_hw_comm_trial",
+    "evals/trials/vfs_sw_hw_comm_hierarchy_trial",
+    "evals/trials/vfs_sw_hw_axi_handlers_trial",
+    "evals/trials/rr_arbiter_trial",
+    "evals/trials/credit_counter_trial",
+    "evals/trials/retry_buffer_trial",
+    "evals/trials/stream_width_converter_trial",
+    "evals/trials/data_integrity_trial",
+    "evals/trials/multi_bank_scheduler_trial"
+  ]
+}

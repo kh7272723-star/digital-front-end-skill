@@ -1,0 +1,15 @@
+{
+  "name": "apb_regs_trial",
+  "top": "tb",
+  "sources": [
+    "apb_regs.v"
+  ],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": [
+      "PASS apb regs"
+    ]
+  },
+  "timeout_seconds": 10
+}

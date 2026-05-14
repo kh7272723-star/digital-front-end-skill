@@ -1,0 +1,584 @@
+{
+  "skill_name": "digital-front-end-skill",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Design a small ready/valid pipeline register slice with one-cycle latency, synchronous active-high reset, and backpressure handling. Include assumptions, design contract, state elements, cycle trace, RTL, and a minimal verification plan.",
+      "expected_output": "A readable synthesizable module with explicit handshake behavior, reset handling, cycle trace, and test ideas.",
+      "files": [],
+      "assertions": [
+        "Output states a timing contract before RTL.",
+        "Output includes state elements before RTL.",
+        "Output includes a cycle trace before RTL with pre-edge and next-visible behavior.",
+        "RTL uses consistent *_i/*_o port naming, for example valid_i/ready_o/data_i and valid_o/ready_i/data_o.",
+        "RTL uses accept_input and accept_output for ready/valid movement conditions.",
+        "RTL holds payload stable while valid_o is high and ready_i is low.",
+        "Verification notes include a backpressure or data-stability check."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A user reports that their FSM-based UART controller gets stuck after reset deassertion. Analyze likely RTL bug patterns using first-divergent-cycle reasoning and suggest a minimal fix strategy, without rewriting the whole block.",
+      "expected_output": "A focused debug explanation that identifies plausible RTL issues, first divergent cycle candidates, timing assumptions, and a small corrective plan.",
+      "files": [],
+      "assertions": [
+        "Output separates observed evidence from hypotheses.",
+        "Output checks reset state and first post-reset cycle behavior.",
+        "Output names the first cycle where expected and observed behavior may diverge.",
+        "Output suggests a minimal fix rather than a full rewrite.",
+        "Output names what waveform or log evidence is still needed if ambiguous."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Create a SystemVerilog testbench skeleton for a parameterized FIFO. The testbench should cover reset, normal write/read, full, empty, and backpressure cases.",
+      "expected_output": "A compact but useful testbench scaffold with directed tests and verification notes.",
+      "files": [],
+      "assertions": [
+        "Testbench has explicit pass/fail checks, not stimulus only.",
+        "Testbench covers reset, normal write/read, full, empty, and boundary behavior.",
+        "Output states the assumed FIFO read-data timing.",
+        "Output includes overflow or underflow attempt behavior according to the contract.",
+        "Output uses wr_en/rd_en terminology for FIFO activity."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Review this RTL style: one always block mixes blocking and nonblocking assignments for state updates, the combinational case statement lacks defaults, and a generated divided clock drives part of the logic. Explain the risks and propose conservative fixes.",
+      "expected_output": "A source-derived review that flags assignment-style, latch, and clocking risks with small corrective patterns.",
+      "files": [],
+      "assertions": [
+        "Output flags mixed blocking/nonblocking assignment risk in stateful logic.",
+        "Output flags missing combinational defaults as latch or simulation/synthesis mismatch risk.",
+        "Output recommends clock enable or proper clocking methodology instead of ad hoc divided clocks.",
+        "Output keeps fixes surgical."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Design a small synchronous FIFO with parameterized width/depth. The user did not specify full+read behavior, empty+write behavior, or whether read data is registered. Respond as the skill should.",
+      "expected_output": "A contract-first FIFO response that asks or states conservative assumptions before RTL and makes boundary policy explicit.",
+      "files": [],
+      "assertions": [
+        "Output does not silently invent FIFO boundary semantics.",
+        "Output explicitly defines or asks about full+read and empty+write behavior.",
+        "Output explicitly defines or asks about registered versus combinational read data.",
+        "Output ties wr_en/rd_en, wr_do/rd_do, pointer, count, and memory access conditions to one contract.",
+        "Output includes a cycle trace or asks for missing policy before RTL."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "The block crosses a 16-bit status bus from clk_a to clk_b. Please just add two flops per bit. Respond as a senior RTL reviewer using this skill.",
+      "expected_output": "A CDC-aware response that refuses to treat a multi-bit bus as independent safe single-bit crossings without a reviewed protocol.",
+      "files": [],
+      "assertions": [
+        "Output identifies the request as a multi-bit CDC problem.",
+        "Output explains why two flops per bit can be unsafe for coherent multi-bit data.",
+        "Output asks for or proposes a proper CDC pattern such as handshake, snapshot, gray counter, or async FIFO.",
+        "Output avoids generating guessed CDC RTL as final code."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Design a stallable one-stage pipeline register with valid/data, synchronous active-high reset, stall, and flush. Flush should win over stall. Include contract, state elements, cycle trace, Verilog RTL, and checks.",
+      "expected_output": "A Verilog-first pipeline stage where valid and payload alignment is explained and protected under stall and flush.",
+      "files": [],
+      "assertions": [
+        "Output states the flush-over-stall priority before RTL.",
+        "Output includes a cycle trace covering reset, normal load, stall, and flush.",
+        "RTL freezes valid_o and data_o together during stall when not flushing.",
+        "RTL clears valid_o on flush.",
+        "Verification notes include a stable-under-stall check."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Create a contract-first Verilog skeleton for a two-process FSM controller with reset, start, busy, done, and illegal-state recovery. Include a cycle trace and verification checks.",
+      "expected_output": "A two-process FSM skeleton with explicit reset state, state transition trace, defaults, and pass/fail checks.",
+      "files": [],
+      "assertions": [
+        "Output lists legal states and reset state before RTL.",
+        "Output includes a cycle trace for reset, start, wait, and complete behavior.",
+        "RTL separates combinational next-state logic from the state register.",
+        "Combinational outputs have defaults before the state case.",
+        "Verification notes include reset-state and transition checks."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Design a complete AXI DMA engine with descriptor fetch, AXI read, AXI write, completion writeback, and interrupt. Respond using the skill's large-system workflow.",
+      "expected_output": "A hierarchical architecture plan rather than guessed monolithic RTL.",
+      "files": [],
+      "assertions": [
+        "Output classifies the request as a full system or large subsystem.",
+        "Output includes a system contract before any RTL.",
+        "Output decomposes the design into submodules such as descriptor, read, write, response, completion, and top integration.",
+        "Output includes interface contracts and integration invariants.",
+        "Output avoids emitting full top-level RTL as the main answer."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "For an AXI DMA, explain when completion writeback and interrupt may be generated. Include ordering and error-path invariants.",
+      "expected_output": "An integration-invariant answer that protects writeback and interrupt ordering.",
+      "files": [],
+      "assertions": [
+        "Output states that completion follows required write responses or explicit error policy.",
+        "Output states that interrupt follows visible completion or writeback.",
+        "Output includes error convergence or abort behavior.",
+        "Output includes at least one directed test or monitor idea."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Analyze possible deadlock in a multi-module DMA path where read data FIFO full stalls read data acceptance, write side is stalled, and descriptor engine waits for completion before issuing more work.",
+      "expected_output": "A backpressure and deadlock review using integration invariants.",
+      "files": [],
+      "assertions": [
+        "Output identifies pressure source and propagation direction.",
+        "Output identifies a buffer or state transition that can relieve pressure.",
+        "Output flags closed wait cycles when no relief condition exists.",
+        "Output proposes a minimal architecture or contract change before RTL."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Use the ready_valid_stall_bug fixture evidence to explain the likely RTL bug and minimal fix. The checker reports EXPECTED_STALL_HOLD_FAIL.",
+      "expected_output": "A fixture-driven debug answer that uses the failing signature to identify a valid/data hold violation.",
+      "files": ["evals/fixtures/ready_valid_stall_bug"],
+      "assertions": [
+        "Output uses the failing signature as evidence.",
+        "Output identifies valid/data changing while downstream is stalled.",
+        "Output proposes gating updates with ready_o or accept conditions.",
+        "Output recommends rerunning scripts/rtl_check.py for the fixture after the fix."
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "Choose between a one-entry register slice and a two-entry skid buffer for a streaming boundary where downstream can deassert ready with one-cycle notice and upstream should not lose throughput. Explain the tradeoff and verification impact.",
+      "expected_output": "A microarchitecture tradeoff answer with chosen pattern, cost, and verification implications.",
+      "files": [],
+      "assertions": [
+        "Output compares register slice and skid buffer options.",
+        "Output makes a clear choice for the stated throughput/backpressure requirement.",
+        "Output states the cost in state or verification complexity.",
+        "Output includes at least one verification implication."
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "Create a verification matrix for a two-entry ready/valid buffer. Cover reset, normal transfer, downstream stall, full boundary, simultaneous accept/output, and ordering.",
+      "expected_output": "A verification matrix with scenarios, stimulus, expected result, checker, coverage target, and priority.",
+      "files": [],
+      "assertions": [
+        "Output uses a matrix or table format.",
+        "Matrix covers reset, normal transfer, downstream stall, full boundary, simultaneous movement, and ordering.",
+        "Each row has an expected result and checker.",
+        "Output includes scoreboard or stability monitor guidance."
+      ]
+    },
+    {
+      "id": 15,
+      "prompt": "Plan staged bring-up for an AXI DMA from reset smoke test through interrupt ordering and abort with outstanding work. Do not write RTL.",
+      "expected_output": "A staged implementation and verification ladder for AXI DMA.",
+      "files": [],
+      "assertions": [
+        "Output starts with reset or smoke test before full traffic.",
+        "Output stages simple transfer before stalls and errors.",
+        "Output includes write response before completion and interrupt ordering.",
+        "Output includes abort or reset with outstanding work.",
+        "Output avoids RTL."
+      ]
+    },
+    {
+      "id": 16,
+      "prompt": "Review a proposed DMA architecture and classify its maturity. It has a descriptor parser and read/write engines, but no write response tracking, no error drain policy, and only one no-stall simulation. Give top residual risks and next step.",
+      "expected_output": "An engineering review that classifies maturity, identifies residual risks, and recommends the smallest next step.",
+      "files": [],
+      "assertions": [
+        "Output classifies the design maturity below signoff candidate.",
+        "Output flags missing write response tracking.",
+        "Output flags missing error drain or abort policy.",
+        "Output states that one no-stall simulation is insufficient.",
+        "Output recommends a smallest next step."
+      ]
+    },
+    {
+      "id": 17,
+      "prompt": "Design an arbiter for three requesters sharing one ready/valid output. Ask or state contract choices for fixed priority versus round-robin, grant hold under backpressure, and starvation. Include checks.",
+      "expected_output": "An advanced-pattern response that surfaces arbitration policy and verification obligations before RTL.",
+      "files": [],
+      "assertions": [
+        "Output discusses fixed-priority versus round-robin tradeoff.",
+        "Output defines grant hold behavior under backpressure.",
+        "Output addresses starvation or fairness expectations.",
+        "Output includes checks such as one-hot grant and accepted-grant behavior."
+      ]
+    },
+    {
+      "id": 18,
+      "prompt": "You are modifying an existing RTL repository. Similar modules use active-low rst_ni, registered ready outputs, and project-specific lint waivers. Explain how you would adapt before changing a ready/valid adapter.",
+      "expected_output": "A project-adaptation answer that observes and follows local conventions before editing.",
+      "files": [],
+      "assertions": [
+        "Output says to inspect similar local modules first.",
+        "Output follows local reset and ready conventions instead of blindly applying the default style.",
+        "Output calls out conflicts between local style and generic guidance.",
+        "Output avoids unrelated reformatting."
+      ]
+    },
+    {
+      "id": 19,
+      "prompt": "A small FIFO passes one directed Icarus simulation. Can we call it signoff-ready? Answer as this skill should.",
+      "expected_output": "A toolchain-closure answer that refuses to overclaim signoff from a directed simulation.",
+      "files": [],
+      "assertions": [
+        "Output says directed simulation is not signoff.",
+        "Output lists missing gates such as lint, coverage, synthesis, timing, CDC if relevant, or formal.",
+        "Output states exactly what evidence the Icarus run provides.",
+        "Output recommends the next tool or verification step."
+      ]
+    },
+    {
+      "id": 20,
+      "prompt": "Review a ready/valid width converter for protocol completeness. It has valid/ready, byte enables, and last flags. List edge cases that must be checked before integration.",
+      "expected_output": "A protocol edge-case review covering payload/sideband alignment, replacement cycles, stalls, and boundary behavior.",
+      "files": [],
+      "assertions": [
+        "Output checks sideband alignment for byte enables and last flags.",
+        "Output checks valid/data stability under downstream stall.",
+        "Output checks simultaneous input acceptance and output consumption.",
+        "Output checks ready path or combinational loop risk.",
+        "Output includes verification checks or monitors."
+      ]
+    },
+    {
+      "id": 21,
+      "prompt": "Maintain this skill package after adding a new reference file. What static checks should be run?",
+      "expected_output": "A skill-maintenance answer that invokes the package static checker and explains what it validates.",
+      "files": [],
+      "assertions": [
+        "Output recommends running scripts/skill_static_check.py.",
+        "Output mentions evals JSON parsing.",
+        "Output mentions reference listing in SKILL.md.",
+        "Output mentions banned legacy terminology check.",
+        "Output mentions fixture manifest checks."
+      ]
+    },
+    {
+      "id": 22,
+      "prompt": "Design an AXI-Lite register block with two 32-bit registers. The write address and write data channels can arrive in either order, B and R responses must hold under backpressure, and byte strobes must be honored. Use the skill workflow.",
+      "expected_output": "An AXI-Lite contract-first response grounded in official AMBA-style channel separation, with RTL and checks.",
+      "files": [],
+      "assertions": [
+        "Output treats AW, W, B, AR, and R as separate channels.",
+        "Output handles AW before W and W before AW.",
+        "Output states that B response follows both accepted write address and accepted write data.",
+        "Output states that R data and response hold while rvalid_o is high and rready_i is low.",
+        "Output includes byte strobe behavior.",
+        "Output references official protocol guidance or the local AXI-Lite guidelines."
+      ]
+    },
+    {
+      "id": 23,
+      "prompt": "I want to implement a complete AXI DMA, not just plan it. Pick the first safe RTL slice and explain what RTL you would write now, what neighbor stubs you need, and what invariant the testbench must check.",
+      "expected_output": "A subsystem slicing answer that moves from architecture to one implementable slice without writing a monolithic DMA top.",
+      "files": [],
+      "assertions": [
+        "Output refuses to implement the complete DMA top in one pass from underspecified requirements.",
+        "Output selects one bounded RTL slice.",
+        "Output defines neighbor stubs or models.",
+        "Output includes interface contracts for the slice.",
+        "Output names at least one integration invariant checked by the testbench.",
+        "Output lists residual integration risks."
+      ]
+    },
+    {
+      "id": 24,
+      "prompt": "Review an AXI DMA design that asserts completion when the last W beat is accepted. It does not wait for B responses. Explain the protocol bug, first risky cycle, and minimal architectural fix.",
+      "expected_output": "An AXI DMA protocol review that catches write-response ordering and completion semantics.",
+      "files": [],
+      "assertions": [
+        "Output says last write data beat acceptance is not sufficient for descriptor completion.",
+        "Output requires write response tracking before completion.",
+        "Output identifies a first risky cycle involving delayed or error B response.",
+        "Output proposes counters or tags for outstanding write responses.",
+        "Output states interrupt or visible completion must follow response observation."
+      ]
+    },
+    {
+      "id": 25,
+      "prompt": "Implement the first executable RTL slice for an AXI DMA completion path. Scope it to one descriptor, final W beat observation, B response tracking, completion valid, and error capture. Include contract, cycle trace, RTL, and checks.",
+      "expected_output": "A bounded DMA completion slice that proves completion waits for expected write responses rather than last write data beat alone.",
+      "files": [],
+      "assertions": [
+        "Output states this is a slice, not a complete DMA.",
+        "Output says last W beat acceptance alone must not assert completion.",
+        "Output tracks expected or outstanding B responses.",
+        "Output completes only after final write data and all expected B responses.",
+        "Output captures non-OKAY B response as descriptor error.",
+        "Output includes a directed check for delayed B response after final W beat."
+      ]
+    },
+    {
+      "id": 26,
+      "prompt": "Design an APB register block with two 32-bit registers, PREADY wait-state support, PSTRB byte writes, and PSLVERR for invalid addresses. Use official-protocol-grounded rules and include cycle traces and checks.",
+      "expected_output": "An APB contract-first response that respects setup/access phases, wait states, byte strobes, and error response timing.",
+      "files": [],
+      "assertions": [
+        "Output identifies setup phase and access phase separately.",
+        "Output updates registers only on completed access with PSEL, PENABLE, and PREADY.",
+        "Output states that wait states must not update state.",
+        "Output includes PSTRB byte-lane behavior.",
+        "Output includes PSLVERR behavior for invalid addresses.",
+        "Output references official protocol guidance or the local APB guidelines."
+      ]
+    },
+    {
+      "id": 27,
+      "prompt": "Review an AHB-Lite slave that updates write data using the current cycle HADDR instead of the previous accepted address phase. Explain the timing bug and minimal fix.",
+      "expected_output": "An AHB-Lite phase-discipline review that catches address/data phase misalignment.",
+      "files": [],
+      "assertions": [
+        "Output states that AHB-Lite has separate address/control and data phases.",
+        "Output says write data belongs to the previous accepted address phase.",
+        "Output checks HREADY-related hold or progress behavior.",
+        "Output proposes registering address/control for the data phase.",
+        "Output references official protocol guidance or the local AHB-Lite guidelines."
+      ]
+    },
+    {
+      "id": 28,
+      "prompt": "Design an AXI-Stream width converter. It has TDATA, TKEEP, TLAST, and TUSER. Explain contract choices before RTL and list checks for stalls, partial last beat, and packet ordering.",
+      "expected_output": "An AXI-Stream protocol response that keeps payload and sideband aligned under backpressure and width conversion.",
+      "files": [],
+      "assertions": [
+        "Output treats TDATA, TKEEP, TLAST, and TUSER as one transferred item.",
+        "Output states stability while TVALID is high and TREADY is low.",
+        "Output defines partial last-beat behavior using TKEEP.",
+        "Output includes packet ordering or scoreboard checks.",
+        "Output references official protocol guidance or the local AXI-Stream guidelines."
+      ]
+    },
+    {
+      "id": 29,
+      "prompt": "Plan a full AXI write master for bursts with AW, W, and B channels. The prompt does not specify ID width, outstanding limit, burst type, or error policy. Respond using the skill.",
+      "expected_output": "A full AXI contract response that refuses guessed RTL and freezes channel, burst, outstanding, and response semantics first.",
+      "files": [],
+      "assertions": [
+        "Output treats AW, W, and B as independently backpressured channels.",
+        "Output asks for or states assumptions about ID width and outstanding limit.",
+        "Output asks for or states supported burst type and maximum burst length.",
+        "Output says WLAST is not the same as write completion.",
+        "Output includes B response tracking and error policy.",
+        "Output references official protocol guidance or the local AXI full guidelines."
+      ]
+    },
+    {
+      "id": 30,
+      "prompt": "Evaluate this skill package as a benchmark suite. What dimensions must be covered, and what scripts should be run to confirm eval coverage and static package health?",
+      "expected_output": "A benchmark-maintenance answer that checks dimensional coverage, eval schema, static health, and executable RTL trials.",
+      "files": [],
+      "assertions": [
+        "Output recommends running scripts/eval_benchmark_check.py.",
+        "Output recommends running scripts/skill_static_check.py.",
+        "Output mentions protocol coverage dimensions such as AXI full, AXI-Lite, APB, AHB-Lite, and AXI-Stream.",
+        "Output distinguishes eval prompt coverage from executable RTL fixture evidence.",
+        "Output names representative rtl_check.py trials."
+      ]
+    },
+    {
+      "id": 31,
+      "prompt": "Implement a bounded AXI full write burst tracker for a single-ID master slice. It should accept one command with AWLEN, hold AWVALID until AWREADY, emit W beats after AW acceptance, assert WLAST only on the final accepted beat, wait for B response before done, and report non-OKAY BRESP as error. Include contract, cycle trace, RTL, and checks.",
+      "expected_output": "A conservative AXI full write slice that respects AW/W/B channel separation, burst beat counting, WLAST alignment, and B response completion.",
+      "files": [],
+      "assertions": [
+        "Output states this is a bounded slice, not a complete AXI master.",
+        "Output treats AW, W, and B as separate channels.",
+        "Output derives beat count from AWLEN plus one.",
+        "Output asserts WLAST only on the final accepted W beat.",
+        "Output waits for B response before done.",
+        "Output reports non-OKAY BRESP as an error completion.",
+        "Output includes checks for AW stall, W backpressure, delayed B response, and error response."
+      ]
+    },
+    {
+      "id": 32,
+      "prompt": "Implement a bounded AXI full read burst tracker for a single-ID master slice. It should accept one command with ARLEN, hold ARVALID until ARREADY, accept R beats after AR acceptance, check RLAST alignment, capture non-OKAY RRESP as error, and assert done only after the final expected accepted R beat. Include contract, cycle trace, RTL, and checks.",
+      "expected_output": "A conservative AXI full read slice that respects AR/R channel separation, burst beat counting, RLAST alignment, RRESP error capture, and final-beat completion.",
+      "files": [],
+      "assertions": [
+        "Output states this is a bounded slice, not a complete AXI master.",
+        "Output treats AR and R as separate channels.",
+        "Output derives beat count from ARLEN plus one.",
+        "Output accepts R beats only after AR acceptance.",
+        "Output checks RLAST alignment with the final expected R beat.",
+        "Output captures non-OKAY RRESP as an error.",
+        "Output includes checks for AR stall, R backpressure, RLAST mismatch, and RRESP error."
+      ]
+    },
+    {
+      "id": 33,
+      "prompt": "Implement a bounded AXI full read response scoreboard that supports multiple outstanding IDs, with one outstanding burst per ID. It must allow different IDs to complete out of issue order, block a second command for an active ID, check RLAST per ID, and accumulate RRESP errors per ID. Include contract, cycle trace, RTL, and checks.",
+      "expected_output": "A bounded multi-ID AXI read response scoreboard that tracks per-ID outstanding beats and errors without pretending to be a full interconnect.",
+      "files": [],
+      "assertions": [
+        "Output states the bounded scope and one-outstanding-burst-per-ID restriction.",
+        "Output allows multiple IDs to be active at once.",
+        "Output blocks a new command for an ID that is already active.",
+        "Output allows cross-ID completion order to differ from command issue order.",
+        "Output tracks remaining beats and error state per ID.",
+        "Output checks RLAST alignment and RRESP error per ID.",
+        "Output includes inactive-ID response and same-ID block checks."
+      ]
+    },
+    {
+      "id": 34,
+      "prompt": "Implement the first executable AXI DMA descriptor-to-burst planning slice. Scope it to aligned descriptors, full-width INCR-style beats, max four beats per burst, paired read/write command generation, and expected B response count. Include contract, cycle trace, RTL, and checks.",
+      "expected_output": "A bounded DMA descriptor parser and burst planner that emits paired read/write commands and expected write-response count without claiming to be a complete DMA.",
+      "files": [],
+      "assertions": [
+        "Output states this is a slice, not a complete DMA.",
+        "Output defines descriptor fields and alignment restrictions.",
+        "Output converts byte count to beat count.",
+        "Output splits commands by maximum burst beats.",
+        "Output emits matching read and write command lengths.",
+        "Output reports expected B response count from write command count.",
+        "Output rejects zero-length or unaligned descriptors without emitting commands."
+      ]
+    },
+    {
+      "id": 35,
+      "prompt": "Implement a multi-stage RTL controller for a submission-queue read command generator. The project prefers two-process FSM style. Include contract, state list, cycle trace, RTL, and checks.",
+      "expected_output": "A multi-stage controller that uses an explicit two-process FSM instead of hiding the flow in flags and counters.",
+      "files": [],
+      "assertions": [
+        "Output lists legal FSM states and reset state before RTL.",
+        "Output uses a two-process FSM structure with state_q/state_d or equivalent current-next naming.",
+        "Output separates clocked register updates from combinational next-state and default assignments.",
+        "Output includes a cycle trace for command issue, command accept, and pointer update.",
+        "Output states when implicit flag/counter control would be acceptable and why this controller needs explicit states.",
+        "Output includes directed checks for stall, boundary split, and state recovery."
+      ]
+    },
+    {
+      "id": 36,
+      "prompt": "Review this RTL before synthesis: an always @(*) block loops over 256 items to sum them, a large memory array is reset element by element, and the target is 500 MHz. Explain synthesis and timing risks and propose a safer micro-architecture.",
+      "expected_output": "A synthesis-aware review that flags combinational loop unrolling, memory inference risk, timing closure risk, and offers pipelined or sequential alternatives.",
+      "files": [],
+      "assertions": [
+        "Output explains that the combinational loop unrolls into hardware rather than executing over cycles.",
+        "Output flags the reset-on-large-array risk for RAM inference.",
+        "Output connects the 500 MHz target to combinational path depth or pipelining.",
+        "Output proposes at least one pipelined or multi-cycle accumulation alternative.",
+        "Output includes a concise synthesis or timing notes section."
+      ]
+    },
+    {
+      "id": 37,
+      "prompt": "Review these SVA ideas for a registered valid/data path: one property uses |-> from valid_i to valid_o, another disables on rst || !enable, and there is no coverage for the stall antecedent. What should be fixed?",
+      "expected_output": "An assertion-quality review that fixes registered timing, reset masking, and vacuous pass risk.",
+      "files": [],
+      "assertions": [
+        "Output says registered effects should use non-overlapping implication or next-cycle checking.",
+        "Output warns that a broad disable condition can mask meaningful failures.",
+        "Output identifies the missing coverage or antecedent-hit check as a vacuity risk.",
+        "Output checks assertion clock-domain ownership.",
+        "Output suggests a stability assertion for valid/data hold under stall."
+      ]
+    },
+    {
+      "id": 38,
+      "prompt": "I have a 600-line existing RTL module and need to add a flush input to one datapath. Respond using the skill: what should you inspect first, how do you find the change point, and how do you avoid breaking unrelated behavior?",
+      "expected_output": "A brownfield large-module workflow that scans structure, maps dependencies, identifies the change seam, and proposes minimal regression checks before editing.",
+      "files": [],
+      "assertions": [
+        "Output says to inspect local project conventions before editing.",
+        "Output scans module structure before reading every line.",
+        "Output builds a dependency or blast-radius map for the affected datapath.",
+        "Output identifies the exact change point before proposing code.",
+        "Output emphasizes minimal diff and preservation of existing behavior.",
+        "Output proposes regression tests for old behavior and the new flush behavior."
+      ]
+    },
+    {
+      "id": 39,
+      "prompt": "Give a basic SDC/XDC constraint plan for a single-clock RTL block targeting 200 MHz, with external input/output ports and one unrelated debug clock. State assumptions and what values are placeholders.",
+      "expected_output": "A constraint-aware answer with primary clock, IO delay assumptions, async clock grouping, and caution around placeholders.",
+      "files": [],
+      "assertions": [
+        "Output includes a primary clock constraint with a 5 ns period or equivalent 200 MHz statement.",
+        "Output includes input and output delay constraints with explicit placeholder assumptions.",
+        "Output treats the unrelated debug clock as asynchronous or asks for the relationship.",
+        "Output warns not to hide real synchronous paths with false paths.",
+        "Output states that board or integration timing data must replace placeholder values."
+      ]
+    },
+    {
+      "id": 40,
+      "prompt": "Design a credit-based flow-control slice for a command path where downstream backpressure takes 6 cycles to return and the downstream queue has 16 entries. Include contract, cycle trace, RTL outline, and checks.",
+      "expected_output": "A credit-based control response that uses explicit credit accounting instead of simple ready/valid backpressure.",
+      "files": [],
+      "assertions": [
+        "Output explains why simple same-cycle ready/valid backpressure is insufficient for the stated return latency.",
+        "Output defines initial credit count and credit consume/return conditions.",
+        "Output handles simultaneous credit consume and return in the contract.",
+        "Output includes underflow and overflow checks for the credit counter.",
+        "Output includes a cycle trace covering credit exhaustion and credit return."
+      ]
+    },
+    {
+      "id": 41,
+      "prompt": "Design a bounded retry buffer for a ready/valid packet stream with ACK/NAK replay. It must hold unacknowledged data, replay from the oldest unacknowledged item on NAK, and bound the in-flight window. Include contract, state elements, RTL outline, and verification checks.",
+      "expected_output": "A retry/replay buffer design that uses circular-buffer pointers and explicit ACK/NAK semantics.",
+      "files": [],
+      "assertions": [
+        "Output defines write, read, and replay or oldest-unacknowledged pointers.",
+        "Output states ACK and NAK priority or conflict behavior.",
+        "Output bounds the in-flight window and blocks overflow.",
+        "Output explains how replay restarts from the oldest unacknowledged item.",
+        "Output includes checks for NAK replay, ACK advance, full behavior, and no duplicate loss beyond replay semantics."
+      ]
+    },
+    {
+      "id": 42,
+      "prompt": "Design a 32-bit to 128-bit streaming width converter with ready/valid, keep/last sideband, and backpressure on both sides. Include the timing contract, sideband alignment rules, RTL outline, and directed checks.",
+      "expected_output": "A width-converter response that accumulates narrow beats into wide beats while preserving keep/last and backpressure semantics.",
+      "files": [],
+      "assertions": [
+        "Output defines the conversion ratio and accumulation count.",
+        "Output keeps data, keep, and last sideband aligned under stalls.",
+        "Output defines partial final output behavior when last arrives before a full wide word.",
+        "Output includes backpressure hold behavior on both input and output channels.",
+        "Output includes directed checks for full-width transfer, partial-last transfer, and output stall."
+      ]
+    },
+    {
+      "id": 43,
+      "prompt": "Add data integrity protection to a storage datapath. Compare CRC and SECDED ECC for this use case, state when each is appropriate, and outline the RTL/verification plan without inventing a hardcoded parity matrix.",
+      "expected_output": "A data-integrity design discussion that distinguishes CRC detection from ECC correction and avoids fabricated ECC matrices.",
+      "files": [],
+      "assertions": [
+        "Output distinguishes CRC error detection from SECDED-style correction.",
+        "Output states polynomial/init/reflection choices are required for CRC.",
+        "Output states ECC parity matrix or generator source must be specified instead of invented.",
+        "Output includes pipeline or latency implications for the datapath.",
+        "Output includes injection checks for single-bit, double-bit, and burst-like errors as applicable."
+      ]
+    },
+    {
+      "id": 44,
+      "prompt": "Design a 4-bank memory access scheduler for two requesters. It should decode bank index, detect same-bank conflicts, arbitrate fairly, and preserve response ordering per requester. Include contract, state elements, and checks.",
+      "expected_output": "A multi-bank memory scheduler plan that handles bank conflicts, arbitration, and per-requester response ordering explicitly.",
+      "files": [],
+      "assertions": [
+        "Output defines address-to-bank mapping and interleaving granularity.",
+        "Output detects same-bank conflicts before issuing memory commands.",
+        "Output states the arbitration policy and fairness expectation.",
+        "Output preserves or explicitly scopes response ordering per requester.",
+        "Output includes checks for no-conflict parallel issue, same-bank conflict, fairness, and response routing."
+      ]
+    }
+  ]
+}

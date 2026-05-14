@@ -1,0 +1,11 @@
+{
+  "name": "skid_buffer_trial",
+  "top": "tb_rv_two_entry_buffer",
+  "sources": ["rv_two_entry_buffer.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": ["PASS skid buffer"]
+  },
+  "timeout_seconds": 10
+}
