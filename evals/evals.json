@@ -579,6 +579,206 @@
         "Output preserves or explicitly scopes response ordering per requester.",
         "Output includes checks for no-conflict parallel issue, same-bank conflict, fairness, and response routing."
       ]
+    },
+    {
+      "id": 45,
+      "prompt": "Generate a ready/valid register slice with synchronous active-high reset. Before finalizing, scan the RTL against known bug patterns from the bug pattern library and report any matched risks with prevention assertions.",
+      "expected_output": "A register slice RTL that proactively identifies stall-hold bug risk and includes payload stability prevention.",
+      "files": [],
+      "assertions": [
+        "Output references a stall-hold or payload-stability bug pattern from the bug pattern library.",
+        "Output includes a prevention assertion or check for payload stability under backpressure.",
+        "Output explains how the generated code avoids the matched bug pattern.",
+        "Output includes a cycle trace or contract before RTL.",
+        "RTL uses accept_input and accept_output for ready/valid movement conditions."
+      ]
+    },
+    {
+      "id": 46,
+      "prompt": "Design a synchronous FIFO with parameterized width and depth. Before finalizing, scan for known boundary bug patterns and report matched risks with prevention assertions.",
+      "expected_output": "A FIFO design that proactively identifies full-write and empty-read boundary risks and includes overflow/underflow prevention.",
+      "files": [],
+      "assertions": [
+        "Output references a full-write boundary or overflow bug pattern from the bug pattern library.",
+        "Output includes a prevention assertion for overflow or underflow.",
+        "Output states the full+read and empty+write same-cycle policy explicitly.",
+        "Output states whether read data is registered or combinational.",
+        "Output includes a cycle trace covering boundary behavior."
+      ]
+    },
+    {
+      "id": 47,
+      "prompt": "Design a two-process FSM controller with reset, start, busy, done states. Before finalizing, scan for known FSM bug patterns and report matched risks with prevention assertions.",
+      "expected_output": "An FSM design that proactively identifies reset-state and illegal-state risks and includes prevention checks.",
+      "files": [],
+      "assertions": [
+        "Output references a reset-to-wrong-state or illegal-state bug pattern from the bug pattern library.",
+        "Output includes a prevention assertion for the reset state value.",
+        "Output includes a prevention assertion or default branch for illegal state recovery.",
+        "Output lists legal states and reset state before RTL.",
+        "RTL separates combinational next-state logic from the state register."
+      ]
+    },
+    {
+      "id": 48,
+      "prompt": "Generate a round-robin ready/valid arbiter for 4 requesters. After generating RTL, write it to a fixture directory, generate a manifest.json, and run scripts/rtl_check.py to verify the code compiles and passes simulation. Fix any issues found and re-run until PASS.",
+      "expected_output": "A round-robin arbiter with testbench that passes tool-based verification, with evidence of compile/sim results.",
+      "files": [],
+      "assertions": [
+        "Output includes a testbench with pass/fail signal.",
+        "Output references running rtl_check.py or equivalent tool verification.",
+        "Output includes the simulation result or fix iteration evidence.",
+        "Output includes a timing contract before RTL.",
+        "RTL uses accept_input and accept_output for ready/valid movement conditions."
+      ]
+    },
+    {
+      "id": 49,
+      "prompt": "Design a credit-based flow control counter. After generating RTL, verify it compiles with Icarus Verilog by running rtl_check.py. If compilation or simulation fails, fix the issues and re-run until PASS.",
+      "expected_output": "A credit counter with testbench that passes tool-based verification, with evidence of compile/sim results and any fix iterations.",
+      "files": [],
+      "assertions": [
+        "Output includes tool verification evidence such as compile or sim result.",
+        "Output shows fix iteration if initial check failed.",
+        "Output includes a timing contract before RTL.",
+        "RTL defines credit consume and return conditions explicitly.",
+        "Output includes checks for credit underflow or overflow."
+      ]
+    },
+    {
+      "id": 50,
+      "prompt": "Design a clock-gated register bank with 8 registers. The clock should be gated when no write is occurring and no read is pending. Include the gating logic, explain why this saves power, and state what must not be gated (e.g., CDC synchronizers). Reference the low-power guidelines.",
+      "expected_output": "A clock-gated register bank with explicit enable logic, power-saving explanation, and CDC safety warnings.",
+      "files": [],
+      "assertions": [
+        "Output explains clock gating as a power reduction technique before RTL.",
+        "RTL uses an enable signal (not a gated clock directly) for synthesis-friendly gating.",
+        "Output states that CDC synchronizers must never have their clocks gated.",
+        "Output includes a verification check for gated-domain state retention or re-initialization.",
+        "Output references the low-power guidelines."
+      ]
+    },
+    {
+      "id": 51,
+      "prompt": "Review this RTL for DFT readiness: a module uses latches for state, has no test-mode override on clock gating, and hard-wires memory write-enable to a constant. Explain DFT risks and propose minimal fixes. Reference the DFT guidelines.",
+      "expected_output": "A DFT-aware review that flags latch, clock-gating, and memory BIST issues with minimal corrective patterns.",
+      "files": [],
+      "assertions": [
+        "Output identifies latches as scan-chain-breaking elements.",
+        "Output flags missing test-mode override on clock gating.",
+        "Output flags hard-wired memory control as blocking BIST insertion.",
+        "Output recommends synchronous resets when possible for smaller scan cell overhead.",
+        "Output references the DFT guidelines."
+      ]
+    },
+    {
+      "id": 52,
+      "prompt": "Explain when to use UVM constrained-random verification versus directed tests for a ready/valid FIFO. Define the coverage model, scoreboard strategy, and when directed tests are sufficient. Reference the UVM guidelines.",
+      "expected_output": "A verification methodology answer that distinguishes UVM from directed tests with a coverage-driven closure plan.",
+      "files": [],
+      "assertions": [
+        "Output explains constrained-random vs directed test tradeoffs.",
+        "Output defines a functional coverage model (bins for full, empty, simultaneous read/write).",
+        "Output describes a scoreboard strategy for FIFO verification.",
+        "Output states when directed tests are sufficient (simple modules, smoke tests).",
+        "Output references the UVM guidelines."
+      ]
+    },
+    {
+      "id": 53,
+      "prompt": "Review this RTL before synthesis: a 256-entry loop sums combinationally, a large memory array is reset element by element, and the target is 500 MHz. Explain synthesis and timing risks, propose a safer micro-architecture, and suggest SDC constraints. Reference the synthesis/timing closure guidelines.",
+      "expected_output": "A synthesis-aware review with timing closure strategy and SDC constraint plan.",
+      "files": [],
+      "assertions": [
+        "Output explains that combinational loop unrolls into hardware.",
+        "Output flags element-by-element memory reset as preventing RAM inference.",
+        "Output connects 500 MHz target to critical path depth.",
+        "Output proposes a pipelined or multi-cycle alternative.",
+        "Output includes basic SDC constraints (clock, IO delays, clock groups).",
+        "Output references the synthesis/timing closure guidelines."
+      ]
+    },
+    {
+      "id": 54,
+      "prompt": "Write SVA properties to formally verify a round-robin arbiter: prove that every requester eventually gets a grant (liveness), no two requesters get simultaneous grants (safety), and the arbiter cannot deadlock. Explain which properties are suitable for formal vs simulation. Reference the formal verification guidelines.",
+      "expected_output": "Formal-ready SVA properties with safety/liveness classification and formal vs simulation guidance.",
+      "files": [],
+      "assertions": [
+        "Output includes a safety property (no simultaneous grants).",
+        "Output includes a liveness property (eventual grant for each requester).",
+        "Output includes a deadlock-freedom property.",
+        "Output classifies which properties are suitable for formal vs simulation.",
+        "Output explains the difference between bounded model checking and unbounded proof.",
+        "Output references the formal verification guidelines."
+      ]
+    },
+    {
+      "id": 55,
+      "prompt": "Design a register slice and explain how its physical implementation would be affected by: (1) being placed 2mm from its consumer, (2) having 64-bit data width, (3) targeting 1GHz clock. Discuss wire delay, floorplanning, and clock tree implications. Reference the physical awareness guidelines.",
+      "expected_output": "A physical-awareness answer connecting RTL design to floorplanning, wire delay, and CTS considerations.",
+      "files": [],
+      "assertions": [
+        "Output discusses wire delay impact at 2mm distance.",
+        "Output discusses congestion implications of 64-bit wide datapath.",
+        "Output connects 1GHz clock to clock tree balancing requirements.",
+        "Output recommends registered interfaces between physical blocks.",
+        "Output references the physical awareness guidelines."
+      ]
+    },
+    {
+      "id": 56,
+      "prompt": "Create a verification plan for a parameterized synchronous FIFO. It should cover directed tests, constrained-random strategy, coverage model (with specific bins), assertion properties, and exit criteria. Classify the verification maturity level (L0-L5). Reference the verification planning and coverage models guidelines.",
+      "expected_output": "A structured verification plan with stimulus strategy, checking strategy, coverage model, and exit criteria.",
+      "files": [],
+      "assertions": [
+        "Output classifies verification maturity level (L0-L5) with rationale.",
+        "Output defines a coverage model with specific bins (empty, full, almost-full, simultaneous read/write).",
+        "Output includes both directed tests and constrained-random strategy.",
+        "Output includes at least one SVA property for the FIFO.",
+        "Output defines exit criteria (coverage threshold, assertion pass).",
+        "Output references the verification planning and coverage models guidelines."
+      ]
+    },
+    {
+      "id": 57,
+      "prompt": "Write a UVM-style testbench structure for a ready/valid register slice. Include transaction class, driver, monitor, scoreboard, and coverage collector. The testbench should support constrained-random stimulus and have a pass/fail criterion. Reference the UVM templates guidelines.",
+      "expected_output": "A UVM-structured testbench with all key components and a coverage-driven verification approach.",
+      "files": [],
+      "assertions": [
+        "Output includes a transaction class with randomizable fields.",
+        "Output includes a driver that drives the ready/valid interface.",
+        "Output includes a monitor that observes transfers.",
+        "Output includes a scoreboard that checks data correctness.",
+        "Output includes a coverage collector with functional coverage bins.",
+        "Output references the UVM templates guidelines."
+      ]
+    },
+    {
+      "id": 58,
+      "prompt": "You need to design a FIFO to buffer data between a producer running at 200MHz and a consumer running at 150MHz. The producer can burst 8 beats, and the consumer takes 2 cycles per beat. How deep should the FIFO be? Walk through your sizing reasoning step by step. Reference the design heuristics guidelines.",
+      "expected_output": "A FIFO depth sizing analysis with explicit calculation, safety margin, and reasoning.",
+      "files": [],
+      "assertions": [
+        "Output calculates the required depth based on latency and throughput mismatch.",
+        "Output accounts for the producer burst length (8 beats).",
+        "Output accounts for the consumer processing time (2 cycles per beat).",
+        "Output adds a safety margin for pipeline latency and backpressure.",
+        "Output states the final recommended depth with justification.",
+        "Output references the design heuristics guidelines."
+      ]
+    },
+    {
+      "id": 59,
+      "prompt": "Review this RTL for design quality using engineering intuition: a 64-entry FIFO uses a 256-deep counter for occupancy, a FSM has 3 states but uses one-hot encoding, and a pipeline has 8 stages with no stall handling. Identify red flags and suggest fixes. Reference the design heuristics guidelines.",
+      "expected_output": "A design review that identifies over-engineering, encoding mismatches, and missing stall handling.",
+      "files": [],
+      "assertions": [
+        "Output flags the 256-deep counter for a 64-entry FIFO as over-engineered.",
+        "Output notes one-hot encoding for 3 states is reasonable but could be binary.",
+        "Output flags missing stall handling in an 8-stage pipeline as a critical red flag.",
+        "Output suggests specific fixes (right-size counter, add stall logic).",
+        "Output references the design heuristics guidelines."
+      ]
     }
   ]
 }

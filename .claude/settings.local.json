@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(karpathy-guidelines)",
+      "mcp__plugin_agentmemory_agentmemory__memory_save",
+      "mcp__plugin_agentmemory_agentmemory__memory_recall",
+      "mcp__plugin_agentmemory_agentmemory__memory_sessions",
+      "mcp__plugin_agentmemory_agentmemory__memory_smart_search",
+      "WebSearch",
+      "Bash(mkdir -p \"C:\\\\Users\\\\86182\\\\.claude\\\\skills\\\\digital-front-end-skill\")",
+      "Bash(cp \"D:\\\\skill管理\\\\ic-design-skill\\\\digital-front-end-skill-ds\\\\SKILL.md\" \"C:\\\\Users\\\\86182\\\\.claude\\\\skills\\\\digital-front-end-skill\\\\\")"
+    ]
+  }
+}

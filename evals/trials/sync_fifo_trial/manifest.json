@@ -1,0 +1,11 @@
+{
+  "name": "sync_fifo_trial",
+  "top": "tb",
+  "sources": ["sync_fifo.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": ["PASS sync fifo"]
+  },
+  "timeout_seconds": 10
+}

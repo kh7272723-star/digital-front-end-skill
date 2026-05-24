@@ -1,7 +1,7 @@
 {
   "benchmark_name": "digital-front-end-skill-benchmark",
   "version": "1.0",
-  "minimum_eval_count": 30,
+  "minimum_eval_count": 35,
   "required_assertions_per_eval": 4,
   "minimum_executable_trials": 18,
   "task_benchmark_file": "evals/task_benchmark.json",
@@ -91,6 +91,72 @@
       "description": "Reusable RTL/IP patterns such as credits, retry buffers, width conversion, data integrity, and multi-bank memory.",
       "min_count": 4,
       "eval_ids": [40, 41, 42, 43, 44]
+    },
+    {
+      "name": "bug_prevention",
+      "description": "Proactive bug pattern matching, known-pattern warnings, and prevention assertions during RTL generation.",
+      "min_count": 2,
+      "eval_ids": [45, 46, 47]
+    },
+    {
+      "name": "tool_driven_verification",
+      "description": "Tool-driven RTL verification: compile, simulate, interpret output, iterate fixes.",
+      "min_count": 2,
+      "eval_ids": [48, 49]
+    },
+    {
+      "name": "low_power_design",
+      "description": "Clock gating, operand isolation, power domains, UPF basics, and power-aware verification.",
+      "min_count": 1,
+      "eval_ids": [50]
+    },
+    {
+      "name": "dft_awareness",
+      "description": "Scan chain readiness, memory BIST, test-mode overrides, and DFT-friendly RTL patterns.",
+      "min_count": 1,
+      "eval_ids": [51]
+    },
+    {
+      "name": "uvm_methodology",
+      "description": "Constrained-random verification, coverage-driven closure, UVM architecture, and scoreboard strategy.",
+      "min_count": 1,
+      "eval_ids": [52]
+    },
+    {
+      "name": "synthesis_timing_closure",
+      "description": "Synthesis-aware RTL, SDC constraints, critical path optimization, and area/timing tradeoffs.",
+      "min_count": 1,
+      "eval_ids": [53]
+    },
+    {
+      "name": "formal_verification",
+      "description": "SVA properties for formal, safety/liveness classification, and formal vs simulation guidance.",
+      "min_count": 1,
+      "eval_ids": [54]
+    },
+    {
+      "name": "physical_awareness",
+      "description": "Floorplanning, wire delay, IO planning, clock tree synthesis, and package considerations for RTL engineers.",
+      "min_count": 1,
+      "eval_ids": [55]
+    },
+    {
+      "name": "verification_planning",
+      "description": "Verification plans with coverage models, constrained-random strategy, directed tests, and exit criteria.",
+      "min_count": 1,
+      "eval_ids": [56]
+    },
+    {
+      "name": "uvm_testbench",
+      "description": "UVM-structured testbench with transaction, driver, monitor, scoreboard, and coverage collector.",
+      "min_count": 1,
+      "eval_ids": [57]
+    },
+    {
+      "name": "design_intuition",
+      "description": "FIFO depth sizing, pipeline stage count, area/timing estimation, and red flag identification using engineering heuristics.",
+      "min_count": 2,
+      "eval_ids": [58, 59]
     }
   ],
   "official_protocol_sources": [
@@ -99,10 +165,10 @@
       "owner": "Arm",
       "document": "AMBA AXI and ACE Protocol Specification, Arm IHI 0022",
       "reference_files": [
-        "references/axi-full-guidelines.md",
-        "references/axi-multi-outstanding-guidelines.md",
-        "references/axi-lite-guidelines.md",
-        "references/axi-dma-channel-guidelines.md"
+        "references/axi-dma/axi-full-guidelines.md",
+        "references/axi-dma/axi-multi-outstanding-guidelines.md",
+        "references/axi-dma/axi-lite-guidelines.md",
+        "references/axi-dma/axi-dma-channel-guidelines.md"
       ],
       "eval_ids": [22, 24, 25, 29, 31, 32, 33, 34]
     },
@@ -111,7 +177,7 @@
       "owner": "Arm",
       "document": "AMBA APB Protocol Specification, Arm IHI 0024",
       "reference_files": [
-        "references/apb-guidelines.md"
+        "references/bus/apb-guidelines.md"
       ],
       "eval_ids": [26]
     },
@@ -120,7 +186,7 @@
       "owner": "Arm",
       "document": "AMBA AHB Protocol Specification, Arm IHI 0033",
       "reference_files": [
-        "references/ahb-lite-guidelines.md"
+        "references/bus/ahb-lite-guidelines.md"
       ],
       "eval_ids": [27]
     },
@@ -129,7 +195,7 @@
       "owner": "Arm",
       "document": "AMBA AXI4-Stream Protocol Specification, Arm IHI 0051",
       "reference_files": [
-        "references/axi-stream-guidelines.md"
+        "references/axi-dma/axi-stream-guidelines.md"
       ],
       "eval_ids": [28]
     }
@@ -152,6 +218,11 @@
     "evals/trials/retry_buffer_trial",
     "evals/trials/stream_width_converter_trial",
     "evals/trials/data_integrity_trial",
-    "evals/trials/multi_bank_scheduler_trial"
+    "evals/trials/multi_bank_scheduler_trial",
+    "evals/trials/skid_buffer_trial",
+    "evals/trials/sync_fifo_trial",
+    "evals/trials/pipeline_stall_flush_trial",
+    "evals/trials/two_process_fsm_trial",
+    "evals/trials/rv_register_slice_trial"
   ]
 }

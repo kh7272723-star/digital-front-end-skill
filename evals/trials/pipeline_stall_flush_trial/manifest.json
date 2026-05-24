@@ -1,0 +1,11 @@
+{
+  "name": "pipeline_stall_flush_trial",
+  "top": "tb",
+  "sources": ["rv_pipeline_stage.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": ["PASS pipeline stage"]
+  },
+  "timeout_seconds": 10
+}

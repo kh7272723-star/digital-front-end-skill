@@ -1,0 +1,11 @@
+{
+  "name": "two_process_fsm_trial",
+  "top": "tb",
+  "sources": ["simple_fsm.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": ["PASS two process fsm"]
+  },
+  "timeout_seconds": 10
+}

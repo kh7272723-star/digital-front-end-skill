@@ -1,0 +1,11 @@
+{
+  "name": "rv_register_slice_trial",
+  "top": "tb",
+  "sources": ["rv_register_slice.v"],
+  "testbench": "tb.v",
+  "expected": {
+    "result": "pass",
+    "contains": ["PASS register slice"]
+  },
+  "timeout_seconds": 10
+}

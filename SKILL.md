@@ -1,11 +1,12 @@
 ---
 name: digital-front-end-skill
 description: >
-  Help with digital front-end RTL design and timing reasoning for Verilog/SystemVerilog.
-  Use this skill whenever the user asks for RTL coding, module interface design, FSM design,
-  ready/valid or req/ack handshakes, FIFO/pipeline/arbiter/counter patterns, testbench or
-  assertion generation, timing-behavior explanation, lint/code-review help, simulation debug,
-  or bug triage for digital chip front-end work, even if they do not explicitly mention a skill.
+  Digital front-end RTL design assistant for Verilog/SystemVerilog. MUST use this skill for ANY RTL coding task,
+  module interface design, FSM design, ready/valid or req/ack handshakes, FIFO/pipeline/arbiter/counter patterns,
+  testbench generation, timing explanation, lint/code review, simulation debug, or bug triage. Even if the user
+  doesn't mention "skill" or "RTL" explicitly, trigger this for any digital hardware design work including
+  synthesis-aware coding, CDC handling, protocol implementation (AXI/APB/AHB/AXI-Stream), clock gating,
+  interrupt controllers, DMA engines, and multi-module subsystem design.
 ---
 
 # Digital Front-End Skill
@@ -20,478 +21,324 @@ The core method is:
 4. Write the cycle-level contract and trace before code.
 5. Generate conservative RTL and verification checks that match the contract and trace.
 
-This skill already contains distilled guidance from the authority classes listed in `references/authority-synthesis.md`. Do not browse standards or methodology documents during normal use unless the user asks for exact citations, the local project requires a specific version, or a rule conflict must be resolved.
-
 ## What this skill is good for
 
-- Translate a feature request into RTL-ready requirements.
-- Propose module boundaries, ports, widths, reset behavior, and handshake rules.
-- Generate synthesizable Verilog RTL for common front-end structures.
-- Draft FSMs, FIFOs, pipelines, arbiters, counters, and simple protocol glue.
-- Plan subsystem and full-system front-end designs with hierarchy, interface contracts, and integration invariants.
-- Produce module-level testbench scaffolding and sanity checks.
-- Build verification matrices and staged bring-up plans for nontrivial blocks.
+- Translate feature requests into RTL-ready requirements with module boundaries, ports, widths, reset behavior, and handshake rules.
+- Generate synthesizable Verilog RTL for FSMs, FIFOs, pipelines, arbiters, counters, and protocol glue.
+- Plan subsystem and full-system designs with hierarchy, interface contracts, integration invariants, and staged bring-up.
+- Produce testbench scaffolding, verification matrices, and directed test plans.
 - Adapt to existing project conventions before changing integrated RTL.
-- Explain timing behavior cycle by cycle.
-- Review code for common RTL issues and suggest fixes.
-- Triage simple simulation failures from logs or wave descriptions.
-- Enforce a timing-first, spec-first way of thinking before code is written.
+- Explain timing behavior cycle by cycle, review code for RTL issues, and triage simulation failures.
 
 ## What this skill should not pretend to do
 
 - Do not claim correctness for complex protocol logic without verification.
-- Do not silently invent interface semantics when the requirements are underspecified.
+- Do not silently invent interface semantics when requirements are underspecified.
 - Do not replace CDC review, formal signoff, or engineering judgment.
 - Do not produce 'clever' RTL if a plain, readable template is safer.
 - Do not answer timing questions with generic prose when a cycle-level contract is required.
-- Do not quote standards as decoration; convert them into concrete RTL decisions.
-- Do not generate a monolithic full-system RTL implementation from an underspecified subsystem prompt.
+- Do not generate monolithic full-system RTL from an underspecified subsystem prompt.
 - Do not present directed simulation as signoff or proof of correctness.
 
 ## Operating principles
 
-1. Start by extracting the design contract.
-  - Identify inputs, outputs, clocks, resets, latency, throughput, backpressure, and corner cases.
-  - If anything critical is missing, ask for it before writing code.
-2. Prefer explicit structure over compactness.
-  - Separate combinational and sequential logic clearly.
-  - Use defaults to avoid latches and X-propagation surprises.
-  - Keep naming consistent and readable.
-3. Make timing visible.
-  - Describe what changes on the current cycle and what is registered to the next cycle.
-  - State any assumptions about handshake ordering, reset release, or pipeline latency.
-  - For any temporal behavior, give a cycle-by-cycle explanation before giving code.
-4. Verify the design path.
-  - When generating RTL, also generate a small verification plan.
-  - Include a minimal testbench skeleton or directed test ideas.
-  - Call out what should be checked in simulation, lint, and assertions.
-  - Treat simulation evidence as necessary for nontrivial protocol or stateful logic.
-5. When debugging, work from evidence.
-  - Use compiler/lint errors, sim logs, wave behavior, and assertions as the source of truth.
-  - Suggest the smallest fix that preserves the intended behavior.
-  - If the failure is ambiguous, ask for the missing waveform or log evidence instead of guessing.
+1. Start by extracting the design contract. If anything critical is missing, ask before writing code.
+2. Prefer explicit structure over compactness. Separate combinational and sequential logic. Use defaults to avoid latches.
+3. Make timing visible. Describe what changes on the current cycle and what is registered to the next cycle.
+4. Verify the design path. When generating RTL, also generate a verification plan with directed tests.
+5. When debugging, work from evidence. Use compiler/lint errors, sim logs, wave behavior, and assertions as the source of truth.
 
 ## Authority-to-rule synthesis
 
-The skill should treat standards and methodology documents as source material, not as answer text. Use this hierarchy:
-
-1. User-provided project spec, interface spec, style guide, and failing evidence.
-2. Language and simulation semantics from Verilog/SystemVerilog standards.
-3. Vendor or methodology guidance for synthesis, reset, CDC, lint, and verification.
-4. Established synchronous design practice for FSMs, FIFOs, pipelines, arbiters, counters, and handshakes.
-5. This skill's local examples and templates.
-
-When converting source material into guidance:
-
-- Extract the rule that affects an RTL decision.
-- State the cycle-level consequence of the rule.
-- Tie the rule to a code structure or verification check.
-- Prefer short normative instructions over literature review.
-- If local project rules conflict with this skill, follow the local project rules and call out the conflict.
-- If the source material is missing or ambiguous, state the assumption rather than implying authority.
-- During normal RTL work, use the distilled rules in this skill as the operating standard instead of re-reading the original documents.
-
-Useful translation pattern:
-
-- Source concept: nonblocking assignments model clocked state updates.
-- Internal rule: use nonblocking assignments for registers and explain when the new value becomes visible.
-- Code consequence: keep registered state in `always @(posedge clk)` blocks.
-- Verification consequence: check behavior on the cycle after the active clock edge.
-
-## Timing and protocol discipline
-
-- Always explain stateful behavior in cycle terms before implementation.
-- For every nontrivial block, write the cycle contract first: what changes now, what changes next, and what must stay stable.
-- For FSM, FIFO, pipeline, or handshake logic, include a cycle trace before RTL.
-- For complete subsystems, decompose first and trace only risky local boundaries.
-- Prefer explicit two-process FSMs for multi-stage control; use implicit flag/counter control only for small single-path trackers and state the equivalent states.
-- For ready/valid logic, define exactly when data is accepted, held, and released.
-- For FSMs, list legal states and the reset state before coding.
-- For FIFOs and pipelines, define boundary behavior and alignment rules.
-- For CDC or multi-clock logic, do not improvise; require an explicit safe crossing pattern or additional review.
-- If the timing story is unclear, stop and ask before generating code.
+Treat standards and methodology documents as source material, not as answer text. Hierarchy: (1) user-provided spec, (2) Verilog/SystemVerilog standards, (3) vendor/methodology guidance, (4) established synchronous design practice, (5) this skill's local examples. See `references/timing/authority-synthesis.md`.
 
 ## Reference materials
 
-Use these curated references as the primary knowledge base for timing and pattern decisions:
+Read `references/reference-index.md` for a task-to-reference mapping. Key directories:
 
-- `references/timing-semantics.md`
-- `references/authority-synthesis.md`
-- `references/timing-contract-template.md`
-- `references/naming-guidelines.md`
-- `references/cycle-trace-guidelines.md`
-- `references/protocol-authority-map.md`
-- `references/hierarchical-design-guidelines.md`
-- `references/system-contract-template.md`
-- `references/interface-contract-template.md`
-- `references/integration-invariants.md`
-- `references/axi-dma-planning-example.md`
-- `references/engineering-review-checklist.md`
-- `references/verification-matrix-template.md`
-- `references/tradeoff-guidance.md`
-- `references/staged-bringup-guidelines.md`
-- `references/advanced-patterns.md`
-- `references/arbiter-examples.md`
-- `references/axi-full-guidelines.md`
-- `references/axi-multi-outstanding-guidelines.md`
-- `references/axi-lite-guidelines.md`
-- `references/axi-dma-channel-guidelines.md`
-- `references/dma-descriptor-burst-guidelines.md`
-- `references/apb-guidelines.md`
-- `references/ahb-lite-guidelines.md`
-- `references/axi-stream-guidelines.md`
-- `references/subsystem-rtl-slicing-guidelines.md`
-- `references/project-adaptation-guidelines.md`
-- `references/toolchain-closure-guidelines.md`
-- `references/protocol-edge-case-checklist.md`
-- `references/clock-reset-guidelines.md`
-- `references/cdc-guidelines.md`
-- `references/constraint-guidance.md`
-- `references/synthesis-guidance.md`
-- `references/micro-arch-decisions.md`
-- `references/assertion-quality-checklist.md`
-- `references/brownfield-guidance.md`
-- `references/large-module-guidance.md`
-- `references/protocol-semantics.md`
-- `references/rtl-writing-guidelines.md`
-- `references/rtl-patterns.md`
-- `references/full-module-examples.md`
-- `references/verilog-examples.md`
-- `references/fsm-examples.md`
-- `references/handshake-examples.md`
-- `references/fifo-examples.md`
-- `references/pipeline-examples.md`
-- `references/tb-examples.md`
-- `references/assertion-examples.md`
-- `references/debug-cases.md`
-- `references/verification-guidance.md`
-Read them when the task involves timing, protocol behavior, pattern selection, debug, or verification. They are intentionally written as a curated synthesis of authoritative engineering practice, not as a dump of mixed-quality examples.
+- **Timing/protocol**: `references/timing/` — timing semantics, contracts, naming, protocol rules, cycle traces, clock/reset
+- **Architecture**: `references/architecture/` — hierarchy, system contracts, integration invariants, tradeoffs, staged bring-up
+- **AXI/DMA**: `references/axi-dma/` — AXI full/Lite/Stream, DMA channel guidelines, CDMA examples, outstanding rules
+- **Bus protocols**: `references/bus/` — APB, AHB-Lite
+- **RTL patterns**: `references/rtl/` — coding guidelines, FSM examples, FIFO examples, handshake examples, pipeline examples, naming conventions, correctness rules (multi-driven, latch, width, blocking/nonblocking, reset, loops, implicit wires)
+- **Specialized patterns**: `references/patterns/` — arbiters, credit-based, rate-limiter, retry buffer, CRC, ECC, width converter, frame assembler, multi-bank memory, CAM
+- **Verification**: `references/verification/` — verification guidance, TB examples, assertion examples, coverage models, formal properties, UVM templates, AXI verification (BFM, scoreboard, coverage), simulation loop (lint→compile→simulate→fix), engineering review checklist
+- **Debug**: `references/debug/` — debug cases, bug pattern library
+- **Existing project**: `references/project/` — project adaptation, brownfield guidance, large module guidance
+- **CDC/synthesis**: `references/synthesis/` — CDC guidelines, constraint guidance, synthesis guidance, toolchain closure, formal verification
+- **Advanced**: `references/advanced/` — low-power, DFT, UVM, physical awareness
+- **Design intuition**: `references/design/` — design heuristics, tool-driven workflow, power/timing/area rules (low-power RTL, timing closure, resource optimization)
 
-Reference selection:
+## Coding rules (mandatory)
 
-- Timing semantics, assignment ordering, or cycle explanation: read `references/timing-semantics.md`, `references/timing-contract-template.md`, and `references/cycle-trace-guidelines.md`.
-- Source-to-rule conversion or methodology grounding: read `references/authority-synthesis.md`.
-- Protocol-specific AXI, AXI-Lite, AXI-Stream, APB, AHB, ACE, or CHI rules: read `references/protocol-authority-map.md` before adding or changing rules.
-- Naming or interface style: read `references/naming-guidelines.md`.
-- Complete DMA, AXI subsystem, cache, NoC, bus bridge, multi-channel engine, or full top integration: read `references/hierarchical-design-guidelines.md`, `references/system-contract-template.md`, `references/interface-contract-template.md`, and `references/integration-invariants.md`.
-- AXI DMA architecture or implementation slicing: also read `references/axi-dma-planning-example.md`, `references/axi-dma-channel-guidelines.md`, and `references/subsystem-rtl-slicing-guidelines.md`.
-- AXI full masters, slaves, bridges, or memory engines: read `references/axi-full-guidelines.md`.
-- AXI multi-ID, multi-outstanding, or ordering work: also read `references/axi-multi-outstanding-guidelines.md`.
-- DMA descriptor parsing or burst command generation: also read `references/dma-descriptor-burst-guidelines.md`.
-- AXI-Lite register blocks or small slaves: read `references/axi-lite-guidelines.md`.
-- APB, AHB-Lite, or AXI-Stream blocks: read the matching `references/apb-guidelines.md`, `references/ahb-lite-guidelines.md`, or `references/axi-stream-guidelines.md`.
-- Architecture or microarchitecture tradeoffs: read `references/tradeoff-guidance.md` and `references/micro-arch-decisions.md`.
-- Nontrivial verification planning: read `references/verification-matrix-template.md`.
-- Large-system staged implementation: read `references/staged-bringup-guidelines.md`.
-- Arbiters: read `references/advanced-patterns.md` and `references/arbiter-examples.md`.
-- Specialized RTL/IP patterns: read `references/credit-based-examples.md`, `references/rate-limiter-examples.md`, `references/retry-buffer-examples.md`, `references/utility-examples.md`, `references/crc-examples.md`, `references/ecc-examples.md`, `references/width-converter-examples.md`, `references/frame-assembler-examples.md`, `references/multi-bank-memory-examples.md`, or `references/cam-examples.md`.
-- Req/ack adapters and counters: read `references/advanced-patterns.md`; CDC planning: read `references/cdc-guidelines.md`.
-- Final review of nontrivial RTL or architecture: read `references/engineering-review-checklist.md`.
-- Existing project or codebase work: read `references/project-adaptation-guidelines.md`, `references/brownfield-guidance.md`, and for large modules `references/large-module-guidance.md`.
-- Claims about readiness, signoff, lint, CDC, synthesis, timing, or formal: read `references/toolchain-closure-guidelines.md`, `references/synthesis-guidance.md`, and `references/constraint-guidance.md`.
-- Protocol completeness review: read `references/protocol-edge-case-checklist.md`.
-- Clock/reset questions: read `references/clock-reset-guidelines.md`; CDC or async reset crossing: also read `references/cdc-guidelines.md`.
-- Ready/valid, req/ack, FIFO boundaries, pipeline handoff: read `references/protocol-semantics.md`, then `references/cycle-trace-guidelines.md`.
-- RTL generation or review: read `references/rtl-writing-guidelines.md`, then `references/full-module-examples.md` or the closest example file.
-- Pattern selection: read `references/rtl-patterns.md`.
-- Debug requests: read `references/debug-cases.md` and the protocol or pattern file closest to the failure.
-- Verification requests: read `references/verification-guidance.md`, `references/tb-examples.md`, `references/assertion-examples.md`, and for SVA `references/assertion-quality-checklist.md`.
-- If an RTL fixture is provided, use `scripts/rtl_check.py --case <fixture_dir>` when Icarus Verilog is available.
-- For skill package maintenance, run `scripts/skill_static_check.py`.
-- For eval benchmark coverage maintenance, run `scripts/eval_benchmark_check.py`; for task benchmark runs, use `scripts/init_task_benchmark.py` and `scripts/grade_task_benchmark.py`.
+All detailed rules are in `references/rtl/coding-guidelines.md`. Key mandatory rules:
 
-## Curated example policy
+- **Naming**: Read `references/timing/naming-guidelines.md` before writing any port list. Use `*_i`/`*_o` suffixes, `*_q`/`*_d` for registered state, `wr_do`/`rd_do` for FIFO operations.
+- **FSM style**: Use two-process style for >3 states. See `references/rtl/fsm-examples.md`.
+- **FSM single-bit control**: All FSM I/O must be single-bit enables. Multi-bit register assignments happen outside the FSM. See `references/rtl/fsm-examples.md` pattern 5.
+- **AXI channel separation**: AW/W/B must have independent valid/ready control. Read/write command paths must be independent. See `references/axi-dma/axi-dma-channel-guidelines.md`.
 
-- Prefer plain Verilog examples over SystemVerilog unless the user asks otherwise.
-- Keep the library small enough to review by eye.
-- Prefer examples that are easy to simulate and reason about cycle by cycle.
-- If an example is not clearly synthesizable or clearly testable, do not promote it into the library.
-- Treat the example library as the canonical source for style, not a loose collection of snippets.
-- Bias the library toward patterns that recur in real RTL work: FSM, FIFO, handshake, pipeline, testbench, and assertions.
+## Timing and protocol discipline
 
-## Skill internal rule synthesis
+See `references/timing/timing-discipline.md` for full rules. Key points:
 
-Use the timing and guideline references to synthesize the skill's own operating rules:
+- Write the cycle contract before code. See `references/timing/timing-contract-template.md`.
+- For FSM/FIFO/pipeline/handshake logic, include a cycle trace before RTL. See `references/timing/cycle-trace-guidelines.md`.
+- For ready/valid logic, define exactly when data is accepted, held, and released.
+- For CDC or multi-clock logic, require an explicit safe crossing pattern.
 
-- turn source material into compact writing rules
-- state cycle-level semantics in agent-facing language
-- prefer normative instructions over raw quotations
-- keep the skill body focused on action, not literature review
-- let examples reinforce rules, not replace them
-- bias the skill toward conservative, verifiable RTL rather than clever but fragile constructions
-- prefer Verilog-first patterns and only use SystemVerilog when the user asks or the task truly needs it
-- keep the skill opinionated about safe defaults so the agent does not improvise style
-
-## Example-driven learning rule
+## Example-driven learning
 
 Prefer example-first reasoning for RTL tasks:
 
-1. Find the closest verified pattern.
+1. Find the closest verified pattern in `references/rtl/` or `references/patterns/`.
 2. Extract the cycle-level rule from the example.
 3. Generalize only after the contract is clear.
 4. Reject examples that are syntactically valid but semantically unclear.
-5. Prefer plain Verilog-style RTL unless the user explicitly asks for SystemVerilog features.
 
-Examples are not proof of correctness. Before reusing an example, check:
-
-- Does its reset style match the request?
-- Does its handshake naming match producer/consumer direction?
-- Does it define boundary behavior?
-- Does it preserve data/control alignment under stall?
-- Does the verification note check the same contract?
+Before reusing an example, check: reset style match, handshake naming match, boundary behavior defined, data/control alignment under stall, verification note checks the same contract.
 
 ## Standard workflow
 
 ### 1. Parse the request
 
-Summarize the requested block in your own words and list the open questions.
-If working in an existing project, inspect local conventions before proposing edits.
+Summarize the requested block and list open questions. If working in an existing project, inspect local conventions first. Classify as leaf module, subsystem, or full system.
 
-Classify the request as:
+If the specification is underspecified or vague (missing protocol details, data widths, error handling, throughput targets, CRC parameters, etc.), run the requirement extraction framework from `references/architecture/requirement-extraction-template.md` before proceeding to Step 2. Classify every design dimension as Required/Implied/Assumed/Unknown. Attach the filled checklist + design decision log to the timing contract. If more than 3 Required dimensions are unanswered, pause and ask the user before writing any RTL.
 
-- leaf module: one FSM, FIFO, pipeline stage, register slice, counter, arbiter, or adapter
-- subsystem: multiple modules with one primary data or control path
-- full system: multiple protocols, multiple channels, descriptor/status/error handling, or top-level integration
-
-For trivial one-register, one-counter, or simple explanation requests, keep the answer short. Still state reset, enable, and visible-cycle behavior, but do not force the full five-section output if it would add noise.
-
-For full systems, do not start with RTL. Produce a system contract, submodule decomposition, interface contracts, integration invariants, risky local traces, implementation sequence, and verification strategy. Generate RTL only for one selected leaf module or integration slice unless the user explicitly asks for staged implementation.
+For full systems, do not start with RTL. Produce a system contract, submodule decomposition, interface contracts, integration invariants, risky local traces, implementation sequence, and verification strategy.
 
 ### 2. Build the timing contract first
 
-Before writing code, produce a short timing contract using the template in `references/timing-contract-template.md`.
-It should include:
-
-- module purpose
-- clock domain(s)
-- reset style
-- input handshake
-- output handshake
-- data latency
-- stall behavior
-- flush behavior
-- boundary behavior
-- illegal or unsupported cases
-
-If any of these fields are irrelevant, mark them as `not applicable` instead of inventing behavior.
+Before writing code, produce a short timing contract using `references/timing/timing-contract-template.md`. Include: module purpose, clock domains, reset style, input/output handshake, data latency, stall/flush behavior, boundary behavior, illegal cases.
 
 ### 3. Freeze the contract
 
-Turn the timing contract into a short design spec with:
-
-- ports and signal widths
-- naming conventions
-- reset and idle behavior
-- handshake or protocol rules
-- corner cases
+Turn the timing contract into a short design spec with: ports and signal widths, naming conventions, reset and idle behavior, handshake or protocol rules, corner cases.
 
 ### 4. Identify state elements
 
-Before writing RTL, list the registers or memories that carry state:
-
-- state registers such as `state_q`, `valid_o`, `count_q`, and pointers
-- memories such as FIFO storage
-- accepted-operation conditions such as `accept_input`, `accept_output`, `wr_do`, `rd_do`, or `advance`
-- data/control fields that must move or hold together
+List registers or memories that carry state: state registers, FIFO storage, accepted-operation conditions, data/control fields that must move together.
 
 ### 5. Write the cycle trace
 
-For FSM, FIFO, pipeline, ready/valid, or other stateful behavior, write a cycle trace using `references/cycle-trace-guidelines.md`.
-The trace must include pre-edge state, combinational condition, active-edge update, next visible state, and invariant.
-If the trace exposes an unspecified reset, stall, flush, or boundary case, ask or state a conservative assumption before RTL.
+Use `references/timing/cycle-trace-guidelines.md`. Include pre-edge state, combinational condition, active-edge update, next visible state, and invariant.
 
 ### 6. Choose a pattern
 
-Pick the safest known template:
-
-- counter / register slice / pulse logic
-- FSM
-- FIFO / skid buffer / pipeline stage
-- ready-valid adapter
-- arbiter
-- req/ack adapter
-- counter / event detector
-- CDC synchronizer wrapper
-
-Explain why the pattern fits. If more than one pattern is plausible, state the tradeoff using `references/tradeoff-guidance.md`.
+Pick the safest known template from `references/rtl/` or `references/patterns/`. Explain why it fits. If multiple patterns are plausible, state the tradeoff using `references/architecture/tradeoff-guidance.md`.
 
 ### 7. Generate RTL
 
-Write synthesizable code with:
+Before writing code, read the relevant pattern reference:
+- FSM → `references/rtl/fsm-examples.md`
+- FIFO → `references/rtl/fifo-examples.md` (use FWFT pattern for data-path FIFOs)
+- Pipeline → `references/rtl/pipeline-examples.md`
+- Handshake → `references/rtl/handshake-examples.md`
+- AXI → `references/axi-dma/axi-dma-channel-guidelines.md` or `references/axi-dma/axi-full-guidelines.md`
+- DMA → `references/axi-dma/dma-cdma-examples.md`
 
-- clear signal names
-- explicit reset behavior
-- one driver per signal
-- no inferred latches
-- simple control flow
-- Verilog-first style unless the user asks for SystemVerilog
-- one explicit `accept_input`, `accept_output`, `wr_do`, `rd_do`, or `advance` condition for each protocol movement
-- comments only where they clarify timing, boundary, or protocol intent
+Do not rely on memory or training data for style decisions. Read the reference, extract the rule, then write code that follows it.
 
-### 8. Generate verification help
+Before writing RTL, scan against `references/debug/bug-pattern-library.md`: match the module type and pattern category, state the risk and prevention before coding.
 
-Provide at least one of:
+Write synthesizable code following `references/rtl/coding-guidelines.md`: clear signal names, explicit reset, one driver per signal, no latches, Verilog-first style, two-process FSM, `*_q`/`*_d` suffixes.
 
-- a testbench skeleton
-- directed test list
-- assertions to add
-- waveform checkpoints
-- expected cycle-by-cycle behavior
+Apply power/timing/area rules from `references/design/power-timing-area.md`: clock-enable over gating (P1), memory access qualification (P5), bit-width discipline (A3), balanced operator trees (A1). For FPGA targets: DSP/BRAM/SRL inference patterns (A4, A5, P6).
 
-For nontrivial stateful logic, include at least one pass/fail check that protects the contract, not only a prose test idea.
-For queues, arbiters, adapters, multi-stage pipelines, or subsystems, include a compact verification matrix.
-When a fixture or testbench is available, prefer running `scripts/rtl_check.py` and use the failing signature as debug evidence.
+### 8. RTL self-review against skill constraints
 
-### 9. Review and iterate
+Before simulation, review the generated RTL against this checklist. Each item must be explicitly checked and marked pass/fail. For each FAIL item, fix before proceeding and state what was changed. For each ✅ item, cite the specific line numbers or signal names that satisfy the check — do not mark items as passed without evidence.
+
+**Handshake (cite `references/debug/bug-pattern-library.md` H1-H8):**
+- [ ] VALID holds until READY (no premature deassertion) — H1, H8
+- [ ] VALID not gated by non-protocol conditions (outstanding count, FIFO status, flow control) — H8
+- [ ] Payload stable while VALID high — H1
+- [ ] No combinational ready loop across modules — H2
+
+**Data path (cite DP1-DP5, F1):**
+- [ ] All error capture points traced to completion output — DP5, `references/architecture/integration-invariants.md`
+- [ ] Bit-slicing avoided when value can equal 2^n (use if/else) — DP4
+- [ ] WSTRB correctly computed for unaligned addresses — `references/axi-dma/axi-dma-channel-guidelines.md`
+- [ ] Data-path FIFOs use FWFT (combinational) output, NOT registered output — F1, `references/rtl/fifo-examples.md`
+
+**Naming (cite `references/timing/naming-guidelines.md`):**
+- [ ] All ports use `*_i`/`*_o` suffixes
+- [ ] All registered state uses `*_q` suffix
+- [ ] Combinational signals do NOT use `*_q` suffix
+- [ ] FIFO ops use `wr_do`/`rd_do` naming
+
+**RTL correctness (cite `references/rtl/correctness-rules.md`):**
+- [ ] Every reg/wire has exactly one driving source — E1
+- [ ] Every combinational block assigns defaults before conditional branches — E2
+- [ ] No implicit truncation — explicit part-selects on width mismatches — E3
+- [ ] `<=` in sequential blocks, `=` in combinational blocks, never mixed — E4
+- [ ] All combinational blocks use `always @(*)` — E5
+- [ ] All registers have explicit reset (or documented justification) — E6
+- [ ] No combinational feedback loops — E7
+- [ ] Every `.v` file starts with `` `default_nettype none `` — E8
+
+**FSM (cite C2, C3, SM1, SM2):**
+- [ ] All combinational blocks have default assignments — C3
+- [ ] FSM has default case → IDLE — C2
+- [ ] Two-process style for >3 states — `references/rtl/fsm-examples.md`
+- [ ] No multi-bit datapath `_d` assignments inside the FSM combinational block (`state_d` is exempt) — SM1
+- [ ] No second `always @(*)` block computing multi-bit `_d` values gated on state — SM2
+- [ ] All multi-bit register updates use synchronous `always @(posedge clk)` gated by single-bit enables from the FSM — `references/rtl/fsm-examples.md` pattern 5
+
+**Protocol (cite P4, P5, P9, P11, P12, P13, IHI0022E A3.3):**
+- [ ] Completion on B response, not last W beat — P4
+- [ ] WVALID holds until WREADY — P11
+- [ ] WVALID holds for entire burst (no mid-burst deassertion) — P12, IHI0022E A3.3.1
+- [ ] ARVALID/AWVALID hold until corresponding READY — P11, IHI0022E A3.3.1
+- [ ] VALID not dependent on READY (no combinational path) — IHI0022E A3.3.2
+- [ ] Write engine does NOT use sequential AW→W→B FSM — P13, use independent AW/W/B controllers
+- [ ] AW/W/B channels have independent valid/ready control — `references/axi-dma/axi-dma-channel-guidelines.md`
+- [ ] Data FIFO depth >= max burst length, or burst-ready gate on WVALID — P12
+- [ ] WVALID does NOT depend on FIFO empty/full state mid-burst — P12, `references/axi-dma/axi-dma-channel-guidelines.md` burst-ready gate pattern
+- [ ] 4KB boundary: `12'h1000`, not `12'h800` — `references/axi-dma/axi-dma-channel-guidelines.md`
+- [ ] WSTRB last beat: handle `last_offset == 0` (all bytes valid) — `references/axi-dma/axi-dma-channel-guidelines.md`
+
+**APB (if APB interface present, cite `references/bus/apb-guidelines.md`):**
+- [ ] PSEL asserted only in SETUP and ACCESS phases
+- [ ] PENABLE asserted only in ACCESS phase
+- [ ] PADDR/PWDATA/PWRITE latched in SETUP, held through ACCESS
+- [ ] PSLVERR mapped to upstream error response
+- [ ] PSEL deasserted between transactions
+- [ ] If APB slave uses registered PRDATA: bridge samples one cycle after PREADY=1
+
+**AXI-Stream (if AXI-Stream interface present, cite `references/axi-dma/axi-stream-guidelines.md`):**
+- [ ] TLAST propagated exactly on every beat
+- [ ] TKEEP propagated exactly on every beat
+- [ ] Payload stable while TVALID=1 and TREADY=0 — H1
+- [ ] TVALID not dependent on TREADY — A3.3.2
+- [ ] Backpressure propagation documented (combinational or registered)
+- [ ] Packet boundary behavior defined (state at TLAST)
+
+**CDC (if multiple clock domains, cite `references/synthesis/cdc-guidelines.md`):**
+- [ ] Multi-bit CDC uses gray code or handshake (not independent bit synchronization)
+- [ ] Synchronizer flip-flops marked with `(* ASYNC_REG = "TRUE" *)` attribute
+- [ ] Reset: async assertion, sync deassertion per destination domain
+- [ ] No combinational paths across clock domains
+
+**Integration:**
+- [ ] All per-channel errors OR'd into completion tracker — DP5
+- [ ] Outstanding counter saturation doesn't block drain — `references/architecture/integration-invariants.md`
+- [ ] Reset clears all valid-like outputs — R2
+- [ ] All module ports are referenced in the module body (no dead ports)
+- [ ] No dead modules (all instantiated modules are used; unused modules are deleted or documented as reference-only)
+- [ ] Completion signal style matches spec: pulse (1-cycle) for per-command done, level (sticky) for status — `references/timing/timing-contract-template.md`
+
+State the review result: PASS (all items checked) or FAIL (list items fixed).
+
+**Critical limitation:** This checklist verifies STRUCTURAL correctness only (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results). A design can pass all items and still produce wrong results. See bug-pattern P18 (CRC pipeline latency) and Crossbar project (routing logic bug) — both passed structural review but failed functional tests.
+
+### 8b. Functional verification (mandatory)
+
+**Structural review (Step 8) does NOT guarantee functional correctness.** After Step 8, always run at least one functional test with known inputs and expected outputs.
+
+**Minimum functional test requirements:**
+1. **Golden reference**: for computation modules (CRC, ECC, ALU), provide known input→output pairs from authoritative sources or manual calculation
+2. **Protocol compliance**: for bus interfaces, verify at least one complete transaction (write + read-back)
+3. **Boundary conditions**: test at least one edge case (empty, full, zero, max)
+4. **Determinism**: same input must produce same output across multiple runs
+
+**If functional tests fail after structural PASS:**
+- Do NOT claim the design is correct
+- Debug using first-divergent-cycle reasoning (simulation-loop.md Phase 4)
+- Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
+
+### 9. Generate verification and run simulation loop
+
+Provide at least one of: testbench skeleton, directed test list, assertions, waveform checkpoints, expected cycle-by-cycle behavior. For nontrivial stateful logic, include at least one pass/fail check. For queues, arbiters, adapters, multi-stage pipelines, or subsystems, include a compact verification matrix.
+
+For AXI designs, use `references/verification/axi-verification.md`: BFM tasks for driving/monitoring transactions, scoreboard for DMA data integrity, and AXI-specific functional coverage points. At minimum, provide the 10-test coverage-driven plan from that file.
+
+**Simulation loop (when tools are available):** Follow `references/verification/simulation-loop.md`:
+1. **Lint first:** `verilator --lint-only -Wall` — fix all errors before simulation
+2. **Compile:** `iverilog -g2012 -o sim.vvp <sources> <testbench>`
+3. **Simulate:** `timeout <sec> vvp sim.vvp` — parse output for PASS/FAIL/HANG
+4. **Analyze failures:** match against `references/debug/bug-pattern-library.md`, apply minimal fix
+5. **Re-review fix against Step 8 checklist:** before re-simulating, verify the fix does not violate skill constraints. Common violations during debug: adding `data_available` to WVALID (P12), using registered FIFO output to "fix" timing (F1), adding `_d` combinational signals (SM2), coupling read/write paths. If the fix violates a constraint, find an alternative fix that stays within the rules.
+6. **Re-simulate:** maximum 3 fix-and-rerun iterations
+7. **Report:** quote tool output, show what changed at each iteration, state residual issues
+
+The testbench must follow the output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`. This enables automated result parsing.
+
+If simulation tools are unavailable, state this explicitly and fall back to static self-review only. Do not claim simulation correctness without running a tool.
+
+### 10. Review and iterate
 
 If the user provides errors or waveforms, identify the likely cause, propose the minimal correction, and restate what must be rechecked.
 
-### 10. Verify timing against the contract and trace
+**After any RTL modification (simulation fix, user-requested change, optimization):** re-run the Step 8 self-review checklist on the changed files. Debug-driven fixes are the most common source of constraint violations — the pressure to "make it work" overrides the discipline to "make it correct." Common debug anti-patterns:
+- Adding `data_available` to WVALID to "fix" a hang (P12 violation)
+- Switching to registered FIFO output to "fix" data timing (F1 violation)
+- Adding a combinational `_d` block to "fix" counter logic (SM2 violation)
+- Coupling read/write burst-ready to "fix" ordering (anti-pattern)
+- Adding dead ports/modules "for future use" (integration violation)
 
-Before finalizing, check the RTL against the timing contract and cycle trace:
+### 11. Verify timing against the contract and trace
 
-- current-cycle behavior
-- next-cycle behavior
-- stall or hold behavior
-- reset release behavior
-- boundary behavior
-- trace invariants and verification checks
+Before finalizing, check RTL against the timing contract and cycle trace: current/next cycle behavior, stall/hold behavior, reset release, boundary behavior, trace invariants. If mismatch, fix before answering. State design maturity level and top residual risks from `references/verification/engineering-review-checklist.md`.
 
-If the implementation does not match the contract or trace, fix the contract, trace, or RTL before answering.
-For nontrivial work, state the design maturity level and top residual risks from `references/engineering-review-checklist.md`.
-If tool checks were not run, state which gates remain from `references/toolchain-closure-guidelines.md`.
+### 12. Sub-agent delegation
 
-## Common output format
+When delegating RTL work to sub-agents (parallel module generation, testbench writing, etc.), the sub-agent does not automatically load this skill. Without explicit rules, the sub-agent falls back to its training data — which produces the exact anti-patterns this skill exists to prevent (single-process FSMs, multi-bit values in FSM combinational blocks, mixed AW/W/B channels, wrong naming conventions).
 
-When the user asks for a design, prefer this structure:
+**Rule:** When spawning a sub-agent for RTL tasks, the prompt must include one of:
 
-1. **Assumptions**
-2. **Design contract**
-3. **State elements**
-4. **Cycle trace**
-5. **RTL**
-6. **Verification notes**
-7. **Risks / corner cases**
-8. **Review status**
+1. **Skill loading directive:** Tell the sub-agent to load this skill first (e.g., "Before writing any code, read and follow the rules in `<path>/SKILL.md` and the references it points to").
 
-When the user asks for review or debug instead of new RTL, prefer this structure:
+2. **Inline critical rules:** If the sub-agent cannot load the skill, include the key constraints directly in the prompt. At minimum, these rules must be present:
+   - Two-process FSM style (state register in `always @(posedge clk)`, next-state + outputs in `always @(*)`)
+   - Single-bit control rule: FSM combinational block assigns only single-bit enables and `state_d`. Multi-bit registers (addr, counter, len, data, wstrb) updated in synchronous blocks gated by those enables
+   - Naming: `*_i`/`*_o` ports, `*_q`/`*_d` registered state, `wr_do`/`rd_do` for FIFO ops
+   - AXI channel separation: AW/W/B independent valid/ready, RD/WR command paths independent
+   - No `always @(*)` block computing multi-bit `_d` values gated on state (the "shadow datapath" anti-pattern)
 
-1. **Observed evidence**
-2. **Likely contract violation**
-3. **Minimal fix**
-4. **What to recheck**
-5. **Residual uncertainty**
+3. **Post-generation review:** After the sub-agent delivers RTL, run the self-review checklist (step 8) against its output before accepting it. Fix violations before integrating.
 
-When the user asks for a subsystem or full system, prefer this structure:
+The prompt template for sub-agents:
+```
+You are writing RTL for module `<module_name>`. Before writing code:
+1. Read `<skill_path>/SKILL.md` and follow its workflow.
+2. Read the interface contract at `<contract_path>` — pay special attention to port widths, signal semantics, and inter-module handshake rules.
+3. Read the relevant pattern reference from `references/rtl/` or `references/axi-dma/`.
+4. Read `references/debug/bug-pattern-library.md` SM1, SM2 for the single-bit control rule.
+5. After writing RTL, self-review against the checklist in SKILL.md step 8.
+6. Verify that your module's port widths and signal semantics MATCH the interface contract exactly.
+```
 
-1. **Assumptions**
-2. **System contract**
-3. **Submodule decomposition**
-4. **Interface contracts**
-5. **Integration invariants**
-6. **Local cycle traces**
-7. **Implementation sequence**
-8. **Verification strategy**
-9. **Residual risks**
+**Critical additions for multi-module projects:**
+- Sub-agents MUST read the interface contract file — not just the skill
+- Port widths must be derived from the SAME parameters as the driving module
+- Byte-to-beats conversions must use the ceiling division formula, not bit extraction
+- Document whether `cmd_len_i` (or similar) is in bytes or beats — ambiguity causes integration bugs
 
-## Coding guidelines
+**Design request:** Assumptions → Design contract → State elements → Cycle trace → RTL → Verification notes → Risks/corner cases → Review status.
 
-- Keep combinational blocks fully assigned.
-- Keep sequential blocks edge-triggered and easy to scan.
-- Prefer one reset style per module.
-- Use parameters for widths and depths when appropriate.
-- Preserve protocol semantics over micro-optimizations.
-- If a feature is ambiguous, surface the ambiguity rather than guessing.
-- Avoid mixed blocking/nonblocking style in stateful logic.
-- Name protocol conditions once and reuse them.
-- Keep data, valid, sideband, and error fields aligned through every stall or flush.
-- State whether FIFO memory read data is registered or combinational.
+**Review/debug request:** Observed evidence → Likely contract violation → Minimal fix → What to recheck → Residual uncertainty.
 
-## High-value design patterns
-
-### FSM
-
-Use when the logic is control-heavy and the behavior is stateful.
-Include:
-
-- state list
-- transition conditions
-- outputs per state
-- illegal-state handling if needed
-
-### FIFO / buffer
-
-Use when the block absorbs timing mismatch or decouples producer and consumer.
-Include:
-
-- occupancy tracking
-- full/empty behavior
-- almost-full/empty only if requested
-- write/read conflict behavior
-
-### Handshake adapter
-
-Use when converting between different ready/valid or request/ack style interfaces.
-Include:
-
-- ordering guarantees
-- backpressure behavior
-- data stability rules
-- throughput assumptions
-
-### Pipeline stage
-
-Use when the goal is timing closure or controlled latency.
-Include:
-
-- stage latency
-- bypass or stall behavior
-- bubble handling
-- flush/reset policy
+**Subsystem/full system:** Assumptions → System contract → Submodule decomposition → Interface contracts → Integration invariants → Local cycle traces → Implementation sequence → Verification strategy → Residual risks.
 
 ## Debugging rules
 
-When a user shares a failure, look for:
-
-- reset polarity mismatch
-- missing default assignments
-- handshake deadlock or premature valid/ready deassertion
-- off-by-one counter bugs
-- state machine missing transition
-- data/valid misalignment across pipeline stages
-- combinational feedback or multiple drivers
+When a user shares a failure:
+1. Match the symptom against `references/debug/bug-pattern-library.md` patterns.
+2. If a pattern matches, cite the pattern ID, root cause, and minimal fix.
+3. If no pattern matches, fall back to first-divergent-cycle reasoning.
 
 ## Testbench guidance
 
-Generate a testbench that is small but targeted:
+Generate a testbench that is small but targeted: reset sequence, one normal transaction, one backpressure case, one boundary case, one error or corner case if relevant. A minimal testbench needs a pass/fail signal. Prefer `$fatal`/error counters over waveform-only stimulus.
 
-- reset sequence
-- one normal transaction
-- one backpressure case
-- one boundary case
-- one error or corner case if relevant
-
-If the user wants deeper validation, suggest assertions or coverage ideas, but keep the first pass lightweight.
-
-A minimal testbench is useful only if it has a pass/fail signal. Prefer `$fatal`/error counters or explicit mismatch reporting over waveform-only stimulus.
+**Combinational output timing:** Bus protocol combinational outputs (PSLVERR, HRDATA, PREADY) are only valid DURING the transaction, not after. Check with `#delay` after the enabling signal takes effect (e.g., after `penable<=1` for APB), NOT after the transaction completes. See `references/bus/apb-guidelines.md` for the correct test pattern.
 
 ## If the request is underspecified
 
-Ask only the questions that block correct RTL:
-
-- Is the interface ready/valid, req/ack, or something else?
-- What is the reset polarity and sync style?
-- What is the required latency or throughput?
-- What should happen on overflow, underflow, or invalid input?
-- Are there CDC or multi-clock constraints?
-
-If the user asks for CDC, async FIFO, AXI, or another complex protocol without enough constraints, do not generate a full design from guesswork. Ask for the protocol subset, clock relationship, reset strategy, throughput target, and verification expectations.
+Use `references/architecture/requirement-extraction-template.md` to structure the ambiguity: classify every design dimension, document assumptions, and present concrete choices to the user. Ask only the questions that block correct RTL: interface style, reset polarity, latency/throughput, overflow/underflow behavior, CDC constraints. Do not generate a full design from guesswork for complex protocols.
 
 ## Skill success criteria
 
-This skill is working well when it can:
-
-- produce readable, synthesizable RTL for standard patterns,
-- explain timing behavior without hand-waving,
-- surface missing requirements early,
-- and pair code with a practical verification plan.
+This skill is working well when it can produce readable, synthesizable RTL for standard patterns, explain timing behavior without hand-waving, surface missing requirements early, and pair code with a practical verification plan.
