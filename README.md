@@ -10,6 +10,7 @@ General-purpose LLMs can generate syntactically valid Verilog, but they routinel
 - Guess FIFO boundary semantics and handshake policies instead of asking
 - Mix blocking/nonblocking assignments or omit combinational defaults
 - Treat bus protocol knowledge as text rather than cycle-level behavior
+- Generate code that passes structural review but fails functional tests
 
 This skill fixes those problems by encoding the engineering discipline that experienced RTL engineers follow internally, then making it explicit and mandatory for the agent.
 
@@ -23,8 +24,8 @@ Given a digital front-end design request, the skill forces the agent through a s
 4. Identify state elements (registers, memories, movement conditions)
 5. Write a cycle trace (pre-edge state, combinational condition, active-edge update, next visible state)
 6. Select a design pattern (FSM, FIFO, pipeline, arbiter, etc.)
-7. Generate synthesizable RTL (Verilog-first, conservative defaults)
-8. Generate verification plan (testbench skeleton, directed tests, assertions)
+7. Generate synthesizable RTL (Verilog-first, conservative defaults, bug-pattern scan)
+8. **Functional verification (mandatory)**: run tests with known inputs and expected outputs
 9. Engineering review (maturity level, residual risks)
 10. Verify RTL against the contract and trace
 
@@ -34,53 +35,29 @@ For large systems (DMA engines, bus bridges, multi-channel controllers), the ski
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # The skill definition (entry point)
+├── SKILL.md                          # The skill definition (343 lines)
+├── SKILL_CHANGELOG.md                # Iteration history (480+ lines)
 ├── README.md                         # This file
-├── references/                       # 60 curated knowledge documents
-│   ├── authority-synthesis.md        # How authoritative sources become rules
-│   ├── timing-semantics.md           # Cycle-level timing language
-│   ├── timing-contract-template.md   # Contract template for all designs
-│   ├── cycle-trace-guidelines.md     # How to write cycle traces
-│   ├── rtl-writing-guidelines.md     # RTL coding rules
-│   ├── rtl-patterns.md               # Pattern catalog and selection logic
-│   ├── naming-guidelines.md          # Signal naming conventions
-│   ├── protocol-authority-map.md     # Maps protocols to their official specs
-│   ├── axi-full-guidelines.md        # AXI4 full master/slave rules
-│   ├── axi-lite-guidelines.md        # AXI-Lite register block rules
-│   ├── axi-dma-channel-guidelines.md # DMA channel design rules
-│   ├── axi-dma-planning-example.md   # DMA architecture planning walkthrough
-│   ├── apb-guidelines.md             # APB protocol rules
-│   ├── ahb-lite-guidelines.md        # AHB-Lite protocol rules
-│   ├── axi-stream-guidelines.md      # AXI-Stream protocol rules
-│   ├── cdc-guidelines.md             # Clock domain crossing safety
-│   ├── hierarchical-design-guidelines.md  # Large system decomposition
-│   ├── staged-bringup-guidelines.md  # Staged implementation sequence
-│   ├── engineering-review-checklist.md    # Design maturity assessment
-│   ├── verification-matrix-template.md    # Verification planning template
-│   ├── toolchain-closure-guidelines.md    # Signoff gate definitions
-│   ├── tradeoff-guidance.md          # Microarchitecture tradeoff framework
-│   ├── ...                           # 38 more pattern/example/guideline files
-│   └── frame-assembler-examples.md
+├── references/                       # 158 curated knowledge documents
+│   ├── reference-index.md            # Task-to-reference mapping
+│   ├── timing/                       # Timing semantics, contracts, naming, protocols
+│   ├── architecture/                 # Hierarchy, system contracts, integration invariants
+│   ├── axi-dma/                      # AXI full/Lite/Stream, DMA channel guidelines
+│   ├── bus/                          # APB, AHB-Lite protocol rules
+│   ├── rtl/                          # Coding guidelines, FSM/FIFO/pipeline/handshake examples
+│   ├── patterns/                     # Arbiter, credit-based, CRC, ECC, width converter, etc.
+│   ├── synthesis/                    # CDC, constraints, synthesis guidance
+│   ├── verification/                 # TB examples, assertions, simulation loop, UVM
+│   ├── debug/                        # Bug pattern library (18 patterns: P1-P18)
+│   ├── design/                       # Power/timing/area rules, design heuristics
+│   ├── project/                      # Brownfield, large module guidance
+│   └── advanced/                     # Low-power, DFT, UVM, physical awareness
 ├── evals/
-│   ├── evals.json                    # 44 evaluation prompts with 250+ assertions
+│   ├── evals.json                    # 59 evaluation prompts with 250+ assertions
 │   ├── benchmark.json                # Benchmark metadata and dimension coverage
 │   ├── task_benchmark.json           # 12 engineer-level A/B comparison tasks
-│   ├── task-benchmark.md             # Benchmark workflow documentation
 │   ├── fixtures/                     # 4 bug fixtures for debug evaluation
-│   │   ├── ready_valid_stall_bug/    # valid/data changes during downstream stall
-│   │   ├── fifo_boundary_bug/        # write accepted while FIFO is full
-│   │   ├── fsm_reset_release_bug/    # FSM stuck after reset deassertion
-│   │   └── pipeline_stall_bug/       # pipeline data advances during stall
-│   └── trials/                       # 19 executable RTL + testbench trials
-│       ├── credit_counter_trial/
-│       ├── rr_arbiter_trial/
-│       ├── skid_buffer_trial/
-│       ├── axi_read_tracker_trial/
-│       ├── axi_write_tracker_trial/
-│       ├── dma_burst_planner_trial/
-│       ├── vfs_sw_hw_comm_hierarchy_trial/
-│       ├── multi_bank_scheduler_trial/
-│       └── ... (11 more)
+│   └── trials/                       # 23 executable RTL + testbench trials
 └── scripts/
     ├── skill_static_check.py         # Package health checks
     ├── eval_benchmark_check.py       # Eval dimension coverage checker
@@ -91,11 +68,45 @@ digital-front-end-skill/
     └── grade_task_benchmark.py       # Grade outputs with deterministic assertions
 ```
 
-## Design philosophy
+## Key capabilities
 
 ### Contract-first, always
 
-The agent must write a timing contract before any RTL. This is not a suggestion -- the skill's workflow makes it structurally impossible to skip. The contract includes clock domains, reset style, handshake semantics, latency, stall behavior, flush behavior, and boundary policy.
+The agent must write a timing contract before any RTL. This is not a suggestion — the skill's workflow makes it structurally impossible to skip. The contract includes clock domains, reset style, handshake semantics, latency, stall behavior, flush behavior, and boundary policy.
+
+### Functional verification is mandatory
+
+Structural self-review (Step 8) checks naming, FSM style, protocol compliance, and reset — but it does NOT verify functional correctness. Step 8b requires running functional tests with known inputs and expected outputs. This addresses the fundamental limitation that a design can pass all structural checks and still produce wrong results.
+
+### 18 bug patterns with authoritative sources
+
+The bug pattern library encodes known RTL failure modes discovered through 12 real projects:
+
+| Category | Patterns | Examples |
+|----------|----------|---------|
+| Handshake (H1-H8) | 8 | Payload stability, ready loops, valid gating |
+| Protocol (P1-P13) | 13 | AXI channel separation, WVALID burst, APB timing |
+| Counter (P14) | 1 | Auto-reload + trigger race |
+| Status Register (P15-P17) | 3 | Dedicated clear, release, capture vs clear priority |
+| Pipeline (P18) | 1 | Combinational output reads stale registered value |
+| State Machine (SM1-SM2) | 2 | Shadow datapath, multi-bit _d in FSM |
+| Data Path (DP1-DP5) | 5 | Width converter, bit-slicing, error paths |
+| FIFO (F1-F2) | 2 | FWFT output, registered output race |
+| CDC (D1-D2) | 2 | Gray code, ASYNC_REG |
+
+### Synthesis awareness
+
+RTL is verified with Yosys 0.45 open-source synthesis. Patterns include:
+- Clock-enable over manual clock gating (P1)
+- Casez priority encoder for balanced decode trees (A1)
+- $clog2 for parameterized width discipline (A3)
+- No latch inference from incomplete combinational blocks (E2)
+
+### Multi-module integration
+
+Sub-agent delegation with interface contracts (`interface_contract.md`) ensures port width consistency across independently generated modules.
+
+## Design philosophy
 
 ### Refuse to guess
 
@@ -113,99 +124,6 @@ Multi-bit clock domain crossings cannot be fixed by "just add two flops per bit.
 
 Default output is plain Verilog, not SystemVerilog. This minimizes synthesis tool compatibility issues. SystemVerilog features are used only when explicitly requested or when the task genuinely requires them (e.g., SVA assertions).
 
-## Evaluation framework
-
-The project includes a two-layer evaluation system:
-
-### Layer 1: Prompt coverage (evals.json)
-
-44 prompts covering 14 quality dimensions:
-
-| Dimension | What it tests |
-|-----------|---------------|
-| module_timing | Leaf RTL timing contracts, state elements, cycle traces |
-| protocol_axi_full | AXI full channel, burst, outstanding, response semantics |
-| protocol_axi_lite | AXI-Lite register blocks and small slaves |
-| protocol_axi_dma | DMA ordering, response tracking, completion, slice planning |
-| protocol_apb | APB setup/access phases, wait states, byte strobes |
-| protocol_ahb_lite | AHB-Lite address/data phase alignment |
-| protocol_axi_stream | AXI-Stream payload, sideband, backpressure |
-| system_hierarchy | Large-system decomposition, interface contracts, invariants |
-| verification_closure | Verification matrices, tool evidence, signoff discipline |
-| debug_review | First-divergent-cycle reasoning and protocol bug review |
-| cdc_safety | CDC refusal, safe pattern selection |
-| project_adaptation | Existing repo convention adaptation |
-| synthesis_timing | Synthesis inference, constraints, timing closure awareness |
-| specialized_rtl_patterns | Credits, retry buffers, width converters, ECC, multi-bank |
-
-Each prompt has 5-7 deterministic assertions checked by regex matching.
-
-### Layer 2: Engineer-level task benchmark (task_benchmark.json)
-
-12 tasks that simulate real RTL development, with A/B comparison:
-- **with_skill**: agent runs with `digital-front-end-skill` loaded
-- **baseline**: agent runs without the skill
-
-Grading is automated by `scripts/grade_task_benchmark.py`, producing structured `benchmark.md` and `benchmark.json` reports.
-
-### Executable trials
-
-19 trials contain synthesizable RTL + testbenches + manifest files. Each can be compiled and simulated with Icarus Verilog via `scripts/rtl_check.py`. This provides hard evidence that generated code passes simulation, not just that it looks correct.
-
-### Bug fixtures
-
-4 fixtures encode real RTL bug patterns (stall hold violation, boundary policy error, reset release issue, pipeline data corruption). Each has a manifest specifying expected failure signatures, used to evaluate the agent's debug capability.
-
-## Usage
-
-### As a Claude Code skill
-
-Place the `digital-front-end-skill` directory under your project and reference it in your CLAUDE.md or load it via the skill mechanism. The agent will automatically follow the contract-first workflow for any RTL design request.
-
-### Running static checks
-
-```bash
-python scripts/skill_static_check.py
-```
-
-Validates: evals JSON schema, reference files listed in SKILL.md, banned legacy terminology (fire/push/pop), fixture manifests.
-
-### Running eval benchmark coverage
-
-```bash
-python scripts/eval_benchmark_check.py
-```
-
-Checks that all 14 dimensions have sufficient eval coverage and that executable trials exist for required patterns.
-
-### Running executable trials
-
-```bash
-python scripts/rtl_check.py --case evals/trials/rr_arbiter_trial
-```
-
-Compiles and simulates the trial with Icarus Verilog, then checks the output against the manifest's expected result.
-
-### Running all trials
-
-```bash
-python scripts/run_all_trials.py
-```
-
-Batch-runs all 19 executable trials and reports pass/fail status.
-
-### Running the task benchmark
-
-```bash
-# Initialize iteration
-python scripts/init_task_benchmark.py --iteration 1
-
-# (Run agent with and without skill, save outputs)
-
-# Grade the iteration
-python scripts/grade_task_benchmark.py --iteration-dir ../digital-front-end-skill-workspace/iteration-1
-```
-
 ## Protocol coverage
 
 All protocol-specific rules are grounded in official specifications:
@@ -217,8 +135,6 @@ All protocol-specific rules are grounded in official specifications:
 | APB | Arm IHI 0024 | apb-guidelines |
 | AHB-Lite | Arm IHI 0033 | ahb-lite-guidelines |
 | AXI4-Stream | Arm IHI 0051 | axi-stream-guidelines |
-
-The `references/protocol-authority-map.md` file documents the mapping from each protocol to its authoritative source and the local reference files derived from it.
 
 ## Design pattern catalog
 
@@ -245,16 +161,52 @@ The skill covers 18 reusable RTL patterns:
 | CAM | Content-addressable lookup |
 | AXI DMA slice | Descriptor parsing, burst planning, completion tracking |
 
-## Maturity levels
+## Validated projects (12)
 
-The skill defines four design maturity levels to prevent overclaiming:
+| Project | Type | Tests | Key findings |
+|---------|------|-------|-------------|
+| CDMA x6 | AXI DMA | Multi-round | AW/W/B channel separation, 6 rounds |
+| Timer | Counter | 16/16 | P14-P17: trigger race, status register |
+| INTC | Interrupt | 12/12 | PSLVERR scope, combinational output timing |
+| CRC | Data path | 7/7 | P18: pipeline latency, functional verification |
+| Async FIFO | CDC | 10/10 | CDC guidelines quality verified |
+| AHB-Lite | Bus | 11/11 | Read data timing, simulation loop |
+| DMA System | Multi-module | 1/2 | Interface contracts, SVA compatibility |
+| UART | Multi-module | 6/6 | Interface contract verified |
+| Crossbar | Parameterized | 0/4 | Structural vs functional gap |
+| Arbiter | Arbitration | 6/6 | Synthesis awareness, mask reset bug |
+| Clock Gate | Low-power | 8/8 | P1 rule verified, zero defects |
+| SPI Master | Complex FSM | 5/5 | 6-state FSM, Yosys synthesis |
 
-- **Sketch**: Behavior is plausible, but contracts and checks are incomplete.
-- **Reviewable RTL**: Contract, cycle trace, RTL, and directed checks exist.
-- **Integration-ready RTL**: Interfaces, reset, error, backpressure, and invariants are checked.
-- **Signoff candidate**: Lint, CDC, simulation, formal/coverage, synthesis, and timing risks are addressed by project tools.
+## Usage
 
-The agent is required to state the maturity level and top residual risks before finalizing any nontrivial design.
+### As a Claude Code skill
+
+Place the `digital-front-end-skill` directory under your project and reference it in your CLAUDE.md or load it via the skill mechanism. The agent will automatically follow the contract-first workflow for any RTL design request.
+
+### Running static checks
+
+```bash
+python scripts/skill_static_check.py
+```
+
+### Running eval benchmark coverage
+
+```bash
+python scripts/eval_benchmark_check.py
+```
+
+### Running executable trials
+
+```bash
+python scripts/rtl_check.py --case evals/trials/rr_arbiter_trial
+```
+
+### Running all trials
+
+```bash
+python scripts/run_all_trials.py
+```
 
 ## License
 
