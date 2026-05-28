@@ -91,6 +91,14 @@ end
 
 **First divergent cycle:** the cycle where `valid_o && !ready_i` and `data_o` changes value on the next clock edge.
 
+**VCD detection:**
+```bash
+python scripts/vcd_extract.py dump.vcd --signals valid_o,ready_i,data_o --range 0:100000
+# Look for: valid_o=1, ready_i=0, then data_o changes on next line
+# Or: find transitions of data_o, then check if valid_o=1 && ready_i=0 at that time
+```
+Manual VCD check: grep for the signal ID of `data_o`, find value changes, then cross-reference `valid_o` and `ready_i` at the same timestamp.
+
 **Prevention assertion:**
 ```systemverilog
 property p_payload_stable_under_stall;
@@ -805,6 +813,14 @@ assign done = all_w_sent && (outstanding_w == 0) && b_valid && b_ready;
 ```
 
 **First divergent cycle:** the cycle after the last W beat is accepted — check whether done asserts before B arrives.
+
+**VCD detection:**
+```bash
+python scripts/vcd_extract.py dump.vcd --signals wvalid,wready,wlast,bvalid,bready,done
+# Find the timestamp where WLAST fires (wvalid=1, wready=1, wlast=1)
+# Check if 'done' asserts at the same timestamp or before bvalid=1, bready=1
+```
+If `done` goes high before `bvalid=1 && bready=1`, this pattern is violated.
 
 **Prevention assertion:**
 ```systemverilog
@@ -1888,6 +1904,12 @@ always @(posedge clk) begin
 end
 ```
 
+**VCD detection:**
+```bash
+python scripts/vcd_extract.py dump.vcd --find-violation valid-drop --signals bvalid,bready
+```
+If any violation found (bvalid drops while bready=0), this pattern is triggered.
+
 **Prevention assertion:**
 ```systemverilog
 assert property (@(posedge clk) bvalid && !bready |-> ##1 bvalid);
@@ -1958,6 +1980,15 @@ end
 
 **First divergent cycle:** the cycle where WVALID was high on the previous edge but is now low, while WLAST has not been asserted. Check waveform: WVALID high → low without WLAST = violation.
 
+**VCD detection:**
+```bash
+python scripts/vcd_extract.py dump.vcd --signals wvalid,wlast,wready
+# Find all wvalid transitions: 1->0
+# For each 1->0 transition, check if wlast was 1 at the same timestamp
+# If wlast=0 when wvalid drops, this is a mid-burst violation
+```
+Manual check: grep VCD for WVALID signal ID, find `0<wvalid_id>` lines, then check WLAST value at same timestamp.
+
 **Prevention assertion:**
 ```systemverilog
 // WVALID must not deassert mid-burst (before WLAST)
@@ -2015,6 +2046,15 @@ endcase
 3. B counter: `b_outstanding_q`, increments on AW fire, decrements on B fire, never blocks AW or W
 
 **First divergent cycle:** the cycle where S_BRESP is active and a new burst command is available in the FIFO but cannot be accepted because the FSM is waiting for B. Check: `cmd_valid && !cmd_ready && state_q == S_BRESP`.
+
+**VCD detection:**
+```bash
+python scripts/vcd_extract.py dump.vcd --protocol axi-write
+# Look for: sequential AW→W→B pattern where next AW only appears AFTER B response
+# Independent controllers show overlapping: AW1, AW2, W1, W2, B1, B2
+# Sequential FSM shows: AW1, W1, B1, AW2, W2, B2 (no overlap)
+```
+Check if `awvalid` can assert while `bvalid` is pending (outstanding > 0). If AW only appears after B completes, the channels are coupled.
 
 **Prevention assertion:**
 ```systemverilog
@@ -2420,6 +2460,14 @@ end
 
 **First divergent cycle:** the cycle where READY arrives but `can_send_i` is low, causing the handshake to miss.
 
+**VCD detection:**
+```bash
+python scripts/vcd_extract.py dump.vcd --find-violation valid-drop --signals valid_o,ready_i
+# Then check if can_send_i was low at the violation timestamp
+python scripts/vcd_extract.py dump.vcd --signals can_send_i --range <violation_time>:<violation_time+10>
+```
+Look for: `valid_o=1, ready_i=1` but FSM stays in same state (no handshake completion). This indicates a non-protocol condition blocked the handshake.
+
 **Prevention assertion:**
 ```systemverilog
 // VALID must not deassert without a completed handshake
@@ -2583,11 +2631,65 @@ assert property (@(posedge clk_i)
 
 ---
 
+## Verification blind spot patterns
+
+### V1: Structural PASS but functional FAIL
+
+**Category:** verification
+**Frequency:** high (3 of 19 trial projects)
+**Applies to:** any module where Step 8 structural review passes but functional tests are absent or insufficient
+
+**Source:** CRC project (2026-05-23): 66 checklist items PASS, single-beat CRC output = 0. Crossbar project: routing logic broken. DMA project: transfer never completed.
+
+**Symptom:** Step 8 self-review reports PASS for all items. Module compiles and lint passes. But simulation with known inputs produces wrong outputs, zero outputs, or no output at all.
+
+**Root cause:** The Step 8 checklist verifies structural correctness (naming, FSM style, protocol compliance, reset). It does NOT verify that the module produces correct output values. A module can have perfect naming, correct FSM style, compliant protocol, and proper reset — yet compute the wrong result because of a datapath logic error.
+
+**Trigger conditions:**
+- Module has computation logic not covered by structural checks
+- Module has state transitions that are syntactically correct but semantically wrong
+- Module has pipeline latency causing stale output (see P18)
+- Module has routing/mux logic selecting the wrong source
+- Step 8 checklist passes but no functional test was run
+
+**Detection method:** After Step 8, always run at least one golden reference test:
+- Computation modules: known I/O pairs from authoritative sources (IEEE 802.3 for CRC, Hsiao paper for ECC)
+- Data movement modules: end-to-end data integrity scoreboard
+- Protocol modules: write-readback verification
+- Stateful modules: invariant checking (one-hot, credit bounds, counter overflow)
+- Pipeline modules: output latency verification
+
+See `references/verification/golden-reference-guide.md` for the full methodology and testbench templates.
+
+**Bug code pattern (example — CRC pipeline):**
+```verilog
+// BUG: structural checks PASS, but crc_out_q captures stale crc_q
+wire crc_out_load = (accept_in && tlast);  // fires same cycle as crc_en
+always @(posedge clk_i) begin
+    if (crc_en_i)    crc_q <= crc_next;     // NBA: updates NEXT cycle
+    if (crc_out_load) crc_out_q <= crc_val;  // reads OLD crc_q (stale!)
+end
+```
+
+**Correct approach (golden reference catches this):**
+```verilog
+// In testbench: send single-beat data, check CRC output
+// Golden reference: CRC-8 of 0xAB = 0x58 (from IEEE 802.3 polynomial)
+// If DUT outputs 0x00 (INIT_VALUE) instead of 0x58, P18 bug confirmed
+check_golden(8'hAB, 8'h58, "crc8_single_beat");
+```
+
+**Prevention:** Add golden reference checks to the testbench before claiming the design is correct. A design that passes structural review but has no functional test is at maturity level "Structural Sketch", not "Reviewable RTL".
+
+**Regression:** For each module type, include at least one golden reference test that verifies output values, not just structural properties.
+
+---
+
 ## Self-review limitation rule
 
-**Important:** The Step 8 self-review checklist checks STRUCTURAL correctness (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results, data integrity).
+**Important:** The Step 8 self-review checklist checks STRUCTURAL correctness (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results, data integrity). See V1 above for the full pattern.
 
-**Rule:** After structural self-review, always run a functional test with known inputs and expected outputs. A design can pass all checklist items and still produce wrong results. The checklist catches style violations; simulation catches logic bugs.
+**Rule:** After structural self-review, always run a functional test with known inputs and expected outputs using the golden reference methodology (`references/verification/golden-reference-guide.md`). A design can pass all checklist items and still produce wrong results. The checklist catches style violations; simulation catches logic bugs.
 
 ---
 

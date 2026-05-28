@@ -229,23 +229,43 @@ Before simulation, review the generated RTL against this checklist. Each item mu
 - [ ] No dead modules (all instantiated modules are used; unused modules are deleted or documented as reference-only)
 - [ ] Completion signal style matches spec: pulse (1-cycle) for per-command done, level (sticky) for status — `references/timing/timing-contract-template.md`
 
+**Engineering intuition (cite `references/design/engineering-intuition-checklist.md`; automated via `scripts/rtl_complexity_check.py`):**
+- [ ] No `always @(*)` block exceeds 50 lines — C1 (RMM §7.3)
+- [ ] No if-else nesting exceeds 3 levels — C2 (RMM §7.4)
+- [ ] No single module exceeds 300 lines without decomposition — C3 (RMM §7.2)
+- [ ] Combinational depth from input to output < 7 gate levels — D1 (Synopsys DC)
+- [ ] No wide comparator (>32-bit) on critical path without pipelining — D2 (UG901)
+- [ ] No register array > 64 entries without RAM inference — A1 (UG901, Intel UG-20136)
+- [ ] No hard-coded constants that should be parameters — A3 (RMM §3.3)
+
 State the review result: PASS (all items checked) or FAIL (list items fixed).
 
 **Critical limitation:** This checklist verifies STRUCTURAL correctness only (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results). A design can pass all items and still produce wrong results. See bug-pattern P18 (CRC pipeline latency) and Crossbar project (routing logic bug) — both passed structural review but failed functional tests.
 
 ### 8b. Functional verification (mandatory)
 
-**Structural review (Step 8) does NOT guarantee functional correctness.** After Step 8, always run at least one functional test with known inputs and expected outputs.
+**Structural review (Step 8) does NOT guarantee functional correctness.** After Step 8, always run at least one functional test with known inputs and expected outputs. See bug pattern V1 — "Structural PASS but functional FAIL."
+
+**Golden reference methodology** (see `references/verification/golden-reference-guide.md`):
+
+| Module type | Golden reference strategy | Example |
+|-------------|--------------------------|---------|
+| Computation (CRC, ECC, ALU) | Known I/O pairs from authoritative source | CRC-32 of `0x00000000` = `0x2144DF1C` |
+| Algorithm (variable input) | Software reference model (independent function) | LFSR iteration in testbench function |
+| Register block | Write-readback scoreboard | Write `0xDEADBEEF` to offset `0x10`, read back |
+| Data movement (DMA, FIFO, converter) | End-to-end data integrity scoreboard | Send pattern, verify output matches input |
+| Stateful control (arbiter, counter) | Invariant checking | `$onehot0(grant_o)`, credit count bounds |
+| Pipeline/latency | Output latency verification | Input cycle vs output cycle comparison |
 
 **Minimum functional test requirements:**
-1. **Golden reference**: for computation modules (CRC, ECC, ALU), provide known input→output pairs from authoritative sources or manual calculation
+1. **Golden reference**: at least one test per module type from the table above
 2. **Protocol compliance**: for bus interfaces, verify at least one complete transaction (write + read-back)
 3. **Boundary conditions**: test at least one edge case (empty, full, zero, max)
 4. **Determinism**: same input must produce same output across multiple runs
 
 **If functional tests fail after structural PASS:**
 - Do NOT claim the design is correct
-- Debug using first-divergent-cycle reasoning (simulation-loop.md Phase 4)
+- Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
 - Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
 
 ### 9. Generate verification and run simulation loop
@@ -266,6 +286,22 @@ For AXI designs, use `references/verification/axi-verification.md`: BFM tasks fo
 The testbench must follow the output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`. This enables automated result parsing.
 
 If simulation tools are unavailable, state this explicitly and fall back to static self-review only. Do not claim simulation correctness without running a tool.
+
+**Synthesis feedback (after simulation passes):** When yosys is available and simulation confirms functional correctness, run synthesis to find structural issues that simulation cannot detect:
+
+```bash
+yosys -p "read_verilog -sv <sources>; synth -top <module>; check -assert; stat; ltp" 2>&1
+```
+
+Check for:
+- **Latch inference** (`$_DLATCH_*` in cell list) — always a bug in synchronous design (E2)
+- **Combinational loops** (loop warnings in ltp output) — check if real (E7) or false positive (feedback through registers)
+- **Critical path length** (ltp length) — target < 25 gates for 100MHz
+- **Cell count** — compare against expectations; unexpectedly high count may indicate dead logic
+
+See `references/verification/synthesis-feedback-guide.md` for the full methodology and `scripts/yosys_extract.py` for automated report extraction.
+
+Fix synthesis issues, then **re-simulate** to confirm fixes don't break functionality. Report both: simulation PASS + synthesis clean.
 
 ### 10. Review and iterate
 

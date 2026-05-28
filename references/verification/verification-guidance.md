@@ -80,6 +80,24 @@ For any nontrivial module (FSM, FIFO, protocol adapter, DMA channel, arbiter):
 
 Insufficient test coverage is a common reason for undetected RTL bugs. A design that passes 3 basic tests but lacks boundary and error coverage is still at maturity level "Sketch", not "Reviewable RTL".
 
+## Golden reference tier
+
+Beyond directed tests, add golden reference checks for functional correctness:
+
+| Tier | What it checks | When required | Example |
+|------|---------------|---------------|---------|
+| **T1: Structural** | Lint, naming, FSM style | Always (Step 8) | verilator --lint-only |
+| **T2: Directed** | Happy path, boundary, stall | Always (Step 9) | 5+ directed tests |
+| **T3: Golden reference** | Output values against known-good | Always (Step 8b) | CRC I/O pairs, register readback |
+| **T4: Scoreboard** | End-to-end data integrity | Data movement modules | Input pattern == output pattern |
+| **T5: Invariants** | Continuous property checking | Stateful modules | One-hot grant, credit bounds |
+
+A design at T2 without T3 is at maturity level "Structural Sketch" — it compiles and runs, but functional correctness is unverified. T3 is the minimum for "Reviewable RTL."
+
+**Rule:** If the module computes, transforms, routes, or stores data, it needs at least one T3 check. If it moves data end-to-end, it needs T4. If it manages state (arbiters, counters, FSMs), it needs T5.
+
+See `references/verification/golden-reference-guide.md` for the full methodology and testbench templates.
+
 ## How the agent should respond to failures
 
 - Quote the failing condition in plain language.

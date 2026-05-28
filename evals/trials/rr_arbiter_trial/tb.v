@@ -43,6 +43,10 @@ module tb;
     integer accept_count2;
     integer accept_count3;
 
+    // Golden reference invariant checker variables (Strategy E)
+    integer inv_fail_count;
+    integer liveness_counter;
+
     rr_ready_valid_arbiter #(
         .DATA_W(8)
     ) dut (
@@ -384,6 +388,62 @@ module tb;
         end
     endtask
 
+    // ----------------------------------------------------------------
+    // Golden reference invariant checkers (Strategy E)
+    // Sample pre-edge combinational state with non-blocking assignments
+    // to avoid race conditions with the testbench initial block.
+    // ----------------------------------------------------------------
+    reg       inv_valid_o_pre;
+    reg [3:0] inv_ready_o_pre;
+    reg [3:0] inv_valid_i_pre;
+    reg [1:0] inv_grant_o_pre;
+
+    always @(posedge clk_i) begin
+        // Non-blocking: RHS evaluated at posedge time (pre-edge state)
+        inv_valid_o_pre <= valid_o;
+        inv_ready_o_pre <= ready_o;
+        inv_valid_i_pre <= valid_i;
+        inv_grant_o_pre <= grant_o;
+    end
+
+    always @(posedge clk_i) begin
+        #1; // settling delay per golden-reference-guide rule 2
+        if (!rst_i) begin
+            // INV1: ready_o (pre-edge combinational) must be one-hot or zero
+            if (!model_onehot0(inv_ready_o_pre)) begin
+                $display("INVARIANT_FAIL INV1 cycle %0d: ready_o=%b is not one-hot-or-zero", cycle_count, inv_ready_o_pre);
+                inv_fail_count = inv_fail_count + 1;
+            end
+
+            // INV2: if a grant was issued at this edge (ready_o was non-zero pre-edge),
+            // the granted source must have had an active request (valid_i pre-edge).
+            // NOTE: valid_o is REGISTERED — once latched, the source can deassert valid_i while
+            //       the output waits for downstream ready_i.  So we check at grant time only.
+            if ((inv_ready_o_pre[0] && !inv_valid_i_pre[0]) ||
+                (inv_ready_o_pre[1] && !inv_valid_i_pre[1]) ||
+                (inv_ready_o_pre[2] && !inv_valid_i_pre[2]) ||
+                (inv_ready_o_pre[3] && !inv_valid_i_pre[3])) begin
+                $display("INVARIANT_FAIL INV2 cycle %0d: ready_o grants a source with no active request (ready_o=%b, valid_i=%b)",
+                         cycle_count, inv_ready_o_pre, inv_valid_i_pre);
+                inv_fail_count = inv_fail_count + 1;
+            end
+
+            // INV3: liveness — if requests pending (pre-edge) and output was idle (pre-edge),
+            // expect a grant within 10 cycles.
+            if ((|inv_valid_i_pre) && !inv_valid_o_pre) begin
+                liveness_counter = liveness_counter + 1;
+                if (liveness_counter > 10) begin
+                    $display("INVARIANT_FAIL INV3 cycle %0d: liveness violation — no grant for %0d cycles while requests pending (valid_i=%b)",
+                             cycle_count, liveness_counter, inv_valid_i_pre);
+                    inv_fail_count = inv_fail_count + 1;
+                    liveness_counter = 0; // reset to avoid flooding
+                end
+            end else begin
+                liveness_counter = 0;
+            end
+        end
+    end
+
     initial begin
         cycle_count = 0;
         rand_state = 32'h1ace_b00c;
@@ -398,6 +458,8 @@ module tb;
         accept_count2 = 0;
         accept_count3 = 0;
         total_accepts = 0;
+        inv_fail_count = 0;
+        liveness_counter = 0;
         init_model();
 
         rst_i = 1'b1;
@@ -484,6 +546,7 @@ module tb;
         ready_i = 1'b1;
         repeat (2) checked_step();
 
+        $display("INVARIANT_SUMMARY: %0d violations", inv_fail_count);
         $display("PASS round robin arbiter");
         $finish;
     end

@@ -49,6 +49,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - UVM templates: `references/verification/uvm-templates.md`
 - If an RTL fixture is provided, use `scripts/rtl_check.py --case <fixture_dir>` when Icarus Verilog is available
 - Tool-driven RTL verification or iterative debug: `references/design/tool-driven-workflow.md`
+- Golden reference methodology: `references/verification/golden-reference-guide.md` — functional verification strategies for all module types, testbench templates for known I/O pairs, software reference models, readback scoreboards, data integrity scoreboards, invariant checkers, and latency checkers
 
 ## Signoff and closure
 
@@ -57,6 +58,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 ## Design intuition
 
 - Design heuristics, sizing guidelines, red flags: `references/design/design-heuristics.md`
+- Engineering intuition checklist (automatable): `references/design/engineering-intuition-checklist.md`; run `scripts/rtl_complexity_check.py` for automated checks
 
 ## Advanced methodology
 

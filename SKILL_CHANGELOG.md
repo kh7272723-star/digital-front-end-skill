@@ -4,6 +4,368 @@
 
 ---
 
+## 2026-05-28 — Golden Reference 方法论（解决"结构 PASS 功能 FAIL"系统性缺陷）
+
+### 问题背景
+
+19 个 trial 项目中，3 个出现了"结构审查 PASS 但功能错误"：
+- CRC P18: 66 项自审全部 PASS，单 beat CRC 输出 = 0
+- Crossbar: 路由逻辑完全不工作
+- DMA: 传输从未完成
+
+根因：Step 8 自审清单只检查结构正确性（命名、FSM 风格、协议、复位），不检查输出值是否正确。
+
+### 新增文件
+
+| 文件 | 行数 | 用途 |
+|------|------|------|
+| `references/verification/golden-reference-guide.md` | 122 | 6 种 golden reference 策略（A-F）+ 常见错误 |
+
+### 策略体系
+
+| 策略 | 适用模块 | 方法 |
+|------|---------|------|
+| A: 已知 I/O 对 | CRC、ECC、ALU | 从标准文档获取预计算的输入→输出对 |
+| B: 软件参考模型 | 变长输入算法 | testbench 中独立实现的 Verilog function |
+| C: 写回读记分板 | APB/AXI-Lite 寄存器块 | 写入值，读回，对比 |
+| D: 数据完整性记分板 | DMA、FIFO、位宽转换器 | 输入入队，输出出队+对比 |
+| E: 不变量检查 | 仲裁器、信用计数器 | 每周期连续检查属性 |
+| F: 延迟检查器 | 流水线、寄存器切片 | 输入周期 vs 输出周期对比 |
+
+### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `SKILL.md` Step 8b | 将窄范围 "Golden reference: for computation modules" 替换为 6 模块类型→策略映射表 |
+| `references/verification/tb-examples.md` | 新增 section 9: 4 个 golden reference testbench 模板（9a-9d）|
+| `references/verification/simulation-loop.md` | Phase 4 新增 Step 0（故障分类）+ 功能故障签名 + Step 6（功能回归）+ 2 项 checklist |
+| `references/verification/verification-guidance.md` | 新增 5 层验证体系（T1-T5）|
+| `references/debug/bug-pattern-library.md` | 新增 V1 pattern（结构 PASS 功能 FAIL）+ 更新自审限制规则 |
+| `references/reference-index.md` | 新增 golden-reference-guide.md 索引条目 |
+
+### SKILL.md 行数
+
+371 / 500 行
+
+### 关键设计决策
+
+- Golden reference 不是 formal verification，也不是 UVM，而是在两者之间用最低成本抓住最常见的功能错误
+- 策略 B 的核心约束：参考函数必须从规格独立推导，不能从 DUT 代码复制
+- 所有模板兼容 iverilog（无 SVA、无 UVM class）
+
+### 端到端验证（3 个项目并行验证）
+
+| 项目 | 策略 | 原有测试 | Golden Reference | 开发中发现的问题 |
+|------|------|---------|-----------------|----------------|
+| pipeline_reg | F: 延迟检查器 | 3/3 PASS | 4/4 PASS | always 块竞态条件 |
+| apb_regs | C: 写回读记分板 | 1/1 PASS | 9/9 PASS | prdata_o stale after idle_bus() |
+| rr_arbiter | E: 不变量检查 | 1/1 PASS | 0 违规 | INV2 每周期检查产生 86 个误报 |
+
+### 验证中发现的 Skill 缺陷（3 个）
+
+| ID | 缺陷 | 根因 | 修复 |
+|----|------|------|------|
+| GAP-GR1 | Strategy E: 每周期检查 registered output + combinational input 的关系产生误报 | registered output 保持期间 combinational input 可以变化 | 只在事件边界（grant time）检查，用 pre-edge 采样 |
+| GAP-GR2 | Strategy F: 输入捕获和输出检查分在不同 always 块产生竞态 | 同一 posedge 两个块的执行顺序不确定 | 合并为单个块，check-before-capture 顺序 |
+| GAP-GR3 | Strategy C: 总线 idle 后采样 combinational output 得到 stale 值 | idle_bus() 清除地址，combinational output 反射地址 0x0 的值 | 在 idle_bus() 前采样，或直接检查寄存器输出引脚 |
+
+### Skill 改进
+
+| 文件 | 改动 |
+|------|------|
+| `references/verification/golden-reference-guide.md` | 策略 C/E/F 新增 "Known pitfall" 段落 + 2 条 Common mistakes |
+| `references/verification/tb-examples.md` | 模板 9b 新增 stale output 警告，模板 9d 重写为 pre-edge + grant-time-only 检查 |
+| `references/debug/bug-pattern-library.md` | V1 pattern 已包含 golden reference 检测方法 |
+
+### 关键结论
+
+**Golden reference 方法论验证有效：** 三个项目全部通过，且开发过程中 golden reference 检查器本身帮助发现了 3 个真实的 testbench 设计问题（竞态条件、stale output、registered output 语义）。这证明 golden reference 不仅能检测 RTL bug，其实施过程本身也能暴露验证环境的缺陷。
+
+**策略复杂度排序已验证：** C（写回读）最简单，9/9 一次通过；F（延迟检查）中等，需要 careful block ordering；E（不变量检查）最复杂，需要理解 registered vs combinational 语义。
+
+### 第二轮验证（策略 A/B/D，全策略覆盖）
+
+| 项目 | 策略 | 原有测试 | Golden Reference | 发现 |
+|------|------|---------|-----------------|------|
+| test-fuzzy-spec | A: 已知 I/O 对 | 10/10 PASS | 1/1 PASS | IEEE 802.3 check value 匹配 |
+| test-fuzzy-spec | B: 参考模型 | 10/10 PASS | 1/1 PASS | SW CRC = 0x53ac1f7e = DUT CRC |
+| test-fuzzy-spec | P18 回归 | 10/10 PASS | 1/1 PASS | 单 beat CRC = 0x2144df1c，无 P18 bug |
+| **test-cdc-capture** | **D: 数据完整性** | **5/5 PASS** | **2/2 FAIL** | **packer sample 1 = 0x000，应为 0x001** |
+
+### 关键发现：golden reference 检出真实 RTL bug
+
+cdc_capture 项目：原有 5 个测试全部 PASS（包括数据完整性对比），但 golden reference 记分板通过独立监控 FIFO 写入端口（`dut.u_fifo.wr_do`）发现 ADC packer 写入的第二个 sample 是 `0x000` 而不是 `0x001`。
+
+根因分析：packer 使用移位寄存器 `{pack_buf_q[179:0], adc_data_i}`，但第二个 sample 在 packer 还未准备好时被写入，导致数据丢失。原有测试的 `expected_word` 函数和 DUT 使用了相同的移位逻辑，所以两者"一致"地错误——golden reference 的独立参考路径才是关键。
+
+### 全策略验证完成
+
+| 策略 | 项目 | 结果 | 真实 bug 检出 |
+|------|------|------|-------------|
+| A: 已知 I/O 对 | CRC packet processor | PASS | — |
+| B: 软件参考模型 | CRC packet processor | PASS | — |
+| C: 写回读记分板 | APB register block | PASS | — |
+| D: 数据完整性 | CDC capture | **FAIL** | **packer 数据丢失** |
+| E: 不变量检查 | RR arbiter | PASS | — |
+| F: 延迟检查器 | Pipeline register | PASS | — |
+
+**结论：6 种策略全部验证通过。策略 D 检出了唯一的真实 RTL bug，证明数据完整性记分板是最有效的 golden reference 策略。**
+
+### 第三轮验证（AXI/DMA 协议场景）
+
+| 项目 | 策略 | 原有测试 | Golden Reference | AXI 特有检查 |
+|------|------|---------|-----------------|-------------|
+| axi_lite_regs | C: 写回读 | 1/1 PASS | **37/37 PASS** | AW/W/B 握手、WSTRB、SLVERR |
+| axi_write_tracker | E: 不变量 | 1/1 PASS | **5/5 PASS** | outstanding 计数、WVALID 稳定性 |
+| dma_burst_planner | C: 写回读(适配) | 1/1 PASS | **285/285 PASS** | burst 拆分、地址对齐、错误路径 |
+| **DMA 数据通路** | **D: 端到端** | — | **16/16 PASS** | 源→DMA→目标 数据完整性 |
+
+### 关键发现
+
+1. **Strategy C 在 AXI-Lite 上的适配**：agent 正确处理了 AXI-Lite 的 AW→W→B 和 AR→R 握手序列，在 RVALID&RREADY 握手期间采样 RDATA（不是之后），37 个检查覆盖 full write、byte-strobe partial write、walking-ones、SLVERR。
+
+2. **Strategy E 在 AXI tracker 上的适配**：agent 用 pre-edge 采样避免了 AXI 信号竞态，INV4（WVALID 稳定性）只在 `pre_wvalid && !pre_wready` 时检查，避免了误报。
+
+3. **Strategy C 在 DMA burst planner 上的创造性适配**：burst planner 不是寄存器映射模块，agent 将描述符输入视为"写"，将命令输出视为"回读"，独立计算期望值。285 个检查覆盖 single-beat、multi-burst split、walking-ones、zero-length、misalignment 等场景。
+
+4. **DMA 端到端数据通路验证**：构建了最小 DMA 系统（simple_mem + dma_engine + dma_top），16 个已知数据从源地址搬到目标地址，0 mismatch。验证过程中发现并修复了 `done_q` 双驱动 bug（combinational 和 sequential 块同时赋值）。
+
+### 全策略+全场景验证完成
+
+| 策略 | 简单模块 | AXI 协议 | DMA 数据通路 |
+|------|---------|---------|-------------|
+| A: 已知 I/O | CRC ✅ | — | — |
+| B: 参考模型 | CRC ✅ | — | — |
+| C: 写回读 | APB ✅ | AXI-Lite ✅, DMA planner ✅ | — |
+| D: 数据完整性 | CDC ✅ (bug) | — | DMA ✅ |
+| E: 不变量 | Arbiter ✅ | AXI tracker ✅ | — |
+| F: 延迟检查 | Pipeline ✅ | — | — |
+
+---
+
+## 2026-05-28 — 工程直觉自动化（checklist + 脚本 + Yosys 集成）
+
+### 问题背景
+
+Skill 的工程直觉能力是"初级偏上"——有 `design-heuristics.md` 和 `power-timing-area.md` 作为参考，但这些是被动文档，agent 在生成 RTL 和自审时不会主动应用。需要将工程直觉转化为可执行的检查规则。
+
+### 新增文件
+
+| 文件 | 行数 | 用途 |
+|------|------|------|
+| `references/design/engineering-intuition-checklist.md` | ~150 | 5 类检查（A-E），每项有阈值、权威来源、修复建议 |
+| `scripts/rtl_complexity_check.py` | ~250 | 自动化复杂度检查 + Yosys 集成 |
+
+### 检查体系
+
+| 类别 | 检查项 | 阈值 | 权威来源 |
+|------|--------|------|---------|
+| A: 代码复杂度 | always 块行数、嵌套深度、模块大小、扇出 | 50行/3层/300行/50ref | RMM §7.2-7.4 |
+| B: 组合深度 | 路径级数、宽比较器、优先级链 | 7级/32bit/8级 | Synopsys DC, UG901 |
+| C: 面积红旗 | 寄存器数组、重复实例、硬编码常量 | 64 entries/4 instances | RMM §6.2, UG901 |
+| D: 时序红旗 | 跨模块路径、高扇出、异步复位 | 50 fanout | Cummings SNUG, UG949 |
+| E: 可复用性 | 固定宽度、硬编码地址、协议耦合 | — | RMM §3.3-4.2 |
+
+### SKILL.md 改动
+
+Step 8 自审清单新增 "Engineering intuition" 段落（7 项检查），引用 `engineering-intuition-checklist.md` 和 `rtl_complexity_check.py`。
+
+### SKILL.md 行数
+
+380 / 500 行
+
+### 脚本验证
+
+在 `vfs_sw_hw_axi_handlers_trial` 上测试通过：
+- 检测到 54 行的 `always @(*)` 块（超过 50 行阈值）
+- 正确报告 C1 WARNING 级别
+- 输出格式：`[C1] filename:line: message + fix`
+
+---
+
+## 2026-05-27 — 端到端能力验证（H1 bug 注入→debug→修复→综合）
+
+### 验证方案
+
+注入 H1 bug（payload 在 stall 时变化）到 pipeline_reg.v，让 agent 用 skill 新能力端到端 debug。
+
+### 验证结果
+
+| 阶段 | 能力 | 结果 | 证据 |
+|------|------|------|------|
+| 仿真失败 | simulation-loop.md | ✅ | `H1_VIOLATION at cycle 13` |
+| VCD 信号提取 | vcd_extract.py | ✅ | 找到 m_data_o 在 t=125000 变化 |
+| VCD 违规检测 | --find-violation stall-data-change | ✅ | 新增 H1 检测器 |
+| Bug Pattern 匹配 | bug-pattern-library H1 | ✅ | 正确代码模式直接可用 |
+| RTL 修复 | accept_input 模式 | ✅ | 38 行修复后代码 |
+| 重跑仿真 | ALL_TESTS_PASS | ✅ | 3/3 PASS |
+| Yosys 综合 | yosys_extract.py | ✅ | 0 latch, 36 cells, 5 门临界路径 |
+
+### 发现并修复的 Gap
+
+| Gap | 说明 | 修复 |
+|-----|------|------|
+| vcd_extract.py 无 H1 检测 | `--find-violation valid-drop` 只能找 valid 下降，不能找 stall 时 data 变化 | 新增 `--find-violation stall-data-change` |
+| testbench check 时序 | test_2 的 check 在 violation 计数之前执行 | 记录为 testbench 已知问题 |
+
+### 关键结论
+
+**Skill 新增能力全部验证有效：**
+- VCD 分析：agent 成功用脚本从波形中定位了 H1 违规的确切时间戳和信号值
+- Bug Pattern：H1 的正确代码模式被 agent 直接引用修复
+- Yosys 综合：agent 成功运行综合确认无 latch/loop
+- 端到端流程：仿真→VCD→修复→再仿真→综合 全部跑通
+
+---
+
+## 2026-05-27 — Yosys 综合反馈闭环（仿真→综合→修复→再仿真）
+
+### 新增文件
+
+| 文件 | 行数 | 用途 |
+|------|------|------|
+| `references/verification/synthesis-feedback-guide.md` | ~200 | 综合报告解读、问题映射、工作流 |
+| `scripts/yosys_extract.py` | ~200 | 自动化综合报告提取（cell count/latch/loop/ltp）|
+
+### 综合反馈工作流
+
+```
+仿真通过 (Step 9) → yosys 综合 → 提取报告 → 修复问题 → 再仿真确认
+```
+
+**yosys 可检测的问题：**
+
+| 检查项 | yosys 输出 | RTL 问题 | Bug Pattern |
+|--------|-----------|---------|-------------|
+| Latch 推断 | `$_DLATCH_*` in cells | 组合块缺 default | E2 |
+| 组合环路 | `Detected loop` in ltp | 组合反馈 | E7 |
+| 临界路径 | ltp length > 25 | 组合深度过大 | — |
+| 未使用信号 | warning: unused | 死代码 | E8 |
+| 多驱动 | check: multi-driven | 信号多源驱动 | E1 |
+
+### SKILL.md 改动
+
+Step 9（仿真循环）新增"综合反馈"子节：
+- 仿真通过后运行 yosys
+- 检查 latch/loop/critical path/cell count
+- 修复后重跑仿真确认功能不变
+
+### 脚本验证
+
+`yosys_extract.py` 在 rr_arbiter_trial 上测试通过：
+- 正确提取 cell counts（104 cells: 31 AND, 22 NOR, 12 SDFFE...）
+- 正确检测 ltp（length=22, 临界路径 22 门）
+- 正确报告 check（0 problems）
+- 注意：ltp 的 "loop" 警告有误报（寄存器反馈路径被误判为组合环路）
+
+---
+
+## 2026-05-27 — VCD 波形分析能力（仿真闭环最后一块拼图）
+
+### 新增文件
+
+| 文件 | 行数 | 用途 |
+|------|------|------|
+| `references/verification/vcd-analysis-guide.md` | ~200 | VCD 格式解释、信号提取、协议重建、第一分叉周期定位 |
+| `scripts/vcd_extract.py` | ~280 | VCD 解析脚本：信号提取、转换检测、违规查找、AXI 协议重建 |
+
+### VCD 脚本功能
+
+```bash
+# 列出所有信号
+python scripts/vcd_extract.py dump.vcd --list-signals
+
+# 提取特定信号时间线
+python scripts/vcd_extract.py dump.vcd --signals WVALID,WLAST,WDATA --range 0:50000
+
+# 查找信号转换
+python scripts/vcd_extract.py dump.vcd --transitions WVALID
+
+# 重建 AXI 写通道序列
+python scripts/vcd_extract.py dump.vcd --protocol axi-write
+
+# 查找 valid-drop 协议违规
+python scripts/vcd_extract.py dump.vcd --find-violation valid-drop --signals valid,ready
+```
+
+### Bug Pattern 更新（6 个 pattern 新增 VCD 检测方法）
+
+| Pattern | VCD 检测方法 |
+|---------|-------------|
+| H1 (payload stall) | 提取 valid/ready/data，找 valid=1,ready=0 时 data 变化 |
+| H8 (valid gated) | find-violation valid-drop + 检查 can_send 信号 |
+| P4 (completion timing) | 提取 wlast/bvalid/done，检查 done 是否在 bvalid 之前 |
+| P11 (B response hold) | find-violation valid-drop --signals bvalid,bready |
+| P12 (WVALID mid-burst) | 提取 wvalid 转换，检查 wlast 是否为 0 |
+| P13 (AW/W/B coupling) | protocol axi-write，检查 AW 是否被 B 阻塞 |
+
+### Skill 改进
+
+| 文件 | 改动 |
+|------|------|
+| `references/verification/vcd-analysis-guide.md` | 新建：VCD 格式、信号提取、协议重建、debug 场景 |
+| `scripts/vcd_extract.py` | 新建：VCD 解析工具（list-signals, transitions, protocol, violation）|
+| `references/debug/bug-pattern-library.md` | 6 个 pattern 新增 VCD detection 段落 |
+| `references/verification/simulation-loop.md` | Step 3 引用 vcd-analysis-guide.md 和 vcd_extract.py |
+
+### 关键意义
+
+**波形分析能力 = 仿真闭环的最后一块拼图。** 之前 agent 只能看文本输出的 PASS/FAIL，无法定位"为什么失败"。现在 agent 可以：
+1. 从 VCD 提取信号时间线
+2. 重建 AXI/APB 协议序列
+3. 自动检测协议违规（valid-drop, mid-burst gap）
+4. 定位第一分叉周期
+
+这使得 debug 从"看 $display 输出猜原因"升级为"从波形中精确定位违规周期"。
+
+---
+
+## 2026-05-27 — Simulation Loop 端到端验证（首次真实执行）
+
+**项目**: rr_arbiter_trial（round-robin arbiter, 130 行 RTL + 491 行 TB）
+**方式**: 子 agent 严格按 simulation-loop.md 5 阶段执行
+**结果**: 功能仿真 PASS，发现 6 个 simulation-loop.md 缺陷
+
+### 执行结果
+
+| 阶段 | 工具 | 结果 | 发现 |
+|------|------|------|------|
+| Phase 1 Lint | yosys check -assert | PASS | yosys 可替代 verilator，但覆盖更弱 |
+| Phase 2 Compile | iverilog -g2012 | PASS | 零警告零错误 |
+| Phase 3 Simulate | vvp | PASS | 功能正确，2986ps |
+| Phase 3.5 协议分析 | — | **GAP** | 6 个标准标记全部缺失 |
+| Phase 4/5 | — | SKIPPED | 无失败无超时 |
+
+### 发现的 Skill 缺陷 (6 个)
+
+| ID | 缺陷 | 根因 | 影响 |
+|----|------|------|------|
+| GAP-S1 | 无 yosys lint 替代方案 | simulation-loop.md 只写了 verilator | verilator 不可用时 agent 无法 lint |
+| GAP-S2 | 无 PATH 环境配置指导 | yosys oss-cad-suite 需要 environment.bat | yosys 启动失败（DLL_NOT_FOUND）|
+| GAP-S3 | 无路径编码警告 | 中文路径可能导致工具失败 | 文件找不到或编码错误 |
+| GAP-S4 | 结果分类表有重叠 | COMPILE_ONLY vs FATAL 判定冲突 | 通过的仿真被误判为 FATAL |
+| GAP-S5 | 无非标 testbench 回退解析 | 假设所有 TB 遵循协议 | 现有 23 个 trial 全部不合规 |
+| GAP-S6 | 无 immediate-$finish 处理 | fail task 直接 $finish 阻止后续测试 | SIMULATION_DONE 永远不出现 |
+
+### Skill 改进
+
+| 文件 | 改动 |
+|------|------|
+| `references/verification/simulation-loop.md` | Prerequisites: 新增 yosys 环境配置、路径编码警告 |
+| `references/verification/simulation-loop.md` | Phase 1: 新增 yosys fallback（含覆盖对比表）|
+| `references/verification/simulation-loop.md` | Phase 3: 结果分类改为优先级排序 + 非标 TB 回退解析 |
+| `references/verification/simulation-loop.md` | Checklist: 更新为 verilator/yosys 双路径 |
+
+### 关键发现
+
+**simulation-loop.md 首次端到端验证**: 子 agent 能完整执行 5 阶段流程，但遇到两个实际障碍：
+1. yosys 需要手动配置 PATH（文档未说明）
+2. 现有 testbench 无一遵循输出协议（文档假设全部合规）
+
+**回退解析策略验证**: 对 rr_arbiter_trial 的输出 `"PASS round robin arbiter"` + `$finish`，回退逻辑正确分类为 PASS（non-compliant）。这证明回退策略对现有 trial 有效。
+
+---
+
 ## 2026-05-24 — SPI Master（复杂 FSM）+ Yosys 综合验证
 
 ### SPI Master

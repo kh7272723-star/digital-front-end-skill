@@ -9,19 +9,34 @@ Close the verification loop: generate RTL → lint → compile → simulate → 
 Before starting the simulation loop, check tool availability:
 
 ```bash
-verilator --version    # lint (priority 1)
+verilator --version    # lint (priority 1, preferred)
+yosys -V               # lint (priority 1, fallback when verilator unavailable)
 iverilog -V            # compile + simulate (priority 2)
 vvp -V                 # simulation runtime
 gtkwave --version      # optional: waveform viewer (agent cannot use GUI, but can parse VCD)
+```
+
+**Environment setup:** Yosys from oss-cad-suite requires DLLs in PATH. If `yosys -V` fails with STATUS_DLL_NOT_FOUND (0xC0000135), source the environment first:
+```bash
+call "path\to\oss-cad-suite\environment.bat"
+```
+
+**Path encoding:** Tools may fail when the working directory contains non-ASCII characters (CJK, accented). If tools report file-not-found or encoding errors, copy source files to an ASCII-only temp directory:
+```bash
+mkdir C:\temp_sim
+copy *.v C:\temp_sim\
+cd C:\temp_sim
 ```
 
 If no simulation tools are available, state this explicitly and fall back to static self-review only.
 
 ---
 
-## Phase 1: Lint (Verilator)
+## Phase 1: Lint
 
-Run Verilator lint **before** simulation. It catches structural errors without needing a testbench.
+Run lint **before** simulation. It catches structural errors without needing a testbench.
+
+### Option A: Verilator (preferred)
 
 ```bash
 verilator --lint-only -Wall \
@@ -29,6 +44,27 @@ verilator --lint-only -Wall \
     -I<include_dir> \
     <source_files> 2>&1
 ```
+
+### Option B: Yosys (fallback when verilator unavailable)
+
+```bash
+yosys -p "read_verilog -sv <source_files>; check -assert; stat" 2>&1
+```
+
+**Yosys lint coverage (weaker than verilator):**
+
+| Check | Verilator | Yosys |
+|-------|-----------|-------|
+| Latch inference | Yes (`LATCH`) | Yes (`check -assert`) |
+| Undriven signals | Yes (`UNDRIVEN`) | Yes |
+| Unused signals | Yes (`UNUSED`) | Yes |
+| Width mismatch | Yes (`WIDTH`) | **No** |
+| Blocking in clocked | Yes (`BLKSEQ`) | **No** |
+| Implicit wires | Yes (`IMPLICIT`) | **No** |
+| Incomplete case | Yes (`CASEINCOMPLETE`) | **No** |
+| Combinational delay | Yes (`COMBDLY`) | **No** |
+
+When using yosys, supplement with iverilog warnings during compile: `iverilog -g2012 -Wall` catches some width and implicit wire issues.
 
 ### Verilator warning categories and fixes
 
@@ -50,7 +86,9 @@ verilator --lint-only -Wall \
 
 Always run lint before simulation. A module that fails lint will produce unpredictable simulation results. Fix all lint warnings before writing a testbench.
 
-**Exception:** `UNUSED` warnings on output ports that are intentionally unconnected in a testbench can be suppressed with `-Wno-UNUSED`.
+**Exception:** `UNUSED` warnings on output ports that are intentionally unconnected in a testbench can be suppressed with `-Wno-UNUSED` (verilator only).
+
+**Fallback:** When verilator is unavailable, use yosys `check -assert` for basic structural checks. Supplement with `iverilog -g2012 -Wall` during compile for width/implicit warnings. Document which checks were skipped.
 
 ---
 
@@ -132,19 +170,54 @@ SIMULATION_DONE
 
 ### Simulation result classification
 
-| Result | Output pattern | Action |
-|--------|---------------|--------|
-| **PASS** | `ALL_TESTS_PASS` present | Done — report success |
-| **FAIL** | `TEST_FAIL` present | Extract test_id and reason → Phase 4 |
-| **HANG** | timeout killed, no `SIMULATION_DONE` | → Phase 5 |
-| **COMPILE_ONLY** | no `RESET_RELEASED` | Testbench never started — check clock/reset |
-| **FATAL** | `$fatal` or `$finish` without `ALL_TESTS_PASS` | Extract fatal message → Phase 4 |
+Evaluate in this priority order (first match wins):
+
+| Priority | Result | Output pattern | Action |
+|----------|--------|---------------|--------|
+| 1 | **HANG** | timeout killed, no `SIMULATION_DONE` | → Phase 5 |
+| 2 | **PASS** | `ALL_TESTS_PASS` present | Done — report success |
+| 3 | **FAIL** | `TEST_FAIL` present | Extract test_id and reason → Phase 4 |
+| 4 | **FATAL** | `$fatal` or `$finish` without `ALL_TESTS_PASS` | → fallback check |
+| 5 | **COMPILE_ONLY** | no output at all (empty stdout) | Testbench never started — check clock/reset |
+
+### Fallback: non-compliant testbenches
+
+Existing testbenches may not follow the output protocol (they were written before this standard). When the classification yields FATAL or COMPILE_ONLY but the output is non-empty, apply this fallback:
+
+1. Check if output contains a PASS-like pattern: `"PASS"`, `"OK"`, `"ALL TESTS PASSED"`, `"$finish"` with no preceding `"FAIL"` or `"ERROR"`
+2. Check if output contains a FAIL-like pattern: `"FAIL"`, `"ERROR"`, `"ASSERT"`, `"mismatch"`
+3. If PASS-like found and no FAIL-like found → classify as **PASS (non-compliant output)**, report success with a note that the testbench should be updated to use the standard protocol
+4. If FAIL-like found → classify as **FAIL**, extract the failure message and proceed to Phase 4
+5. If neither → classify as **UNKNOWN**, re-run with verbose output or inspect VCD
+
+**Example non-compliant output and classification:**
+```
+PASS round robin arbiter        → PASS (non-compliant): contains "PASS", no "FAIL"
+tb.v:488: $finish called at ... → $finish without ALL_TESTS_PASS, but preceded by PASS
+```
 
 ---
 
 ## Phase 4: Failure Analysis
 
 When a test fails, follow this procedure:
+
+### Step 0: Classify the failure type
+
+Before pattern matching, classify the failure to choose the right debug approach:
+
+| Failure type | How to recognize | Debug approach |
+|-------------|-----------------|----------------|
+| **Structural** | lint warning, compilation error | Fix with coding guidelines (E1-E8) |
+| **Protocol** | handshake violation message, assertion failure | Match against bug patterns H/P |
+| **Functional** | output value wrong, zero when non-zero expected | Golden reference comparison (golden-reference-guide.md) |
+| **Hang** | timeout, no SIMULATION_DONE | Phase 5 |
+
+For **functional failures** (wrong output values), the primary debug approach is:
+1. Identify which golden reference strategy applies (see `references/verification/golden-reference-guide.md`)
+2. Add or activate the golden reference checker in the testbench
+3. Run simulation to find the first divergent value
+4. Trace backward from the wrong output to the logic error
 
 ### Step 1: Extract the failure signature
 
@@ -169,14 +242,24 @@ Check the failure against `references/debug/bug-pattern-library.md`:
 | "Timeout — no done_o" | P4 (completion) or handshake deadlock |
 | "B response error not captured" | DP5 |
 | "AW/W/B coupled" | P13 |
-
-If a pattern matches, apply the known fix from the pattern library.
+| "Output is zero when non-zero expected" | P18 (pipeline latency) or computation logic error |
+| "Output matches INIT_VALUE, not computed value" | P18: combinational reads stale register |
+| "Data corruption through module" | H1 (payload under stall) or DP1 (width converter) |
+| "Transfer never completes" | P4 (completion logic), H4 (deadlock), or counter bug |
+| "Readback mismatch" | register write path bug, address decode error |
+| "Structural PASS but functional FAIL" | V1 (verification blind spot) — see golden-reference-guide.md |
 
 ### Step 3: If no pattern matches — first divergent cycle
 
 1. Enable VCD dump in testbench: `initial begin $dumpfile("sim.vcd"); $dumpvars(0, tb_top); end`
 2. Re-run simulation
-3. Use `$display` probes to identify the first cycle where actual behavior diverges from expected
+3. Use the VCD helper script to extract target signals and find divergences:
+   ```bash
+   python scripts/vcd_extract.py sim.vcd --signals <suspect_signals> --range <start>:<end>
+   python scripts/vcd_extract.py sim.vcd --find-violation valid-drop --signals valid,ready
+   python scripts/vcd_extract.py sim.vcd --protocol axi-write
+   ```
+   See `references/verification/vcd-analysis-guide.md` for full VCD analysis methodology.
 4. Trace the signal path backward from the divergent output to find the root cause
 
 ### Step 4: Apply minimal fix
@@ -190,6 +273,14 @@ If a pattern matches, apply the known fix from the pattern library.
 Go back to Phase 1 (lint) → Phase 2 (compile) → Phase 3 (simulate). Maximum 3 iterations. After 3 failures, report:
 - What was tried (each fix)
 - What the tool output shows (each failure)
+
+### Step 6: Functional regression after fix
+
+After a fix passes re-simulation, verify functional correctness:
+1. Run the golden reference test that caught the original failure
+2. If no golden reference existed, add one (see `references/verification/golden-reference-guide.md`)
+3. Run at least one end-to-end data integrity test
+4. Report: "Structural PASS + Functional PASS" or list remaining functional gaps
 - What the likely root cause is
 - What the user should investigate next
 
@@ -377,10 +468,22 @@ endmodule
 
 When simulation tools are available:
 
-- [ ] Verilator lint passes with no errors (warnings acceptable with justification)
-- [ ] iverilog compiles all source files without errors
+- [ ] Lint passes with no errors (verilator preferred; yosys `check -assert` as fallback)
+- [ ] iverilog compiles all source files without errors (use `-Wall` for extra warnings)
 - [ ] Testbench follows output protocol (RESET_RELEASED, TEST_START/PASS/FAIL, ALL_TESTS_PASS)
+- [ ] If testbench is non-compliant: apply fallback classification (PASS-like/FAIL-like pattern matching)
 - [ ] Simulation completes within timeout (no hang)
 - [ ] All directed tests pass
 - [ ] If any test fails: bug pattern matched, fix applied, re-simulation passed (max 3 iterations)
 - [ ] If 3 iterations exhausted: residual issues reported with evidence
+- [ ] At least one golden reference test exists (see golden-reference-guide.md for strategy selection)
+- [ ] Golden reference test passes (functional correctness, not just structural)
+
+When yosys is available (after simulation passes):
+
+- [ ] Yosys synthesis completes without errors
+- [ ] No latch inference (`$_DLATCH_*` absent from cell list)
+- [ ] No combinational loops (real loops, not register feedback false positives)
+- [ ] Critical path length reasonable (ltp < 25 gates for 100MHz target)
+- [ ] Cell count within expectations
+- [ ] Synthesis issues fixed → re-simulation confirms functionality preserved

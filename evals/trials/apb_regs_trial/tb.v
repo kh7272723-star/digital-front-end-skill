@@ -151,6 +151,39 @@ module tb;
         end
     endtask
 
+    // --- Golden Reference Write-Readback Scoreboard (Strategy C) ---
+    integer readback_pass_count;
+    integer readback_fail_count;
+
+    task readback_check;
+        input [3:0]  addr;
+        input [31:0] wr_data;
+        input [3:0]  strb;
+        input [31:0] prev_value;
+        reg   [31:0] expected;
+        reg   [31:0] strb_mask;
+        reg   [31:0] actual_reg;
+        begin
+            // Compute expected value: written bytes from wr_data, others from prev_value
+            strb_mask = {{8{strb[3]}}, {8{strb[2]}}, {8{strb[1]}}, {8{strb[0]}}};
+            expected = (wr_data & strb_mask) | (prev_value & ~strb_mask);
+            apb_write(addr, wr_data, strb, 1'b0, 1'b0);
+            // Check register output directly (prdata_o is stale after idle_bus)
+            actual_reg = (addr[2]) ? reg1_o : reg0_o;
+            if (actual_reg !== expected) begin
+                $display("READBACK_FAIL addr=0x%0h write=0x%08h strb=%b expected=0x%08h actual=0x%08h",
+                         addr, wr_data, strb, expected, actual_reg);
+                readback_fail_count = readback_fail_count + 1;
+                $finish;
+            end
+            // Also verify via bus read (apb_read checks prdata_o during access phase)
+            apb_read(addr, expected, 1'b0, 1'b0);
+            $display("READBACK_PASS addr=0x%0h write=0x%08h strb=%b readback=0x%08h",
+                     addr, wr_data, strb, expected);
+            readback_pass_count = readback_pass_count + 1;
+        end
+    endtask
+
     initial begin
         cycle_count = 0;
         rst_i = 1'b1;
@@ -199,6 +232,74 @@ module tb;
         end
         apb_read(4'hc, 32'h0000_0000, 1'b1, 1'b0);
 
+        // --- Golden Reference Write-Readback Scoreboard Tests ---
+        readback_pass_count = 0;
+        readback_fail_count = 0;
+
+        $display("");
+        $display("--- Golden Reference Write-Readback Scoreboard ---");
+
+        // Test 1: Full write 0xDEADBEEF to reg0
+        readback_check(4'h0, 32'hDEADBEEF, 4'b1111, 32'h0000_0000);
+
+        // Test 2: Full write 0xDEADBEEF to reg1
+        readback_check(4'h4, 32'hDEADBEEF, 4'b1111, 32'h0000_0000);
+
+        // Test 3: Full write 0xCAFEBABE to reg0 (overwrite)
+        readback_check(4'h0, 32'hCAFEBABE, 4'b1111, 32'hDEADBEEF);
+
+        // Test 4: Full write 0x12345678 to reg1 (overwrite)
+        readback_check(4'h4, 32'h12345678, 4'b1111, 32'hDEADBEEF);
+
+        // Test 5: Partial strb=4'b1010 write to reg0 (bytes 1,3 from 0xAA55AA55, bytes 0,2 keep CAFEBABE)
+        readback_check(4'h0, 32'hAA55AA55, 4'b1010, 32'hCAFEBABE);
+
+        // Test 6: Partial strb=4'b0101 write to reg1 (bytes 0,2 from 0x11223344, bytes 1,3 keep 12345678)
+        readback_check(4'h4, 32'h11223344, 4'b0101, 32'h12345678);
+
+        // Test 7: Walking-ones on reg0
+        $display("");
+        $display("--- Walking-Ones Test (reg0) ---");
+        apb_write(4'h0, 32'h0000_0000, 4'b1111, 1'b0, 1'b0);
+        begin : walking_ones
+            integer i;
+            reg [31:0] walk_val;
+            for (i = 0; i < 32; i = i + 1) begin
+                walk_val = (32'h1 << i);
+                apb_write(4'h0, walk_val, 4'b1111, 1'b0, 1'b0);
+                apb_read(4'h0, walk_val, 1'b0, 1'b0);
+                if (prdata_o !== walk_val) begin
+                    $display("WALK_FAIL bit %0d: expected=0x%08h actual=0x%08h",
+                             i, walk_val, prdata_o);
+                    readback_fail_count = readback_fail_count + 1;
+                    $finish;
+                end
+            end
+            $display("WALK_PASS all 32 walking-one patterns verified on reg0");
+            readback_pass_count = readback_pass_count + 1;
+        end
+
+        // Test 8: Invalid-address read check (pslverr)
+        $display("");
+        $display("--- Invalid Address Test ---");
+        apb_read(4'h8, 32'h0000_0000, 1'b1, 1'b0);
+        $display("INVALID_PASS addr=0x08 read returned pslverr=1");
+        readback_pass_count = readback_pass_count + 1;
+
+        apb_read(4'hC, 32'h0000_0000, 1'b1, 1'b0);
+        $display("INVALID_PASS addr=0x0C read returned pslverr=1");
+        readback_pass_count = readback_pass_count + 1;
+
+        // Golden reference summary
+        $display("");
+        $display("=== GOLDEN REFERENCE SUMMARY ===");
+        $display("READBACK: %0d passed, %0d failed", readback_pass_count, readback_fail_count);
+        if (readback_fail_count == 0) begin
+            $display("ALL_READBACK_PASS");
+        end else begin
+            $display("READBACK_FAILURES_DETECTED");
+        end
+        $display("");
         $display("PASS apb regs");
         $finish;
     end

@@ -30,6 +30,8 @@ module tb;
     wire [31:0] reg1_o;
 
     integer cycle_count;
+    integer readback_pass_count;
+    integer readback_fail_count;
 
     axi_lite_regs dut (
         .clk_i(clk_i),
@@ -97,6 +99,83 @@ module tb;
             bready_i = 1'b0;
             if (bvalid_o !== 1'b0) begin
                 fail("bvalid_o should clear after response acceptance");
+            end
+        end
+    endtask
+
+    task write_reg;
+        input [3:0] addr;
+        input [31:0] data;
+        input [3:0] strb;
+        input [1:0] exp_resp;
+        begin
+            awaddr_i = addr;
+            wdata_i = data;
+            wstrb_i = strb;
+            awvalid_i = 1'b1;
+            wvalid_i = 1'b1;
+            step();
+            awvalid_i = 1'b0;
+            wvalid_i = 1'b0;
+            expect_b(exp_resp);
+            consume_b(exp_resp);
+        end
+    endtask
+
+    task read_reg_data;
+        input [3:0] addr;
+        output [31:0] data;
+        output [1:0] resp;
+        begin
+            araddr_i = addr;
+            arvalid_i = 1'b1;
+            rready_i = 1'b0;
+            if (arready_o !== 1'b1) begin
+                fail("expected arready_o before read address");
+            end
+            step();
+            arvalid_i = 1'b0;
+            if (rvalid_o !== 1'b1) begin
+                fail("expected rvalid_o after read address");
+            end
+            data = rdata_o;
+            resp = rresp_o;
+            // Verify R holds while rready_i is low (AXI-Lite protocol)
+            step();
+            if (rvalid_o !== 1'b1 || rdata_o !== data || rresp_o !== resp) begin
+                fail("read response changed while rready_i low");
+            end
+            rready_i = 1'b1;
+            step();
+            rready_i = 1'b0;
+            if (rvalid_o !== 1'b0) begin
+                fail("rvalid_o should clear after read response acceptance");
+            end
+        end
+    endtask
+
+    task readback_check;
+        input [3:0] addr;
+        input [31:0] wr_data;
+        input [3:0] strb;
+        input [31:0] current_val;
+        input [256*8-1:0] test_name;
+        reg [31:0] actual_data;
+        reg [1:0] actual_resp;
+        reg [31:0] strb_mask;
+        reg [31:0] expected_data;
+        begin
+            strb_mask = {{8{strb[3]}}, {8{strb[2]}}, {8{strb[1]}}, {8{strb[0]}}};
+            expected_data = (wr_data & strb_mask) | (current_val & ~strb_mask);
+            write_reg(addr, wr_data, strb, 2'b00);
+            read_reg_data(addr, actual_data, actual_resp);
+            if (actual_data !== expected_data || actual_resp !== 2'b00) begin
+                $display("READBACK_FAIL %0s: addr=0x%0h wr=0x%08h strb=0b%04b exp=0x%08h got=0x%08h resp=0b%02b",
+                         test_name, addr, wr_data, strb, expected_data, actual_data, actual_resp);
+                readback_fail_count = readback_fail_count + 1;
+            end else begin
+                $display("READBACK_PASS %0s: addr=0x%0h data=0x%08h", test_name, addr, actual_data);
+                readback_pass_count = readback_pass_count + 1;
             end
         end
     endtask
@@ -247,6 +326,71 @@ module tb;
         consume_b(2'b10);
 
         read_reg(4'hc, 32'h0000_0000, 2'b10);
+
+        // =========================================================
+        // Golden Reference Strategy C: Write-Readback Scoreboard
+        // =========================================================
+        readback_pass_count = 0;
+        readback_fail_count = 0;
+
+        $display("--- Golden Reference: Write-Readback Scoreboard ---");
+
+        // Test 1: Full 32-bit write-readback to reg0
+        readback_check(4'h0, 32'hDEADBEEF, 4'b1111, 32'h00000000, "full_wr_reg0");
+
+        // Test 2: Full 32-bit write-readback to reg1
+        readback_check(4'h4, 32'hCAFEBABE, 4'b1111, 32'h00000000, "full_wr_reg1");
+
+        // Test 3: Byte-strobe partial write reg0 (strb=1010)
+        // Current reg0 = 0xDEADBEEF, wr=0xA5A5A5A5, strb=1010
+        // Expected: byte3=0xA5 byte2=0xAD byte1=0xA5 byte0=0xEF = 0xA5ADA5EF
+        readback_check(4'h0, 32'hA5A5A5A5, 4'b1010, 32'hDEADBEEF, "strb_1010_reg0");
+
+        // Test 4: Byte-strobe partial write reg1 (strb=0101)
+        // Current reg1 = 0xCAFEBABE, wr=0x5A5A5A5A, strb=0101
+        // Expected: byte3=0xCA byte2=0x5A byte1=0xBA byte0=0x5A = 0xCA5ABA5A
+        readback_check(4'h4, 32'h5A5A5A5A, 4'b0101, 32'hCAFEBABE, "strb_0101_reg1");
+
+        // Test 5: Walking ones on reg0
+        begin : walking_ones_blk
+            integer wi;
+            reg [31:0] wi_data, wi_actual;
+            reg [1:0] wi_resp;
+            for (wi = 0; wi < 32; wi = wi + 1) begin
+                wi_data = (32'h1 << wi);
+                write_reg(4'h0, wi_data, 4'b1111, 2'b00);
+                read_reg_data(4'h0, wi_actual, wi_resp);
+                if (wi_actual !== wi_data || wi_resp !== 2'b00) begin
+                    $display("READBACK_FAIL walking_ones[%0d]: wr=0x%08h got=0x%08h resp=0b%02b",
+                             wi, wi_data, wi_actual, wi_resp);
+                    readback_fail_count = readback_fail_count + 1;
+                end else begin
+                    readback_pass_count = readback_pass_count + 1;
+                end
+            end
+        end
+
+        // Test 6: Invalid address read (SLVERR, data=0x0)
+        begin : invalid_read_blk
+            reg [31:0] inv_data;
+            reg [1:0] inv_resp;
+            read_reg_data(4'hC, inv_data, inv_resp);
+            if (inv_resp !== 2'b10) begin
+                $display("READBACK_FAIL invalid_addr_read: resp=0b%02b expected=0b10", inv_resp);
+                readback_fail_count = readback_fail_count + 1;
+            end else if (inv_data !== 32'h00000000) begin
+                $display("READBACK_FAIL invalid_addr_read: data=0x%08h expected=0x00000000", inv_data);
+                readback_fail_count = readback_fail_count + 1;
+            end else begin
+                $display("READBACK_PASS invalid_addr_read: resp=SLVERR data=0x00000000");
+                readback_pass_count = readback_pass_count + 1;
+            end
+        end
+
+        $display("--- Readback Summary: %0d PASS, %0d FAIL ---", readback_pass_count, readback_fail_count);
+        if (readback_fail_count > 0) begin
+            fail("golden reference readback checks failed");
+        end
 
         $display("PASS axi lite regs");
         $finish;

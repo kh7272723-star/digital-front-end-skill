@@ -30,6 +30,91 @@ module tb;
 
     integer cycle_count;
 
+    // --- Strategy E: Invariant Checking ---
+    integer inv_fail_count;
+    reg inv_fail_flag;
+
+    // Pre-edge sampling registers (blocking, captured at posedge before DUT updates)
+    reg       pre_awvalid;
+    reg       pre_wvalid;
+    reg       pre_wready;
+    reg       pre_bvalid;
+    reg       pre_active;
+    reg       pre_aw_done;
+    reg [8:0] pre_beats_rem;
+    reg       pre_done_valid;
+
+    // Pre-edge capture (non-blocking, same posedge as DUT)
+    always @(posedge clk_i) begin
+        pre_awvalid  <= m_awvalid_o;
+        pre_wvalid   <= m_wvalid_o;
+        pre_wready   <= m_wready_i;
+        pre_bvalid   <= m_bvalid_i;
+        pre_active   <= dut.active_q;
+        pre_aw_done  <= dut.aw_done_q;
+        pre_beats_rem <= dut.beats_rem_q;
+        pre_done_valid <= done_valid_o;
+    end
+
+    // Invariant checks (after #1 settling delay, using pre-edge values)
+    always @(posedge clk_i) begin
+        #1;
+        if (rst_i) begin
+            inv_fail_count = 0;
+            inv_fail_flag  = 1'b0;
+        end else begin
+            // INV1: beats_rem_q must be 0 when idle (not active)
+            if (!pre_active && pre_beats_rem != 9'd0) begin
+                $display("INVARIANT_FAIL [INV1] cycle %0d: beats_rem_q=%0d but active_q=0 (should be 0 when idle)",
+                         cycle_count, pre_beats_rem);
+                inv_fail_count = inv_fail_count + 1;
+                inv_fail_flag = 1'b1;
+            end
+
+            // INV2: beats_rem_q must not increase during W phase (active && aw_done)
+            // Only check when no new command was accepted (active stayed high)
+            if (pre_active && pre_aw_done && dut.beats_rem_q > pre_beats_rem &&
+                !pre_done_valid) begin
+                $display("INVARIANT_FAIL [INV2] cycle %0d: beats_rem_q increased from %0d to %0d during W phase (no cmd accepted)",
+                         cycle_count, pre_beats_rem, dut.beats_rem_q);
+                inv_fail_count = inv_fail_count + 1;
+                inv_fail_flag = 1'b1;
+            end
+
+            // INV3: BVALID must not fire when tracker is idle
+            if (pre_bvalid && !pre_active && !pre_done_valid) begin
+                $display("INVARIANT_FAIL [INV3] cycle %0d: BVALID=1 but active_q=0 (response without request)",
+                         cycle_count);
+                inv_fail_count = inv_fail_count + 1;
+                inv_fail_flag = 1'b1;
+            end
+
+            // INV4: When WVALID && !WREADY, WVALID must hold next cycle (H1/P11)
+            if (pre_wvalid && !pre_wready) begin
+                if (!m_wvalid_o) begin
+                    $display("INVARIANT_FAIL [INV4] cycle %0d: WVALID dropped while WREADY=0 (H1/P11 violation)",
+                             cycle_count);
+                    inv_fail_count = inv_fail_count + 1;
+                    inv_fail_flag = 1'b1;
+                end
+            end
+
+            // INV5: active_q and aw_done_q must be 0 or 1 (no X/Z)
+            if (pre_active !== 1'b0 && pre_active !== 1'b1) begin
+                $display("INVARIANT_FAIL [INV5] cycle %0d: active_q is X/Z (%b)",
+                         cycle_count, pre_active);
+                inv_fail_count = inv_fail_count + 1;
+                inv_fail_flag = 1'b1;
+            end
+            if (pre_aw_done !== 1'b0 && pre_aw_done !== 1'b1) begin
+                $display("INVARIANT_FAIL [INV5] cycle %0d: aw_done_q is X/Z (%b)",
+                         cycle_count, pre_aw_done);
+                inv_fail_count = inv_fail_count + 1;
+                inv_fail_flag = 1'b1;
+            end
+        end
+    end
+
     axi_write_burst_tracker dut (
         .clk_i(clk_i),
         .rst_i(rst_i),
@@ -264,7 +349,17 @@ module tb;
         accept_b(2'b10, 1'b1);
         consume_done();
 
-        $display("PASS axi write tracker");
+        // --- INVARIANT_SUMMARY ---
+        if (inv_fail_count == 0)
+            $display("INVARIANT_SUMMARY: 0 violations detected (ALL INVARIANTS PASS)");
+        else
+            $display("INVARIANT_SUMMARY: %0d violation(s) detected (INVARIANT FAIL)", inv_fail_count);
+
+        if (!inv_fail_flag) begin
+            $display("PASS axi write tracker");
+        end else begin
+            $display("FAIL axi write tracker (invariant violations)");
+        end
         $finish;
     end
 endmodule

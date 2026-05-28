@@ -327,6 +327,156 @@ endmodule
 - [ ] Scoreboard handles CDC synchronization delay (use FIFOs or delayed comparison)
 - [ ] Driver/monitor tasks do NOT mix signals from different clock domains
 
+## 9. Golden reference testbench patterns
+
+These patterns implement the golden reference methodology from `golden-reference-guide.md`. Use them to add functional checking to any testbench.
+
+### 9a. Known I/O pair checker (computation modules)
+
+```verilog
+// Golden I/O: check known input->output pairs
+// Use for CRC, ECC, ALU, encoder/decoder
+// Expected values from authoritative source (IEEE 802.3, ISA spec, etc.)
+task check_golden;
+    input [IN_W-1:0]  test_in;
+    input [OUT_W-1:0] expected;
+    input [255:0]     name;
+    reg [OUT_W-1:0]   actual;
+begin
+    din_i = test_in;
+    valid_i = 1'b1;
+    @(posedge clk_i); #1;
+    valid_i = 1'b0;
+    // Wait for module-specific latency
+    repeat (LATENCY) begin @(posedge clk_i); #1; end
+    actual = dout_o;
+    if (actual !== expected) begin
+        $display("GOLDEN_FAIL %0s: in=%08h got=%08h exp=%08h",
+                 name, test_in, actual, expected);
+        fail_cnt = fail_cnt + 1;
+    end else begin
+        $display("GOLDEN_PASS %0s", name);
+    end
+end
+endtask
+```
+
+### 9b. Write-readback scoreboard (register modules)
+
+```verilog
+// Write a value to a register, read it back, compare
+// Use for APB/AXI-Lite register blocks
+//
+// PITFALL: Bus read data (PRDATA, RDATA) is often combinational from
+// the current address. If the bus idle task clears the address after
+// the read, PRDATA changes to the value at address 0x0.
+// FIX: Sample PRDATA BEFORE calling idle_bus(), or check register
+// output pins directly (reg0_o, reg1_o).
+task check_reg_readback;
+    input [ADDR_W-1:0] addr;
+    input [DATA_W-1:0] wr_data;
+    input [STRB_W-1:0] wr_strb;
+    reg [DATA_W-1:0] expected;
+begin
+    bus_write(addr, wr_data, wr_strb);
+    bus_read(addr);
+    // Expected: wr_data masked by strb, OR'd with reset default for unmasked bits
+    expected = (wr_data & strb_to_mask(wr_strb)) |
+               (RESET_DEFAULT & ~strb_to_mask(wr_strb));
+    if (rdata_o !== expected) begin
+        $display("READBACK_FAIL @%08h: got=%08h exp=%08h",
+                 addr, rdata_o, expected);
+        fail_cnt = fail_cnt + 1;
+    end else begin
+        $display("READBACK_PASS @%08h", addr);
+    end
+end
+endtask
+```
+
+### 9c. Data integrity scoreboard (data movement modules)
+
+```verilog
+// Scoreboard: enqueue expected on input, dequeue and compare on output
+// Use for DMA, FIFO, width converter, stream buffer
+reg [DATA_W-1:0] sb_queue [0:255];
+integer sb_wr, sb_rd;
+
+initial begin sb_wr = 0; sb_rd = 0; end
+
+// Input monitor: enqueue on input handshake
+always @(posedge clk_i) begin
+    if (rst_i) begin
+        sb_wr <= 0;
+    end else if (in_valid && in_ready) begin
+        sb_queue[sb_wr] <= in_data;
+        sb_wr <= sb_wr + 1;
+    end
+end
+
+// Output checker: dequeue and compare on output handshake
+always @(posedge clk_i) begin
+    #1;
+    if (!rst_i && out_valid && out_ready) begin
+        if (out_data !== sb_queue[sb_rd]) begin
+            $display("INTEGRITY_FAIL beat %0d: got=%08h exp=%08h",
+                     sb_rd, out_data, sb_queue[sb_rd]);
+            fail_cnt = fail_cnt + 1;
+        end
+        sb_rd = sb_rd + 1;
+    end
+end
+```
+
+### 9d. Invariant checker (stateful modules)
+
+```verilog
+// Continuous invariant checks — run every cycle after reset
+// Use for arbiters, credit counters, FSMs
+//
+// PITFALL: For registered outputs (e.g., valid_o), do NOT check
+// relationships with combinational inputs every cycle — registered
+// outputs hold while inputs change, causing false violations.
+// Check "no grant without request" only at grant time.
+//
+// PITFALL: Use pre-edge sampling to avoid race conditions with
+// DUT combinational logic settling.
+
+// Pre-edge capture (non-blocking, same posedge as DUT)
+reg ready_o_pre;
+reg [N-1:0] valid_i_pre;
+always @(posedge clk_i) begin
+    ready_o_pre <= ready_o;
+    valid_i_pre <= valid_i;
+end
+
+// Invariant checks (after #1 settle)
+always @(posedge clk_i) begin
+    #1;
+    if (!rst_i) begin
+        // INV1: grant must be one-hot or zero
+        if (grant_o !== 0 && !$onehot(grant_o)) begin
+            $display("INVARIANT_FAIL at %0t: grant=%b not one-hot",
+                     $time, grant_o);
+            fail_cnt = fail_cnt + 1;
+        end
+        // INV2: no grant without request (check ONLY at grant time)
+        if (ready_o_pre !== 0) begin
+            if (!valid_i_pre[grant_o]) begin
+                $display("INVARIANT_FAIL at %0t: grant without request", $time);
+                fail_cnt = fail_cnt + 1;
+            end
+        end
+        // INV3: counter must not exceed maximum
+        if (credit_q > MAX_CREDIT) begin
+            $display("INVARIANT_FAIL at %0t: credit overflow %0d",
+                     $time, credit_q);
+            fail_cnt = fail_cnt + 1;
+        end
+    end
+end
+```
+
 ## What to capture from testbench examples
 - reset sequencing
 - transaction timing
@@ -337,3 +487,4 @@ endmodule
 - **Drive-on-negedge for stimulus in multi-clock testbenches**
 - **#1 settling delay in all monitor/checker tasks**
 - **CDC latency tolerance in cross-domain scoreboards**
+- **Golden reference checks: known I/O pairs, readback scoreboard, data integrity, invariants**
