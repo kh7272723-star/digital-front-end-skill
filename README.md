@@ -221,3 +221,4 @@ python scripts/yosys_extract.py --top <module> --sources <files>
 ## License
 
 This project is a curated engineering knowledge base and evaluation framework. See individual reference files for attribution of authoritative sources (IEEE, Arm, SNUG, etc.).
+
