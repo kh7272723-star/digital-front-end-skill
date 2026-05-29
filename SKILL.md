@@ -245,6 +245,9 @@ Before simulation, review the generated RTL against this checklist. Each item mu
 - [ ] Power state machine has no illegal transitions, uses two-process FSM — LP3
 - [ ] Gated clock domain crossings use pulse synchronizers (not level) — LP4
 - [ ] DVFS frequency change gated by bus idle — LP5
+- [ ] Operand isolation applied to wide (>32-bit) combinational logic — LP6
+- [ ] Pulse outputs (ack, done, save, restore) use transition detection, not state comparison — LP7
+- [ ] FSM intermediate states have abort path on request deassertion — SM3
 - [ ] Wide combinational logic (>32-bit) has operand isolation — LP6
 
 **Physical awareness (for ASIC targets, cite `references/advanced/physical-awareness-guidelines.md`):**
@@ -282,6 +285,23 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 - Do NOT claim the design is correct
 - Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
 - Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
+
+### 8c. Design principle review (mandatory)
+
+**The 57 patterns in the bug-pattern library are specific instances of 6 core principles.** Before simulation, apply each principle to the design holistically. This catches functional issues that structural checklist items miss (P18, BUG-1-BUG-4).
+
+Read `references/design/design-principles.md` and answer these 6 questions. For each "no" or "unclear", fix before proceeding. Cite specific signal names or line numbers.
+
+| Principle | Question | YES/NO/NA | Evidence |
+|-----------|----------|-----------|----------|
+| P1: Timing Contract | Is every output's signal type (pulse/level/registered) documented in the interface contract? | | |
+| P2: FSM Safety | Can every FSM state find a path back to IDLE? Do intermediate states have abort paths? | | |
+| P3: Known Values | Does every register have a known value after reset? Are unreset memories documented with init strategy? | | |
+| P4: Independence | Are independent channels/paths/domains decoupled? No AXI channels sharing a single FSM? | | |
+| P5: Physical World | Are isolation/retention/clock-gate sequences correct? Wide combinational paths isolated when unused? | | |
+| P6: Boundaries | Does every module boundary have an explicit contract (port widths, signal types, reset behavior)? | | |
+
+**After completing the table:** For any "NO" — fix the design. For any "UNCLEAR" — either fix or document as a residual risk. This step takes 2-3 minutes and prevents the most common class of functional bugs that structural review misses.
 
 ### 9. Generate verification and run simulation loop
 

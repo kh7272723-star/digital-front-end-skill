@@ -21,9 +21,27 @@ For each matched pattern, cite the pattern ID, include the prevention assertion,
 | INTC | Real project experience: Interrupt controller (2026-05-23) | Project |
 | CRC | Real project experience: CRC AXI-Stream generator (2026-05-23) | Project |
 
+## Design Principles (read FIRST before pattern matching)
+
+This library contains 57+ specific patterns. But experienced engineers don't scan 57 patterns one by one — they apply a small set of core principles that make patterns visible. Read `references/design/design-principles.md` for the 6 principles and their active-search questions.
+
+**Quick mapping:**
+
+| Principle | Key Question | Main Patterns |
+|-----------|-------------|---------------|
+| P1: Timing Contract | Is every signal's pulse/level/registered type documented? | H1, H2, H8, LP7, P11, P12, P18, F1, F2 |
+| P2: FSM Safety | Can this FSM get stuck? Does every state have a path home? | SM1, SM2, SM3, C2, C3, LP3, LP7 |
+| P3: Known Values | What value does every register have after reset? | E1-E8, BUG-4, BUG-5, DP4 |
+| P4: Independence | Are independent channels/paths/domains decoupled? | P4, P5, P9, P13, LP4, CDC |
+| P5: Physical World | Does this RTL respect power/timing/area constraints? | LP1, LP2, LP5, LP6, PH1-PH4 |
+| P6: Boundaries | Does every module boundary have an explicit contract? | DP5, BUG-7, integration invariants |
+
+**Workflow:** After RTL generation, apply the 6 principles (design-principles.md) → any violations found → look up the specific pattern below for the fix template.
+
 ## Pattern structure
 
 Each pattern has:
+- **Principle**: which of the 6 design principles this pattern violates (P1-P6)
 - **Category**: handshake / boundary / reset / pipeline / protocol / counter / state-machine
 - **Frequency**: high / medium / low — how often this appears in real RTL work
 - **Applies to**: which module types or structures are at risk
@@ -3032,6 +3050,84 @@ module my_block (
 ```
 
 **Prevention:** Group related bus signals in port declarations. Use channel-based grouping (AW, W, B, AR, R for AXI). This guides physical designer to route buses together.
+
+---
+
+### SM3: FSM intermediate state lacks abort path on request deassertion
+
+**Category:** FSM
+**Frequency:** Medium
+**Symptom:** FSM enters an intermediate state (e.g., waiting for external condition), request deasserts, but FSM never returns to IDLE. Busy flag stays high forever.
+**Root cause:** Intermediate state has no transition condition for `!request_i`, only for the success condition.
+
+**Bug code:**
+```verilog
+S_CHECK_IDLE: begin
+    // Waits for bus_idle_i, but no way back if request deasserts
+    if (bus_idle_i) begin
+        start_pmu = 1'b1;
+        state_d   = S_REQUEST;
+    end
+    // MISSING: else if (!freq_req_i) state_d = S_IDLE;
+end
+```
+
+**Correct code:**
+```verilog
+S_CHECK_IDLE: begin
+    if (!freq_req_i) begin
+        abort_dvfs = 1'b1;   // clear side effects (busy, isolation)
+        state_d    = S_IDLE;
+    end else if (bus_idle_i) begin
+        start_pmu = 1'b1;
+        state_d   = S_REQUEST;
+    end
+    // else: remain in S_CHECK_IDLE until bus idle or abort
+end
+```
+
+**Prevention:** Every non-terminal FSM state entered on a request signal MUST have an abort path back to IDLE when the request deasserts. This includes states waiting for: bus idle, FIFO not empty, external acknowledge, counter threshold. Use a dedicated `abort_*` single-bit enable to clean up side effects (busy, valid, enable outputs).
+
+**VCD detection:** Check if `state != IDLE` persists for more than expected cycles. Trace the input conditions.
+
+**Source:** Low-Power SoC Subsystem validation (2026-05-29), dvfs_ctrl S_CHECK_IDLE stuck.
+
+---
+
+### LP7: Pulse output uses state comparison instead of transition detection
+
+**Category:** Low-power / FSM
+**Frequency:** High
+**Symptom:** Pulse outputs (ack, done, save, restore) fire spuriously on reset release, or stay asserted indefinitely in IDLE state.
+**Root cause:** Pulse condition uses current-state comparison (`state_q == TARGET && counter == 0`) instead of transition detection (`prev_state == SOURCE && state_q == TARGET`).
+
+**Bug code:**
+```verilog
+// BAD: fires on every entry to S_ON, including reset release
+if (state_q == S_ON && wait_cnt_q == 4'd0) begin
+    wake_ack_o <= 1'b1;
+end else begin
+    wake_ack_o <= 1'b0;
+end
+```
+
+**Correct code:**
+```verilog
+// GOOD: fires only on transition INTO S_ON from S_RESTORE
+reg [2:0] prev_state_q;
+// ... prev_state_q <= state_q in sequential block ...
+if (prev_state_q == S_RESTORE && state_q == S_ON) begin
+    wake_ack_o <= 1'b1;
+end else begin
+    wake_ack_o <= 1'b0;
+end
+```
+
+**Prevention:** ALL pulse outputs (ack, done, save, restore, trigger, irq) MUST use transition detection with a `prev_state_q` register. Never use `state_q == TARGET` for pulse generation. This applies to: PSM ack outputs, retention save/restore pulses, completion pulses, interrupt pulses.
+
+**VCD detection:** Check if pulse output toggles without any state transition. Check if pulse stays high in IDLE state.
+
+**Source:** Low-Power SoC Subsystem validation (2026-05-29), psm wake_ack stuck at 1 after reset.
 
 ---
 

@@ -228,6 +228,35 @@ endmodule
 - Isolation enable asserts BEFORE power switch off (LP1)
 - Retention save completes BEFORE power off, restore AFTER power on (LP2)
 - Timing guard counter prevents premature transitions
+- **LP7: Pulse outputs (sleep_ack, wake_ack, retain_save, retain_restore) MUST use transition detection** (`prev_state_q == SOURCE && state_q == TARGET`), never state comparison (`state_q == TARGET`). State comparison causes spurious assertion on reset and idle-state assertion. Add `prev_state_q` register tracking the previous FSM state.
+
+### LP7: Pulse output transition detection pattern
+
+```verilog
+// Track previous state for transition detection
+reg [2:0] prev_state_q;
+always @(posedge clk_i) begin
+    if (rst_i)
+        prev_state_q <= S_ON;
+    else
+        prev_state_q <= state_q;
+end
+
+// CORRECT: transition detection
+// wake_ack_o fires only on transition from S_RESTORE to S_ON
+always @(posedge clk_i) begin
+    if (rst_i)
+        wake_ack_o <= 1'b0;
+    else if (prev_state_q == S_RESTORE && state_q == S_ON)
+        wake_ack_o <= 1'b1;
+    else
+        wake_ack_o <= 1'b0;
+end
+
+// WRONG: state comparison (fires on reset, stays high in S_ON)
+// if (state_q == S_ON && wait_cnt_q == 0) wake_ack_o <= 1'b1;
+```
+- Timing guard counter prevents premature transitions
 - `power_switch_o` is a register (no glitches)
 
 ---

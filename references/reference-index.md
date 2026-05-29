@@ -57,6 +57,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 
 ## Design intuition
 
+- **Design principles (start here — applies to every RTL task):** `references/design/design-principles.md` — 6 core principles with active-search questions; principle-to-pattern mapping for all 57 patterns
 - Design heuristics, sizing guidelines, red flags: `references/design/design-heuristics.md`
 - Engineering intuition checklist (automatable): `references/design/engineering-intuition-checklist.md`; run `scripts/rtl_complexity_check.py` for automated checks
 

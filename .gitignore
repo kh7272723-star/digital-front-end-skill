@@ -22,6 +22,19 @@ desktop.ini
 # Logs
 *.log
 
+# Simulation artifacts
+*.vvp
+*.vcd
+*.out
+sim/
+sim.vvp
+sim.vcd
+
+# Yosys temp
+*.dot
+*.ps
+*.pdf
+
 # Temporary files
 *.tmp
 *.swp

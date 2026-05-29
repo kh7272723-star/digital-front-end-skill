@@ -4,6 +4,111 @@
 
 ---
 
+## 2026-05-29 — 设计原则驱动重构（缺陷 #4：单点经验 → 原则体系）
+
+### 问题背景
+
+Skill 的 57 个 bug pattern 是"单点经验"——每个 pattern 来自一个项目的一个 bug，pattern 之间独立，agent 只能逐条匹配。有经验的工程师不靠逐条匹配，他们应用 6-8 个核心设计原则，从原则推导出潜在问题。
+
+**核心洞察：** 单点经验 = pattern 是 bug 的镜像，不是原则的特例。要修缺陷 #4（"规则 vs 经验"），应该从"补更多 pattern"转向"提炼更少但更深的原则"。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `references/design/design-principles.md` | **新建** (~200 行)：6 个核心设计原则，每个原则有：核心洞察、为什么重要、6-7 个主动搜索问题、覆盖的 pattern 列表、原则→pattern 映射表 |
+| `references/debug/bug-pattern-library.md` | 新增"Design Principles"章节（顶部）：原则速查表 + 使用流程 |
+| `SKILL.md` Step 8c | 新增"Design principle review"步骤：6 个原则的 YES/NO/NA 审查表，强制 agent 在仿真前做主动搜索 |
+| `references/reference-index.md` | 新增 design-principles.md 索引条目 |
+
+### 6 个核心设计原则
+
+| # | 原则 | 一句话 | 覆盖 pattern 数 |
+|---|------|-------|----------------|
+| P1 | Every Signal Has a Timing Contract | 每个信号必须分类为 pulse/level/registered | 10 |
+| P2 | Every State Machine Must Find Its Way Home | 每个 FSM 状态必须能回到 IDLE | 8 |
+| P3 | Every Register Has a Known Value | 每个寄存器在任何时刻的值都必须可知 | 10 |
+| P4 | Independent Things Must Stay Independent | AXI 通道/时钟域/读写路径必须解耦 | 7 |
+| P5 | The Physical World Always Wins | RTL 必须尊重功耗/时序/面积约束 | 10 |
+| P6 | Boundaries Are Where Bugs Hide | 每个模块边界必须有显式合约 | 5 |
+
+### 自审流程变化
+
+```
+旧流程: Step 7 (RTL生成) → Step 8 (57项逐条匹配) → Step 9 (仿真)
+新流程: Step 7 (RTL生成) → Step 8c (6原则主动搜索) → Step 8 (57项逐条匹配) → Step 9 (仿真)
+```
+
+Step 8c 不是为了替代 Step 8，而是作为**前置透镜**——先用原则发现"可能有问题的地方"，再用 pattern 确认具体是什么问题。
+
+### SKILL.md 行数
+
+415 / 500 行
+
+### 设计决策
+
+- **原则放在 references/ 而非 SKILL.md 内联**：原则文档 ~200 行，放 SKILL.md 会突破 500 行限制。Step 8c 在 SKILL.md 中只有审查表（~30 行），详细内容按需加载。
+- **原则不是替代 pattern，是增强**：pattern 仍然存在且有用。原则帮助发现"没有 pattern 覆盖的新 bug"，pattern 提供"已知 bug 的修复模板"。
+- **主动搜索 > 被动匹配**：旧方法是被动等 pattern 匹配（"这个设计有没有 H1"），新方法是主动搜索（"这个设计的 pulse 信号有没有用状态比较"）。
+
+---
+
+## 2026-05-29 — Low-Power SoC 子系统端到端验证 + Debug 闭环
+
+### 项目概要
+
+构建 6 模块 Low-Power SoC 子系统（psm + dvfs_ctrl + clk_gate_ctrl + phys_aware_datapath + apb_regs + soc_top），~1500 行 RTL，5 子代理并行生成，28 项测试。
+
+**结果：28/28 ALL_TESTS_PASS，Yosys 综合 0 latch，9,384 cells。**
+
+### 发现的 7 个 RTL Bug
+
+| ID | 模块 | Bug | 根因 | 类型 |
+|----|------|-----|------|------|
+| BUG-1 | psm | wake_ack_o 复位后错误触发 | 状态比较而非转换检测 | 功能 |
+| BUG-2 | dvfs | freq_req 是 level 不是 pulse | 接口合约未指定信号类型 | 接口 |
+| BUG-3 | dvfs | S_CHECK_IDLE 无 abort 路径 | FSM 缺少请求撤销处理 | 结构 |
+| BUG-4 | datapath | SRAM 未初始化→'x' 传播 | 未处理存储器上电状态 | 功能 |
+| BUG-5 | clk_gate | output reg + assign 混合驱动 | 端口声明类型错误 | 语法 |
+| BUG-6 | apb_regs | 寄存器 PRDATA 延迟未记录 | 验证指导缺少时序说明 | 验证 |
+| BUG-7 | CG | gate_en 位映射含义反直觉 | 寄存器位极性未文档化 | 接口 |
+
+### Debug 过程中的额外发现（3 个）
+
+| ID | 发现 | 影响 |
+|----|------|------|
+| D1 | SRAM 地址指针递增导致读取未初始化槽位 | BUG-4 的第二层根因 |
+| D2 | dp_start level 信号导致流水线无限重触发 | 需要 pulse 信号或忙锁存 |
+| D3 | dp_done pulse 无法被 polling 方式检测 | 需要 sticky status 或 result latch |
+
+### Skill 文件改动
+
+| 文件 | 改动 |
+|------|------|
+| `bug-pattern-library.md` | 新增 SM3（FSM abort path）+ LP7（pulse transition detection）|
+| `low-power-guidelines.md` §4 | 新增 LP7 模式：脉冲输出必须用转换检测 |
+| `SKILL.md` Step 8 | 新增 4 项自审检查：LP6、LP7、SM3、PH-init |
+
+### Pattern 验证状态
+
+| Pattern | 验证结果 |
+|---------|---------|
+| LP1-LP3 | PASS — PSM 隔离/保持/状态机正确 |
+| LP4 | PASS — CDC 脉冲同步器 + ASYNC_REG |
+| LP5 | PASS — DVFS bus idle gate + abort path |
+| LP6 | PASS — 操作数隔离覆盖完整 DVFS 窗口 |
+| PH1-PH4 | PASS — 注册 I/O、max_fanout、SRAM 同层、总线分组 |
+
+### 核心教训
+
+**所有 5 个子代理自审 PASS 但 5/6 模块有真实 bug** — 第三次验证 P18（结构审查 ≠ 功能正确）。自审清单必须持续强化。
+
+### SKILL.md 行数
+
+~410 / 500 行
+
+---
+
 ## 2026-05-29 — 低功耗与物理感知增强（L1→L2+）
 
 ### 问题背景

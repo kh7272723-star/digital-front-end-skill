@@ -16,18 +16,22 @@ This skill fixes those problems by encoding the engineering discipline that expe
 
 ## What it does
 
-Given a digital front-end design request, the skill forces the agent through a structured workflow:
+Given a digital front-end design request, the skill forces the agent through a structured 12-step workflow:
 
 1. Parse and classify the request (leaf module / subsystem / full system)
 2. Build a timing contract (clock, reset, handshake, latency, stall, flush, boundary)
 3. Freeze the design spec (ports, widths, naming, protocol rules)
 4. Identify state elements (registers, memories, movement conditions)
-5. Write a cycle trace (pre-edge state, combinational condition, active-edge update, next visible state)
-6. Select a design pattern (FSM, FIFO, pipeline, arbiter, etc.)
+5. Write a cycle trace (pre-edge, combinational condition, active-edge update, next visible state)
+6. Choose a design pattern (FSM, FIFO, pipeline, arbiter, etc.)
 7. Generate synthesizable RTL (Verilog-first, conservative defaults, bug-pattern scan)
-8. **Functional verification (mandatory)**: run tests with known inputs and expected outputs
-9. Engineering review (maturity level, residual risks)
-10. Verify RTL against the contract and trace
+8. Structural self-review (57-item checklist across 10 categories)
+8b. Functional verification (mandatory — golden reference methodology, 6 strategies)
+8c. Design principle review (mandatory — 6 principles, active-search questions)
+9. Simulation loop (lint → compile → simulate → VCD analysis → fix → re-simulate)
+10. Synthesis feedback (Yosys: latch/loop/critical-path/cell-count checks)
+11. Review and iterate
+12. Verify timing against contract and trace
 
 For large systems (DMA engines, bus bridges, multi-channel controllers), the skill refuses to emit monolithic RTL. Instead it produces a system contract, submodule decomposition, interface contracts, integration invariants, and a staged implementation sequence.
 
@@ -35,10 +39,10 @@ For large systems (DMA engines, bus bridges, multi-channel controllers), the ski
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # The skill definition (380 lines)
-├── SKILL_CHANGELOG.md                # Iteration history (845+ lines)
-├── README.md                         # This file
-├── references/                       # 86 curated knowledge documents
+├── SKILL.md                          # Skill definition (415 lines)
+├── SKILL_CHANGELOG.md                # Full iteration history
+├── README.md / README_CN.md          # This file
+├── references/                       # 87 curated knowledge documents
 │   ├── reference-index.md            # Task-to-reference mapping
 │   ├── timing/                       # Timing semantics, contracts, naming, protocols
 │   ├── architecture/                 # Hierarchy, system contracts, integration invariants
@@ -47,79 +51,94 @@ digital-front-end-skill/
 │   ├── rtl/                          # Coding guidelines, FSM/FIFO/pipeline/handshake examples
 │   ├── patterns/                     # Arbiter, credit-based, CRC, ECC, width converter, etc.
 │   ├── synthesis/                    # CDC, constraints, synthesis guidance
-│   ├── verification/                 # TB examples, assertions, simulation loop, UVM
-│   ├── debug/                        # Bug pattern library (55 patterns)
-│   ├── design/                       # Power/timing/area rules, design heuristics
+│   ├── verification/                 # TB examples, assertions, simulation loop, golden reference
+│   ├── debug/                        # Bug pattern library (57 patterns)
+│   ├── design/                       # **6 design principles**, heuristics, PTA rules, intuition checklist
 │   ├── project/                      # Brownfield, large module guidance
 │   └── advanced/                     # Low-power, DFT, UVM, physical awareness
 ├── evals/
-│   ├── evals.json                    # 59 evaluation prompts with 250+ assertions
+│   ├── evals.json                    # 63 evaluation prompts with 250+ assertions
 │   ├── benchmark.json                # Benchmark metadata and dimension coverage
 │   ├── task_benchmark.json           # 12 engineer-level A/B comparison tasks
 │   ├── fixtures/                     # 4 bug fixtures for debug evaluation
 │   └── trials/                       # 23 executable RTL + testbench trials
-└── scripts/
-    ├── skill_static_check.py         # Package health checks
-    ├── eval_benchmark_check.py       # Eval dimension coverage checker
-    ├── rtl_check.py                  # Run RTL fixture through Icarus Verilog
-    ├── run_all_trials.py             # Batch-run all executable trials
-    ├── init_task_benchmark.py        # Initialize a benchmark iteration
-    ├── run_task_benchmark.py         # Prepare prompts for agent runs
-    ├── grade_task_benchmark.py       # Grade outputs with deterministic assertions
-    ├── rtl_complexity_check.py       # Engineering intuition complexity checks + Yosys integration
-    ├── vcd_extract.py                # VCD waveform analysis: signal extraction, protocol reconstruction, violation detection
-    └── yosys_extract.py             # Yosys synthesis report extraction: cell count, latch, loop, critical path
+├── scripts/                          # 10 Python automation scripts
+│   ├── skill_static_check.py         # Package health checks
+│   ├── eval_benchmark_check.py       # Eval dimension coverage checker
+│   ├── rtl_check.py                  # Single trial compile + sim
+│   ├── run_all_trials.py             # Batch-run all 23 trials
+│   ├── rtl_complexity_check.py       # Engineering intuition checks + Yosys integration
+│   ├── vcd_extract.py                # VCD waveform analysis + protocol reconstruction
+│   └── yosys_extract.py              # Yosys synthesis report extraction
+└── projects/                         # 13 validated RTL projects
+    ├── test-cdc-capture/
+    ├── test-dma-datapath/
+    ├── test-dma-subsystem/
+    ├── test-fuzzy-spec/
+    ├── test-lowpower-soc/
+    └── test-validation/
 ```
 
 ## Key capabilities
+
+### 6 Design Principles (core innovation)
+
+The skill's 57 bug patterns are organized under 6 core design principles. Instead of scanning 57 patterns one by one, the agent applies these principles as an "active search" lens to catch functional bugs before they become patterns:
+
+| # | Principle | Key Question |
+|---|-----------|-------------|
+| P1 | Every Signal Has a Timing Contract | Is every output's signal type (pulse/level/registered) documented? |
+| P2 | Every FSM Must Find Its Way Home | Can every state find a path back to IDLE? Abort paths for intermediate states? |
+| P3 | Every Register Has a Known Value | What value does every register hold after reset? Uninitialized memories? |
+| P4 | Independent Things Stay Independent | Are AXI channels, clock domains, read/write paths decoupled? |
+| P5 | The Physical World Always Wins | Are power sequences, isolation, operand gating correct for physical implementation? |
+| P6 | Boundaries Are Where Bugs Hide | Does every module boundary have an explicit contract? |
+
+See `references/design/design-principles.md` for the full active-search question set.
 
 ### Contract-first, always
 
 The agent must write a timing contract before any RTL. This is not a suggestion — the skill's workflow makes it structurally impossible to skip. The contract includes clock domains, reset style, handshake semantics, latency, stall behavior, flush behavior, and boundary policy.
 
-### Functional verification is mandatory
+### Functional verification is mandatory (Golden Reference)
 
-Structural self-review (Step 8) checks naming, FSM style, protocol compliance, and reset — but it does NOT verify functional correctness. Step 8b requires running functional tests with known inputs and expected outputs. This addresses the fundamental limitation that a design can pass all structural checks and still produce wrong results.
+Step 8b requires running functional tests with known inputs and expected outputs. Six golden reference strategies cover every module type: known I/O pairs (CRC/ECC), software reference model (algorithms), write-readback scoreboard (register blocks), data integrity scoreboard (DMA/FIFO), invariant checking (arbiters), and latency verification (pipelines). All 6 strategies validated across 10 real projects.
 
-### 55 bug patterns with authoritative sources
+### 57 bug patterns with authoritative sources
 
-The bug pattern library encodes known RTL failure modes discovered through 12 real projects:
+The bug pattern library encodes known RTL failure modes discovered through 13 real projects:
 
 | Category | Patterns | Examples |
 |----------|----------|---------|
 | Handshake (H1-H8) | 8 | Payload stability, ready loops, valid gating, backpressure bypass |
-| Boundary (B1-B5) | 5 | FIFO full/empty, counter off-by-one, pointer reset |
-| Reset (R1-R4) | 4 | Wrong FSM reset state, valid not cleared, async reset recovery |
-| Pipeline (P1-P3) | 3 | Valid during stall, flush priority, data/control misalignment |
 | Protocol (P4-P13) | 10 | AXI channel separation, WVALID burst, APB timing, B response hold |
-| Counter (C1-C4) | 4 | Overflow, illegal FSM state, latch inference, load race |
-| State Machine (SM1-SM2) | 2 | Shadow datapath, multi-bit _d in FSM |
+| Counter/Status (P14-P18) | 5 | Auto-reload race, dedicated clear, status release, pipeline latency |
+| State Machine (SM1-SM3) | 3 | Shadow datapath, multi-bit _d in FSM, FSM abort path |
 | Data Path (DP1-DP5) | 5 | Width converter, bit-slicing, mux glitch, error paths |
+| RTL Correctness (E1-E8) | 8 | Latch inference, multi-driver, truncation, blocking/nonblocking |
 | FIFO (F1-F2) | 2 | FWFT output shift, registered output race |
 | CDC (D1-D2) | 2 | Gray code, ASYNC_REG |
-| Memory (M1-M2) | 2 | Write-during-read hazard, ungated write port |
-| Arbitration (A1) | 1 | Grant stability under backpressure |
-| Clock/Power (CL1) | 1 | Clock gating glitch |
-| Counter/Status (P14-P18) | 5 | Auto-reload race, dedicated clear, status release, pipeline latency |
+| Low-Power (LP1-LP7) | 7 | Isolation timing, retention handshake, PSM states, CDC pulse sync, DVFS gate, operand isolation, pulse transition |
+| Physical (PH1-PH4) | 4 | Registered I/O, fanout control, SRAM proximity, bus grouping |
 | Verification (V1) | 1 | Structural PASS but functional FAIL |
 
-### Synthesis awareness
+### Simulation loop + VCD analysis
 
-RTL is verified with Yosys 0.45 open-source synthesis. Patterns include:
-- Clock-enable over manual clock gating (P1)
-- Casez priority encoder for balanced decode trees (A1)
-- $clog2 for parameterized width discipline (A3)
-- No latch inference from incomplete combinational blocks (E2)
+Full closed-loop verification: `iverilog` compile → `vvp` simulate → parse PASS/FAIL → `vcd_extract.py` waveform analysis (signal timeline extraction, AXI/APB protocol reconstruction, violation detection) → bug pattern matching → minimal fix → re-simulate. Maximum 3 fix-and-rerun iterations.
+
+### Synthesis awareness (Yosys)
+
+Post-simulation synthesis check: latch detection, combinational loop detection, critical path analysis (ltp), cell count verification. `yosys_extract.py` for automated report extraction.
 
 ### Multi-module integration
 
-Sub-agent delegation with interface contracts (`interface_contract.md`) ensures port width consistency across independently generated modules.
+Sub-agent delegation with interface contracts ensuring port width consistency and signal type alignment across independently generated modules. Validated on UART (4 sub-agents), DMA subsystem (4 sub-agents), and Low-Power SoC (5 sub-agents).
 
 ## Design philosophy
 
 ### Refuse to guess
 
-When requirements are incomplete (e.g., "design a FIFO" without specifying full+read behavior), the skill forces the agent to ask or state conservative assumptions. Silent invention of protocol semantics is treated as a bug, not a feature.
+When requirements are incomplete, the skill forces the agent to ask or state conservative assumptions. Silent invention of protocol semantics is treated as a bug, not a feature.
 
 ### Large systems get decomposed
 
@@ -127,96 +146,78 @@ A request for "complete AXI DMA engine" does not produce 500 lines of guessed RT
 
 ### CDC is not negotiable
 
-Multi-bit clock domain crossings cannot be fixed by "just add two flops per bit." The skill refuses to generate guessed CDC RTL and requires an explicit safe crossing pattern (handshake, snapshot, gray counter, or async FIFO).
+Multi-bit clock domain crossings cannot be fixed by "just add two flops per bit." The skill refuses to generate guessed CDC RTL and requires an explicit safe crossing pattern.
 
 ### Verilog-first
 
-Default output is plain Verilog, not SystemVerilog. This minimizes synthesis tool compatibility issues. SystemVerilog features are used only when explicitly requested or when the task genuinely requires them (e.g., SVA assertions).
+Default output is plain Verilog. SystemVerilog features are used only when explicitly requested or when the task genuinely requires them.
 
 ## Protocol coverage
 
-All protocol-specific rules are grounded in official specifications:
-
 | Protocol | Source | Reference files |
 |----------|--------|-----------------|
-| AXI4 Full | Arm IHI 0022 | axi-full-guidelines, axi-multi-outstanding-guidelines, axi-dma-channel-guidelines |
+| AXI4 Full | Arm IHI 0022 | axi-full-guidelines, axi-multi-outstanding, axi-dma-channel |
 | AXI4-Lite | Arm IHI 0022 | axi-lite-guidelines |
 | APB | Arm IHI 0024 | apb-guidelines |
 | AHB-Lite | Arm IHI 0033 | ahb-lite-guidelines |
 | AXI4-Stream | Arm IHI 0051 | axi-stream-guidelines |
 
-## Design pattern catalog
+## Design pattern catalog (18)
 
-The skill covers 18 reusable RTL patterns:
+Ready/valid register slice, skid buffer, FIFO, pipeline stage, FSM (two-process), arbiter (fixed/round-robin), credit-based flow control, retry buffer, width converter, CRC generator, SECDED ECC, multi-bank memory scheduler, counter/register slice, req/ack adapter, rate limiter, frame assembler, CAM, AXI DMA slice.
 
-| Pattern | Use case |
-|---------|----------|
-| Ready/valid register slice | Single-cycle decoupling with backpressure |
-| Skid buffer | Two-entry buffer for throughput under backpressure |
-| FIFO | Bordered storage with ordering guarantees |
-| Pipeline stage | Timing closure with controlled latency |
-| FSM (two-process) | Multi-stage control with explicit states |
-| Arbiter (fixed/round-robin) | Shared resource arbitration |
-| Credit-based flow control | Long-latency backpressure with credit accounting |
-| Retry buffer | ACK/NAK replay with bounded in-flight window |
-| Width converter | Narrow-to-wide or wide-to-narrow streaming |
-| CRC generator | Error detection for data paths |
-| SECDED ECC | Single-error correct, double-error detect |
-| Multi-bank memory scheduler | Bank conflict detection with fair arbitration |
-| Counter / register slice | Simple state tracking |
-| Req/ack adapter | Protocol conversion |
-| Rate limiter | Throughput bounding |
-| Frame assembler | Packet framing with sideband |
-| CAM | Content-addressable lookup |
-| AXI DMA slice | Descriptor parsing, burst planning, completion tracking |
-
-## Validated projects (12)
+## Validated projects (13)
 
 | Project | Type | Tests | Key findings |
 |---------|------|-------|-------------|
-| CDMA x6 | AXI DMA | Multi-round | AW/W/B channel separation, 6 rounds |
+| CDMA x6 | AXI DMA | Multi-round | AW/W/B channel separation, 6-round iteration |
 | Timer | Counter | 16/16 | P14-P17: trigger race, status register |
 | INTC | Interrupt | 12/12 | PSLVERR scope, combinational output timing |
 | CRC | Data path | 7/7 | P18: pipeline latency, functional verification |
 | Async FIFO | CDC | 10/10 | CDC guidelines quality verified |
-| AHB-Lite | Bus | 11/11 | Read data timing, simulation loop |
+| AHB-Lite | Bus | 11/11 | Read data timing, simulation loop validated |
 | DMA System | Multi-module | 1/2 | Interface contracts, SVA compatibility |
-| UART | Multi-module | 6/6 | Interface contract verified |
-| Crossbar | Parameterized | 0/4 | Structural vs functional gap |
+| UART | Multi-module | 6/6 | Interface contract pattern verified |
+| Crossbar | Parameterized | 0/4 | Structural vs functional gap confirmed |
 | Arbiter | Arbitration | 6/6 | Synthesis awareness, mask reset bug |
-| Clock Gate | Low-power | 8/8 | P1 rule verified, zero defects |
-| SPI Master | Complex FSM | 5/5 | 6-state FSM, Yosys synthesis |
+| Clock Gate | Low-power | 8/8 | P1 rule verified, zero design defects |
+| SPI Master | Complex FSM | 5/5 | 6-state FSM, first Yosys synthesis pass |
+| **Low-Power SoC** | **Subsystem** | **28/28** | **LP1-LP7 + PH1-PH4 validated, SM3+LP7 patterns** |
 
 ## Usage
 
 ### As a Claude Code skill
 
-Place the `digital-front-end-skill` directory under your project and reference it in your CLAUDE.md or load it via the skill mechanism. The agent will automatically follow the contract-first workflow for any RTL design request.
+Place the skill under `~/.claude/skills/` or reference it in your project's CLAUDE.md. The agent will automatically follow the contract-first workflow for any RTL design request.
 
 ### Running static checks
 
 ```bash
 python scripts/skill_static_check.py
-```
-
-### Running eval benchmark coverage
-
-```bash
 python scripts/eval_benchmark_check.py
 ```
 
-### Running executable trials
+### Running trials
 
 ```bash
 python scripts/rtl_check.py --case evals/trials/rr_arbiter_trial
+python scripts/run_all_trials.py              # batch all 23
 ```
 
-### Running all trials
+### VCD waveform analysis
 
 ```bash
-python scripts/run_all_trials.py
+python scripts/vcd_extract.py dump.vcd --signals WVALID,WDATA --range 0:50000
+python scripts/vcd_extract.py dump.vcd --protocol axi-write
+python scripts/vcd_extract.py dump.vcd --find-violation stall-data-change
+```
+
+### Yosys synthesis check
+
+```bash
+python scripts/yosys_extract.py --top <module> --sources <files>
 ```
 
 ## License
 
-This project is a curated engineering knowledge base and evaluation framework. See individual reference files for attribution of authoritative sources.
+This project is a curated engineering knowledge base and evaluation framework. See individual reference files for attribution of authoritative sources (IEEE, Arm, SNUG, etc.).
