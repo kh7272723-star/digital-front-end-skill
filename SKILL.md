@@ -238,6 +238,21 @@ Before simulation, review the generated RTL against this checklist. Each item mu
 - [ ] No register array > 64 entries without RAM inference — A1 (UG901, Intel UG-20136)
 - [ ] No hard-coded constants that should be parameters — A3 (RMM §3.3)
 
+**Low-power (when power management is in scope, cite `references/advanced/low-power-guidelines.md`):**
+- [ ] Clock gating uses ICG cell or clock-enable style, not `clk & en` — CL1
+- [ ] Isolation enable asserts before power-off, deasserts after power-on — LP1
+- [ ] Retention save completes before power-off, restore after power-on — LP2
+- [ ] Power state machine has no illegal transitions, uses two-process FSM — LP3
+- [ ] Gated clock domain crossings use pulse synchronizers (not level) — LP4
+- [ ] DVFS frequency change gated by bus idle — LP5
+- [ ] Wide combinational logic (>32-bit) has operand isolation — LP6
+
+**Physical awareness (for ASIC targets, cite `references/advanced/physical-awareness-guidelines.md`):**
+- [ ] Module boundaries have registered I/O (no cross-hierarchy combinational paths) — PH1
+- [ ] High-fanout nets (>50) have `max_fanout` attribute or register replication — PH2
+- [ ] Memory macros in same module hierarchy as primary consumer — PH3
+- [ ] Bus signals grouped by channel at partition ports — PH4
+
 State the review result: PASS (all items checked) or FAIL (list items fixed).
 
 **Critical limitation:** This checklist verifies STRUCTURAL correctness only (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results). A design can pass all items and still produce wrong results. See bug-pattern P18 (CRC pipeline latency) and Crossbar project (routing logic bug) — both passed structural review but failed functional tests.

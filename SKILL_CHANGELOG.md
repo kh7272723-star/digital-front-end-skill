@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-05-29 — 低功耗与物理感知增强（L1→L2+）
+
+### 问题背景
+
+Skill 能力审计发现低功耗（89 行，L1）和物理感知（117 行，L1）是两个最薄弱的领域。现有内容仅停留在概念介绍层面，无法指导实际 RTL 设计。需要提升到可执行的 RTL 模式指导（L2+）。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `references/advanced/low-power-guidelines.md` | 89→~350 行：新增 PSM、retention flop、isolation cell、level shifter、power-aware CDC、DVFS 控制器、低功耗存储器设计 |
+| `references/advanced/physical-awareness-guidelines.md` | 117→~350 行：新增 floorplan-aware RTL、macro placement、congestion-aware coding、wire delay pipeline、IR drop 缓解、CTS-aware、面积优化、Yosys 物理代理 |
+| `references/debug/bug-pattern-library.md` | 新增 10 个 pattern：LP1-LP6（低功耗）、PH1-PH4（物理感知） |
+| `SKILL.md` Step 8 | 新增低功耗检查项（7 项）+ 物理感知检查项（4 项） |
+| `references/reference-index.md` | 更新低功耗和物理感知条目描述 |
+| `evals/evals.json` | 新增 4 个 eval（60-63）：电源门控模块、DVFS 控制器、floorplan 审查、时钟门控数据通路 |
+
+### 新增 Bug Pattern 详情
+
+| ID | Pattern | 类别 | 核心要点 |
+|----|---------|------|---------|
+| LP1 | 隔离使能时序违规 | 低功耗 | isolation enable 必须在 power-off 前使能 |
+| LP2 | Retention save/restore 握手竞争 | 低功耗 | save 和 power-off 必须在不同 FSM 状态 |
+| LP3 | 电源状态机非法状态转换 | 低功耗 | PSM 不得跳过必要中间状态 |
+| LP4 | 门控时钟域穿越无同步器 | 低功耗/CDC | 门控域→非门控域必须用脉冲同步器 |
+| LP5 | DVFS 频率切换期间有活跃传输 | 低功耗 | 频率切换必须在总线空闲时进行 |
+| LP6 | 宽组合逻辑未应用操作数隔离 | 低功耗 | >32-bit 组合逻辑需要操作数隔离 |
+| PH1 | 层次边界落在关键路径 | 物理 | 模块边界必须有寄存器 I/O |
+| PH2 | 高扇出网络无寄存器复制 | 物理 | >50 扇出需要 max_fanout 属性 |
+| PH3 | 存储器宏单元远离消费者 | 物理 | SRAM 和数据通路在同一层次 |
+| PH4 | 总线信号未分组 | 物理 | 按通道分组端口声明 |
+
+### 设计决策
+
+- **纯 RTL 模式**：不涉及 UPF/CPF 命令，保持 Verilog-first 哲学
+- **Yosys 作为物理代理**：用综合报告（cell count、critical path）替代后端工具
+- **代码审查 + 仿真验证**：物理感知通过审查清单和 Yosys 综合验证，不需要 ICC2/Innovus
+
+### SKILL.md 行数
+
+~400 / 500 行
+
+---
+
 ## 2026-05-28 — Golden Reference 方法论（解决"结构 PASS 功能 FAIL"系统性缺陷）
 
 ### 问题背景

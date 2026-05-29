@@ -2685,6 +2685,356 @@ check_golden(8'hAB, 8'h58, "crc8_single_beat");
 
 ---
 
+## Low-power patterns
+
+### LP1: Isolation enable timing violation
+
+**Category:** Low Power
+**Frequency:** High (every power-gated design)
+**Symptom:** Bus contention or metastability at power domain boundary during power-off
+**Root cause:** Isolation enable deasserted too late (after power-off) or asserted too early (before power-on stable)
+
+**Bug code:**
+```verilog
+// BAD: isolation and power switch controlled by same signal
+assign isolation_en = !power_switch;  // simultaneous → contention window
+```
+
+**Correct code:**
+```verilog
+// GOOD: isolation asserts BEFORE power-off, deasserts AFTER power-on
+// PSM state sequence: ISOLATING → SAVE → OFF → WAKING → RESTORE → DEISOLATING
+assign isolation_en = (state == S_ISOLATING) || (state == S_SAVE_RETAIN) ||
+                      (state == S_POWER_OFF) || (state == S_SLEEP) ||
+                      (state == S_WAKING) || (state == S_RESTORE);
+assign power_switch = (state != S_POWER_OFF) && (state != S_SLEEP);
+// Isolation is ON for 2 extra states before power-off and after power-on
+```
+
+**Prevention:** In self-review, verify isolation enable timing against power state machine. Isolation MUST be asserted at least 1 cycle before power-off.
+
+---
+
+### LP2: Retention save/restore handshake race
+
+**Category:** Low Power
+**Frequency:** Medium
+**Symptom:** Retention register contains stale or corrupted data after power-on
+**Root cause:** Save overlaps with power-off, or restore overlaps with de-isolation
+
+**Bug code:**
+```verilog
+// BAD: save and power-off in same cycle
+always @(posedge clk_i) begin
+    if (power_off_req) begin
+        shadow_q <= data_q;      // save
+        power_switch <= 1'b0;    // power off — same cycle! save may not complete
+    end
+end
+```
+
+**Correct code:**
+```verilog
+// GOOD: save completes BEFORE power-off (separate states)
+// PSM: SAVE state (1+ cycles) → OFF state (power off after save done)
+always @(posedge clk_i) begin
+    if (retain_save_i)      // asserted by PSM in SAVE state
+        shadow_q <= data_q; // save completes in SAVE state
+    else if (retain_restore_i)  // asserted by PSM in RESTORE state
+        data_q <= shadow_q;     // restore in RESTORE state
+    else
+        data_q <= data_d;
+end
+```
+
+**Prevention:** Retention save and power-off MUST be in separate FSM states with at least 1 cycle gap.
+
+---
+
+### LP3: Power state machine illegal state transition
+
+**Category:** Low Power
+**Frequency:** Medium
+**Symptom:** Unexpected power domain behavior, contention, or data loss
+**Root cause:** PSM has unreachable states or transitions that skip required steps
+
+**Bug code:**
+```verilog
+// BAD: can go directly from SLEEP to S_ON (skips WAKING, RESTORE, DEISOLATING)
+case (state_q)
+    S_SLEEP: begin
+        if (wake_req_i)
+            state_d = S_ON;  // illegal: skips isolation release, retention restore
+    end
+end
+```
+
+**Correct code:**
+```verilog
+// GOOD: all transitions go through required intermediate states
+case (state_q)
+    S_SLEEP: begin
+        if (wake_req_i)
+            state_d = S_WAKING;  // must go through WAKING → RESTORE → DEISOLATING
+    end
+end
+// Two-process FSM with default: state_d = S_ON (safe default)
+```
+
+**Prevention:** Draw PSM state diagram before coding. Verify every transition. Use `default: state_d = S_ON` for illegal states.
+
+---
+
+### LP4: Gated clock domain crossing without synchronizer
+
+**Category:** Low Power / CDC
+**Frequency:** High
+**Symptom:** Metastability or data loss when gated clock stops
+**Root cause:** Signal crosses from gated domain to ungated domain using level synchronizer (which fails when gated clock stops)
+
+**Bug code:**
+```verilog
+// BAD: level synchronizer fails when gated_clk stops
+reg [1:0] sync_q;
+always @(posedge ungated_clk_i)
+    sync_q <= {sync_q[0], signal_in_gated_domain};
+```
+
+**Correct code:**
+```verilog
+// GOOD: pulse synchronizer handles stopped clock
+// Convert to pulse in gated domain first
+reg signal_d;
+always @(posedge gated_clk_i)
+    signal_d <= signal_in_gated_domain;
+wire pulse = signal_in_gated_domain & ~signal_d;
+
+// Double-flop pulse synchronizer in ungated domain
+reg [2:0] sync_q;
+always @(posedge ungated_clk_i)
+    sync_q <= {sync_q[1:0], pulse};
+wire pulse_out = sync_q[1] & ~sync_q[2];
+```
+
+**Prevention:** Never gate clocks used for CDC synchronizers. Use pulse synchronizers when source clock may stop.
+
+---
+
+### LP5: DVFS frequency change during active transfer
+
+**Category:** Low Power
+**Frequency:** Low
+**Symptom:** Protocol violation, data corruption during frequency transition
+**Root cause:** Frequency change requested while bus transfer is in progress
+
+**Bug code:**
+```verilog
+// BAD: frequency change can happen mid-transfer
+always @(posedge clk_i) begin
+    if (sw_freq_change)
+        freq_reg <= sw_new_freq;  // may change during AXI burst
+end
+```
+
+**Correct code:**
+```verilog
+// GOOD: frequency change gated by bus idle
+wire bus_idle = !axi_valid && !axi_ready && !outstanding;
+always @(posedge clk_i) begin
+    if (sw_freq_change && bus_idle)  // only change when bus is idle
+        freq_reg <= sw_new_freq;
+end
+```
+
+**Prevention:** DVFS controller MUST check bus idle before frequency change. Document this in the timing contract.
+
+---
+
+### LP6: Operand isolation not applied to wide combinational logic
+
+**Category:** Low Power
+**Frequency:** High (common oversight)
+**Symptom:** Unnecessary switching power in wide combinational blocks
+**Root cause:** Multiplier, barrel shifter, or other wide logic switches even when output is unused
+
+**Bug code:**
+```verilog
+// BAD: multiplier always computes even when result is not needed
+wire [63:0] product = a_i * b_i;  // 32x32 multiplier always switching
+assign result = use_product ? product : other_result;
+```
+
+**Correct code:**
+```verilog
+// GOOD: isolate inputs to stop switching
+wire [31:0] a_iso = use_product ? a_i : 32'b0;
+wire [31:0] b_iso = use_product ? b_i : 32'b0;
+wire [63:0] product = a_iso * b_iso;
+assign result = use_product ? product : other_result;
+```
+
+**Prevention:** For any combinational block wider than 32 bits, check if output is always used. If not, apply operand isolation.
+
+---
+
+## Physical awareness patterns
+
+### PH1: Hierarchical boundary on critical path
+
+**Category:** Physical
+**Frequency:** High
+**Symptom:** Timing failure on cross-module combinational path
+**Root cause:** Combinational logic spans two modules that are placed far apart in the floorplan
+
+**Bug code:**
+```verilog
+// BAD: combinational path crosses hierarchy (long wire)
+module block_a (
+    output [31:0] data_o
+);
+    assign data_o = complex_computation;  // output is combinational
+endmodule
+
+module block_b (
+    input  [31:0] data_i,
+    output [31:0] result_o
+);
+    assign result_o = data_i + offset;  // combinational input from block_a
+endmodule
+```
+
+**Correct code:**
+```verilog
+// GOOD: registered boundary at hierarchy
+module block_a (
+    input  clk_i,
+    output reg [31:0] data_o
+);
+    always @(posedge clk_i)
+        data_o <= complex_computation;  // registered output
+endmodule
+
+module block_b (
+    input  clk_i,
+    input  [31:0] data_i,
+    output reg [31:0] result_o
+);
+    always @(posedge clk_i)
+        result_o <= data_i + offset;    // registered input
+endmodule
+```
+
+**Prevention:** Every module boundary should have registered I/O. If a combinational path must cross hierarchy, document it in the timing contract as a potential critical path.
+
+---
+
+### PH2: High-fanout net without register replication
+
+**Category:** Physical
+**Frequency:** High
+**Symptom:** Congestion hotspot, timing failure on high-fanout net
+**Root cause:** Single register drives too many destinations, creating routing congestion
+
+**Bug code:**
+```verilog
+// BAD: single valid signal drives 200 consumers
+reg valid_q;
+always @(posedge clk_i) valid_q <= valid_d;
+// 200 modules read valid_q → routing congestion, slow arrival at far consumers
+```
+
+**Correct code:**
+```verilog
+// GOOD: guide synthesis to replicate
+(* max_fanout = 50 *)
+reg valid_q;
+always @(posedge clk_i) valid_q <= valid_d;
+// Tool replicates to 4 copies, each driving ~50 consumers
+```
+
+**Prevention:** Any signal with fanout >50 should have `max_fanout` attribute or be manually replicated in RTL. Check with `yosys -p "stat"` for fanout information.
+
+---
+
+### PH3: Memory macro too far from data path consumer
+
+**Category:** Physical
+**Frequency:** Medium
+**Symptom:** Timing failure on memory read path, large area overhead for routing
+**Root cause:** Memory macro and its data path consumer are in different floorplan regions
+
+**Bug code:**
+```verilog
+// BAD: memory in one module, consumer in another, far apart
+module memory_block (...);
+    sram_1024x32 u_mem (...);  // placed in region A
+endmodule
+
+module data_processor (...);
+    // placed in region B, 3mm away
+    always @(posedge clk_i)
+        processed <= transform(mem_data_i);  // long wire from mem
+endmodule
+```
+
+**Correct code:**
+```verilog
+// GOOD: memory and consumer in same module (same floorplan region)
+module data_path_with_mem (...);
+    sram_1024x32 u_mem (...);  // placed together
+    always @(posedge clk_i)
+        processed <= transform(u_mem.rdata_o);  // short wire
+endmodule
+```
+
+**Prevention:** Keep memory macros and their primary consumers in the same module hierarchy. Document macro placement intent in RTL comments.
+
+---
+
+### PH4: Bus signals not grouped at partition boundaries
+
+**Category:** Physical
+**Frequency:** Medium
+**Symptom:** Routing congestion at partition ports, bus signals scattered across metal layers
+**Root cause:** Related bus signals are declared as separate ports rather than grouped arrays
+
+**Bug code:**
+```verilog
+// BAD: bus signals scattered across port list
+module my_block (
+    input        axi_awvalid,
+    input [31:0] axi_awaddr,
+    input        axi_wvalid,
+    input [31:0] axi_wdata,
+    // ... other signals interleaved ...
+    input        axi_arvalid,
+    input [31:0] axi_araddr
+);
+```
+
+**Correct code:**
+```verilog
+// GOOD: bus signals grouped, related signals adjacent
+module my_block (
+    // Write address channel
+    input        axi_awvalid_i,
+    input [31:0] axi_awaddr_i,
+    input        axi_awready_o,
+    // Write data channel
+    input        axi_wvalid_i,
+    input [31:0] axi_wdata_i,
+    input        axi_wready_o,
+    // Read address channel
+    input        axi_arvalid_i,
+    input [31:0] axi_araddr_i,
+    input        axi_arready_o
+);
+```
+
+**Prevention:** Group related bus signals in port declarations. Use channel-based grouping (AW, W, B, AR, R for AXI). This guides physical designer to route buses together.
+
+---
+
 ## Self-review limitation rule
 
 **Important:** The Step 8 self-review checklist checks STRUCTURAL correctness (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results, data integrity). See V1 above for the full pattern.

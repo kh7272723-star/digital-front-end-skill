@@ -146,7 +146,9 @@
       "id": 12,
       "prompt": "Use the ready_valid_stall_bug fixture evidence to explain the likely RTL bug and minimal fix. The checker reports EXPECTED_STALL_HOLD_FAIL.",
       "expected_output": "A fixture-driven debug answer that uses the failing signature to identify a valid/data hold violation.",
-      "files": ["evals/fixtures/ready_valid_stall_bug"],
+      "files": [
+        "evals/fixtures/ready_valid_stall_bug"
+      ],
       "assertions": [
         "Output uses the failing signature as evidence.",
         "Output identifies valid/data changing while downstream is stalled.",
@@ -778,6 +780,64 @@
         "Output flags missing stall handling in an 8-stage pipeline as a critical red flag.",
         "Output suggests specific fixes (right-size counter, add stall logic).",
         "Output references the design heuristics guidelines."
+      ]
+    },
+    {
+      "id": 60,
+      "prompt": "Design a power-gated module with isolation and retention for an APB register block. The module has an always-on domain (power state machine, isolation control, wake-up logic) and a switchable domain (functional registers). Include: (1) power state machine controlling isolation enable, power switch, retention save/restore, (2) isolation cells at the boundary (clamp-to-0), (3) retention flops for critical state. Reference low-power guidelines.",
+      "expected_output": "A Verilog module with PSM, isolation, and retention. Isolation enable asserts before power-off. Retention save completes before power-off. All outputs have safe defaults.",
+      "files": [],
+      "assertions": [
+        "Output includes a power state machine with at least 6 states (ON, ISOLATING, SAVE, OFF, WAKING, RESTORE).",
+        "Isolation enable is asserted before power switch is turned off (not simultaneous).",
+        "Retention save completes in a separate state before power-off.",
+        "Retention restore happens after power-on and before de-isolation.",
+        "PSM uses two-process FSM style with safe defaults (no latches).",
+        "Isolation cells use clamp-to-0 pattern (mux with isolation_en).",
+        "Output references low-power guidelines."
+      ]
+    },
+    {
+      "id": 61,
+      "prompt": "Design a DVFS (Dynamic Voltage and Frequency Scaling) controller FSM that interfaces with a PMU (Power Management Unit). The controller accepts frequency change requests from software, handshakes with PMU, and ensures no frequency change occurs during an active bus transfer. Include: (1) request/acknowledge handshake with PMU, (2) bus idle check before frequency change, (3) current frequency readable at all times. Reference low-power guidelines.",
+      "expected_output": "A Verilog DVFS controller FSM with PMU handshake, bus idle gating, and safe frequency transition.",
+      "files": [],
+      "assertions": [
+        "Output uses two-process FSM style.",
+        "Frequency change is gated by bus idle condition.",
+        "PMU handshake uses request/acknowledge pattern (not single pulse).",
+        "Current frequency register is always readable (no glitch).",
+        "FSM has safe defaults (no latches, default state).",
+        "Output references low-power guidelines."
+      ]
+    },
+    {
+      "id": 62,
+      "prompt": "Review this RTL for floorplan-friendliness and physical awareness: a 32-bit datapath has combinational paths crossing 3 module boundaries, a 256-entry register file is in a separate module from its primary consumer, bus signals (AXI AW/W/B/AR/R) are declared as individual ports scattered across the port list, and a single valid signal drives 128 consumers. Identify physical implementation risks and suggest fixes. Reference physical awareness guidelines.",
+      "expected_output": "A review identifying cross-hierarchy combinational paths, macro placement issues, port grouping problems, and high-fanout net risks.",
+      "files": [],
+      "assertions": [
+        "Output flags cross-hierarchy combinational paths as critical (PH1).",
+        "Output suggests registering module boundary outputs.",
+        "Output flags register file placement issue (PH3).",
+        "Output suggests grouping AXI bus signals by channel.",
+        "Output flags 128-fanout valid signal as congestion risk (PH2).",
+        "Output suggests max_fanout attribute or register replication.",
+        "Output references physical awareness guidelines."
+      ]
+    },
+    {
+      "id": 63,
+      "prompt": "Design a clock-gated datapath with operand isolation for a 32x32 multiplier. The datapath should: (1) use clock-enable gating (not manual clock gating) for the output register, (2) apply operand isolation to the multiplier inputs when the result is unused, (3) include a power-aware testbench that verifies switching activity reduction. Reference low-power guidelines and power-timing-area rules.",
+      "expected_output": "A Verilog multiplier datapath with clock-enable gating and operand isolation, plus a testbench verifying power reduction.",
+      "files": [],
+      "assertions": [
+        "Output uses clock-enable style (not manual clk & en).",
+        "Multiplier inputs are isolated when result is unused.",
+        "Isolation uses mux pattern (operand ? input : 0).",
+        "Output register has explicit clock enable signal.",
+        "Testbench verifies that operand isolation reduces switching activity.",
+        "Output references low-power guidelines and power-timing-area P1/P3."
       ]
     }
   ]

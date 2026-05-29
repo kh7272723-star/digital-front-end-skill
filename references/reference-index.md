@@ -62,12 +62,12 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 
 ## Advanced methodology
 
-- Low-power (clock gating, power domains, UPF): `references/advanced/low-power-guidelines.md`
+- Low-power (clock gating, power domains, PSM, retention, isolation, DVFS): `references/advanced/low-power-guidelines.md`; power/timing/area rules: `references/design/power-timing-area.md`
 - DFT (scan, BIST, testability): `references/advanced/dft-guidelines.md`
 - UVM (constrained-random, coverage closure): `references/advanced/uvm-guidelines.md`
 - Synthesis/timing closure (SDC, critical path): `references/synthesis/synthesis-timing-closure-guidelines.md`
 - Formal verification (SVA properties, proofs): `references/synthesis/formal-verification-guidelines.md`
-- Physical awareness (floorplan, wire delay): `references/advanced/physical-awareness-guidelines.md`
+- Physical awareness (floorplan-aware RTL, macro placement, congestion, wire delay, CTS, area): `references/advanced/physical-awareness-guidelines.md`
 
 ## Maintenance
 
