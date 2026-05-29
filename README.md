@@ -35,10 +35,10 @@ For large systems (DMA engines, bus bridges, multi-channel controllers), the ski
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # The skill definition (343 lines)
-├── SKILL_CHANGELOG.md                # Iteration history (480+ lines)
+├── SKILL.md                          # The skill definition (380 lines)
+├── SKILL_CHANGELOG.md                # Iteration history (845+ lines)
 ├── README.md                         # This file
-├── references/                       # 158 curated knowledge documents
+├── references/                       # 86 curated knowledge documents
 │   ├── reference-index.md            # Task-to-reference mapping
 │   ├── timing/                       # Timing semantics, contracts, naming, protocols
 │   ├── architecture/                 # Hierarchy, system contracts, integration invariants
@@ -48,7 +48,7 @@ digital-front-end-skill/
 │   ├── patterns/                     # Arbiter, credit-based, CRC, ECC, width converter, etc.
 │   ├── synthesis/                    # CDC, constraints, synthesis guidance
 │   ├── verification/                 # TB examples, assertions, simulation loop, UVM
-│   ├── debug/                        # Bug pattern library (18 patterns: P1-P18)
+│   ├── debug/                        # Bug pattern library (55 patterns)
 │   ├── design/                       # Power/timing/area rules, design heuristics
 │   ├── project/                      # Brownfield, large module guidance
 │   └── advanced/                     # Low-power, DFT, UVM, physical awareness
@@ -65,7 +65,10 @@ digital-front-end-skill/
     ├── run_all_trials.py             # Batch-run all executable trials
     ├── init_task_benchmark.py        # Initialize a benchmark iteration
     ├── run_task_benchmark.py         # Prepare prompts for agent runs
-    └── grade_task_benchmark.py       # Grade outputs with deterministic assertions
+    ├── grade_task_benchmark.py       # Grade outputs with deterministic assertions
+    ├── rtl_complexity_check.py       # Engineering intuition complexity checks + Yosys integration
+    ├── vcd_extract.py                # VCD waveform analysis: signal extraction, protocol reconstruction, violation detection
+    └── yosys_extract.py             # Yosys synthesis report extraction: cell count, latch, loop, critical path
 ```
 
 ## Key capabilities
@@ -78,21 +81,27 @@ The agent must write a timing contract before any RTL. This is not a suggestion 
 
 Structural self-review (Step 8) checks naming, FSM style, protocol compliance, and reset — but it does NOT verify functional correctness. Step 8b requires running functional tests with known inputs and expected outputs. This addresses the fundamental limitation that a design can pass all structural checks and still produce wrong results.
 
-### 18 bug patterns with authoritative sources
+### 55 bug patterns with authoritative sources
 
 The bug pattern library encodes known RTL failure modes discovered through 12 real projects:
 
 | Category | Patterns | Examples |
 |----------|----------|---------|
-| Handshake (H1-H8) | 8 | Payload stability, ready loops, valid gating |
-| Protocol (P1-P13) | 13 | AXI channel separation, WVALID burst, APB timing |
-| Counter (P14) | 1 | Auto-reload + trigger race |
-| Status Register (P15-P17) | 3 | Dedicated clear, release, capture vs clear priority |
-| Pipeline (P18) | 1 | Combinational output reads stale registered value |
+| Handshake (H1-H8) | 8 | Payload stability, ready loops, valid gating, backpressure bypass |
+| Boundary (B1-B5) | 5 | FIFO full/empty, counter off-by-one, pointer reset |
+| Reset (R1-R4) | 4 | Wrong FSM reset state, valid not cleared, async reset recovery |
+| Pipeline (P1-P3) | 3 | Valid during stall, flush priority, data/control misalignment |
+| Protocol (P4-P13) | 10 | AXI channel separation, WVALID burst, APB timing, B response hold |
+| Counter (C1-C4) | 4 | Overflow, illegal FSM state, latch inference, load race |
 | State Machine (SM1-SM2) | 2 | Shadow datapath, multi-bit _d in FSM |
-| Data Path (DP1-DP5) | 5 | Width converter, bit-slicing, error paths |
-| FIFO (F1-F2) | 2 | FWFT output, registered output race |
+| Data Path (DP1-DP5) | 5 | Width converter, bit-slicing, mux glitch, error paths |
+| FIFO (F1-F2) | 2 | FWFT output shift, registered output race |
 | CDC (D1-D2) | 2 | Gray code, ASYNC_REG |
+| Memory (M1-M2) | 2 | Write-during-read hazard, ungated write port |
+| Arbitration (A1) | 1 | Grant stability under backpressure |
+| Clock/Power (CL1) | 1 | Clock gating glitch |
+| Counter/Status (P14-P18) | 5 | Auto-reload race, dedicated clear, status release, pipeline latency |
+| Verification (V1) | 1 | Structural PASS but functional FAIL |
 
 ### Synthesis awareness
 

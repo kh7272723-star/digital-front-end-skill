@@ -33,10 +33,10 @@
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # Skill 定义（343 行）
-├── SKILL_CHANGELOG.md                # 迭代历史（480+ 行）
+├── SKILL.md                          # Skill 定义（380 行）
+├── SKILL_CHANGELOG.md                # 迭代历史（845+ 行）
 ├── README.md / README_CN.md          # 本文件
-├── references/                       # 158 个知识文档
+├── references/                       # 86 个知识文档
 │   ├── reference-index.md            # 任务到参考文件的映射
 │   ├── timing/                       # 时序语义、合同、命名、协议
 │   ├── architecture/                 # 层次结构、系统合同、集成不变量
@@ -46,29 +46,35 @@ digital-front-end-skill/
 │   ├── patterns/                     # 仲裁器、信用流控、CRC、ECC、宽度转换等
 │   ├── synthesis/                    # CDC、约束、综合指导
 │   ├── verification/                 # 测试台、断言、仿真循环、UVM
-│   ├── debug/                        # Bug pattern 库（18 个 pattern: P1-P18）
+│   ├── debug/                        # Bug pattern 库（55 个 pattern）
 │   ├── design/                       # 功耗/时序/面积规则
 │   ├── project/                      # 棕地开发、大模块指导
 │   └── advanced/                     # 低功耗、DFT、UVM、物理感知
 ├── evals/                            # 59 个评估、23 个试用、4 个 bug fixture
-└── scripts/                          # 7 个 Python 脚本
+└── scripts/                          # 10 个 Python 脚本
 ```
 
 ## 核心能力
 
-### 18 个 Bug Pattern（带权威来源）
+### 55 个 Bug Pattern（带权威来源）
 
 | 类别 | 数量 | 示例 |
 |------|------|------|
-| 握手 (H1-H8) | 8 | 载荷稳定性、ready 循环、valid 门控 |
-| 协议 (P1-P13) | 13 | AXI 通道分离、WVALID burst、APB 时序 |
-| 计数器 (P14) | 1 | 自动重载 + 触发竞争 |
-| 状态寄存器 (P15-P17) | 3 | 专用清除、释放、捕获 vs 清除优先级 |
-| 流水线 (P18) | 1 | 组合输出读取旧寄存器值 |
+| 握手 (H1-H8) | 8 | 载荷稳定性、ready 循环、valid 门控、反压旁路 |
+| 边界 (B1-B5) | 5 | FIFO 满/空、计数器偏移、指针复位 |
+| 复位 (R1-R4) | 4 | FSM 复位状态错误、valid 未清除、异步复位恢复 |
+| 流水线 (P1-P3) | 3 | stall 时 valid 推进、flush 优先级、数据/控制失配 |
+| 协议 (P4-P13) | 10 | AXI 通道分离、WVALID burst、APB 时序、B 响应保持 |
+| 计数器 (C1-C4) | 4 | 溢出、非法 FSM 状态、latch 推断、加载竞争 |
 | 状态机 (SM1-SM2) | 2 | shadow datapath、FSM 中多比特 _d |
-| 数据通路 (DP1-DP5) | 5 | 宽度转换、bit-slicing、错误路径 |
-| FIFO (F1-F2) | 2 | FWFT 输出、寄存器输出竞态 |
+| 数据通路 (DP1-DP5) | 5 | 宽度转换、bit-slicing、mux 毛刺、错误路径 |
+| FIFO (F1-F2) | 2 | FWFT 输出偏移、寄存器输出竞态 |
 | CDC (D1-D2) | 2 | 格雷码、ASYNC_REG |
+| 存储器 (M1-M2) | 2 | 读写冲突、未门控写端口 |
+| 仲裁 (A1) | 1 | 反压下 grant 稳定性 |
+| 时钟/功耗 (CL1) | 1 | 时钟门控毛刺 |
+| 计数器/状态 (P14-P18) | 5 | 自动重载竞争、专用清除、状态释放、流水线延迟 |
+| 验证盲点 (V1) | 1 | 结构 PASS 但功能 FAIL |
 
 ### 综合感知
 
