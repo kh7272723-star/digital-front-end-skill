@@ -27,77 +27,77 @@ Both AR and AW channels use the same FSM structure. The FSM reads a command from
 
 ```verilog
 // cdma_channel_fsm — shared by AR and AW address channels
-// States: IDLE → LOAD → SEND_BLOCK → SEND_REMAIN
+// States: IDLE → CMD_LOAD → FULL_BURST → TAIL_BURST
 module cdma_channel_fsm(
     input  clk_i,
     input  rst_i,
     input  cmd_fifo_empty_i,
-    input  block_present_i,    // full bursts remain
-    input  remain_present_i,   // partial burst remains
-    input  ready_i,            // AXI ARREADY or AWREADY
+    input  full_burst_present_i,    // full bursts remain
+    input  remain_burst_present_i,  // partial burst remains
+    input  ready_i,                 // AXI ARREADY or AWREADY
     output reg cmd_fifo_rd_en_o,
-    output reg load_block_o,
-    output reg load_remain_o,
+    output reg load_full_burst_o,
+    output reg load_remain_burst_o,
     output reg send_next_o,
     output reg load_addr_o,
     output reg valid_o
 );
     localparam S_IDLE        = 4'b0001;
-    localparam S_LOAD        = 4'b0010;
-    localparam S_SEND_BLOCK  = 4'b0100;
-    localparam S_SEND_REMAIN = 4'b1000;
-    reg [3:0] cstate, nstate;
+    localparam S_CMD_LOAD    = 4'b0010;
+    localparam S_FULL_BURST  = 4'b0100;
+    localparam S_TAIL_BURST  = 4'b1000;
+    reg [3:0] state_q, state_d;
 
     // Process 1: state register
     always @(posedge clk_i) begin
-        if (rst_i) cstate <= S_IDLE;
-        else       cstate <= nstate;
+        if (rst_i) state_q <= S_IDLE;
+        else       state_q <= state_d;
     end
 
     // Process 2: next-state + outputs with defaults
     always @(*) begin
-        cmd_fifo_rd_en_o = 1'b0;
-        load_block_o     = 1'b0;
-        load_remain_o    = 1'b0;
-        send_next_o      = 1'b0;
-        valid_o          = 1'b0;
-        load_addr_o      = 1'b0;
-        nstate           = S_IDLE;
-        case (cstate)
+        cmd_fifo_rd_en_o   = 1'b0;
+        load_full_burst_o  = 1'b0;
+        load_remain_burst_o = 1'b0;
+        send_next_o        = 1'b0;
+        valid_o            = 1'b0;
+        load_addr_o        = 1'b0;
+        state_d            = S_IDLE;
+        case (state_q)
             S_IDLE: begin
                 if (!cmd_fifo_empty_i) begin
                     cmd_fifo_rd_en_o = 1'b1;
-                    nstate = S_LOAD;
+                    state_d = S_CMD_LOAD;
                 end
             end
-            S_LOAD: begin
+            S_CMD_LOAD: begin
                 load_addr_o = 1'b1;
-                if (block_present_i) begin
-                    load_block_o = 1'b1;
-                    nstate = S_SEND_BLOCK;
-                end else if (remain_present_i) begin
-                    load_remain_o = 1'b1;
-                    nstate = S_SEND_REMAIN;
+                if (full_burst_present_i) begin
+                    load_full_burst_o = 1'b1;
+                    state_d = S_FULL_BURST;
+                end else if (remain_burst_present_i) begin
+                    load_remain_burst_o = 1'b1;
+                    state_d = S_TAIL_BURST;
                 end
             end
-            S_SEND_BLOCK: begin
+            S_FULL_BURST: begin
                 valid_o = 1'b1;
                 if (ready_i) send_next_o = 1'b1;
-                if (!block_present_i && remain_present_i) begin
-                    load_remain_o = 1'b1;
-                    nstate = S_SEND_REMAIN;
-                end else if (!block_present_i) begin
-                    nstate = S_IDLE;
+                if (!full_burst_present_i && remain_burst_present_i) begin
+                    load_remain_burst_o = 1'b1;
+                    state_d = S_TAIL_BURST;
+                end else if (!full_burst_present_i) begin
+                    state_d = S_IDLE;
                 end else begin
-                    nstate = S_SEND_BLOCK;
+                    state_d = S_FULL_BURST;
                 end
             end
-            S_SEND_REMAIN: begin
+            S_TAIL_BURST: begin
                 valid_o = 1'b1;
-                if (ready_i) nstate = S_IDLE;
-                else         nstate = S_SEND_REMAIN;
+                if (ready_i) state_d = S_IDLE;
+                else         state_d = S_TAIL_BURST;
             end
-            default: nstate = S_IDLE;
+            default: state_d = S_IDLE;
         endcase
     end
 endmodule
@@ -107,7 +107,7 @@ Key properties:
 - Two-process FSM style (mandatory for multi-stage control)
 - All outputs have defaults (no latches)
 - `send_next_o` enables burst address increment (outstanding support)
-- `block_present_i` / `remain_present_i` separate full bursts from partial
+- `full_burst_present_i` / `remain_burst_present_i` separate full bursts from partial
 
 ## Pattern 2: Address channel with local command FIFO
 
@@ -137,24 +137,25 @@ module addr_channel #(
     wire        cmd_fifo_empty;
     reg  [39:0] cmd_addr;
     reg  [ADDR_WIDTH-LP_BLOCK-1:0] axi_addr;
-    reg  [31-LP_BLOCK:0] block_num;
+    reg  [31-LP_BLOCK:0] full_burst_cnt;
     reg  [LP_BLOCK-7:0]  remain_len;
 
-    wire load_block, load_remain, send_next, block_present, remain_present, load_addr;
+    wire load_full_burst, load_remain_burst, send_next;
+    wire full_burst_present, remain_burst_present, load_addr;
 
-    assign m_axi_araddr_o = {axi_addr, {LP_BLOCK{1'b0}}};
-    assign block_present  = (block_num != 0);
-    assign remain_present = (remain_len != 0);
+    assign m_axi_araddr_o      = {axi_addr, {LP_BLOCK{1'b0}}};
+    assign full_burst_present  = (full_burst_cnt != 0);
+    assign remain_burst_present = (remain_len != 0);
 
     // Address register
     always @(posedge clk_i) begin
         if (cmd_fifo_rd_en) cmd_addr <= cmd_fifo_dout[71:32];
     end
 
-    // Block counter (full bursts remaining)
+    // Full burst counter (full bursts remaining)
     always @(posedge clk_i) begin
-        if (cmd_fifo_rd_en)      block_num <= cmd_fifo_dout[31:LP_BLOCK];
-        else if (send_next)      block_num <= block_num - 1'b1;
+        if (cmd_fifo_rd_en)      full_burst_cnt <= cmd_fifo_dout[31:LP_BLOCK];
+        else if (send_next)      full_burst_cnt <= full_burst_cnt - 1'b1;
     end
 
     // Remain register (partial burst length)
@@ -170,23 +171,23 @@ module addr_channel #(
 
     // ARLEN register
     always @(posedge clk_i) begin
-        if (load_block)      m_axi_arlen_o <= BURST_SIZE/(DATA_WIDTH/8) - 1;
-        else if (load_remain) m_axi_arlen_o <= remain_len - 1'b1;
+        if (load_full_burst)      m_axi_arlen_o <= BURST_SIZE/(DATA_WIDTH/8) - 1;
+        else if (load_remain_burst) m_axi_arlen_o <= remain_len - 1'b1;
     end
 
     // Local command FIFO (async: cmd_clk_i → clk_i)
-    // dist_fifo_72bx32_fwft inst_cmd_fifo (...);
+    // dist_fifo_72bx32_fwft u_cmd_fifo (...);
 
     // Shared FSM
-    cdma_channel_fsm inst_fsm (
+    cdma_channel_fsm u_fsm (
         .clk_i(clk_i), .rst_i(rst_i),
         .cmd_fifo_empty_i(cmd_fifo_empty),
-        .block_present_i(block_present),
-        .remain_present_i(remain_present),
+        .full_burst_present_i(full_burst_present),
+        .remain_burst_present_i(remain_burst_present),
         .ready_i(m_axi_arready_i),
         .cmd_fifo_rd_en_o(cmd_fifo_rd_en),
-        .load_block_o(load_block),
-        .load_remain_o(load_remain),
+        .load_full_burst_o(load_full_burst),
+        .load_remain_burst_o(load_remain_burst),
         .load_addr_o(load_addr),
         .send_next_o(send_next),
         .valid_o(m_axi_arvalid_o)
@@ -236,7 +237,7 @@ module rd_data_channel #(
     end
 
     // Data FIFO: carries {rlast, rdata} — WLAST is derived from RLAST
-    // fifo_513bx512_fwft inst_rd_data_fifo (
+    // fifo_513bx512_fwft u_rd_data_fifo (
     //     .din({m_axi_rlast_i, m_axi_rdata_i}),
     //     .wr_en(m_axi_rvalid_i & m_axi_rready_o),
     //     .rd_en(data_fifo_rd_en_i),
@@ -276,8 +277,8 @@ module wr_data_channel #(
     assign m_axi_wdata_o = data_fifo_dout_i[DATA_WIDTH-1:0];
     assign m_axi_wlast_o = data_fifo_dout_i[DATA_WIDTH];
 
-    // W channel FSM: IDLE → SEND
-    wr_data_channel_fsm inst_fsm (
+    // W channel FSM: IDLE → STREAM
+    wr_data_channel_fsm u_fsm (
         .clk_i(clk_i), .rst_i(rst_i),
         .data_fifo_rd_en_o(data_fifo_rd_en_o),
         .data_fifo_empty_i(data_fifo_empty_i),
@@ -293,40 +294,40 @@ module wr_data_channel_fsm(
     output reg axi_wvalid_o,
     input      axi_wready_i
 );
-    localparam S_IDLE = 2'b01;
-    localparam S_SEND = 2'b10;
-    reg [1:0] cstate, nstate;
+    localparam S_IDLE   = 2'b01;
+    localparam S_STREAM = 2'b10;
+    reg [1:0] state_q, state_d;
 
     always @(posedge clk_i) begin
-        if (rst_i) cstate <= S_IDLE;
-        else       cstate <= nstate;
+        if (rst_i) state_q <= S_IDLE;
+        else       state_q <= state_d;
     end
 
     always @(*) begin
         data_fifo_rd_en_o = 1'b0;
         axi_wvalid_o      = 1'b0;
-        nstate            = S_IDLE;
-        case (cstate)
+        state_d           = S_IDLE;
+        case (state_q)
             S_IDLE: begin
                 if (!data_fifo_empty_i) begin
                     data_fifo_rd_en_o = 1'b1;
-                    nstate = S_SEND;
+                    state_d = S_STREAM;
                 end
             end
-            S_SEND: begin
+            S_STREAM: begin
                 axi_wvalid_o = 1'b1;
                 if (axi_wready_i) begin
                     if (!data_fifo_empty_i) begin
                         data_fifo_rd_en_o = 1'b1;
-                        nstate = S_SEND;
+                        state_d = S_STREAM;
                     end else begin
-                        nstate = S_IDLE;
+                        state_d = S_IDLE;
                     end
                 end else begin
-                    nstate = S_SEND;
+                    state_d = S_STREAM;
                 end
             end
-            default: nstate = S_IDLE;
+            default: state_d = S_IDLE;
         endcase
     end
 endmodule
@@ -366,18 +367,18 @@ module bresp_channel #(
     wire cmd_fifo_rd_en;
     wire [31:0] cmd_fifo_dout;
     wire cmd_fifo_empty;
-    wire block_present, remain_present;
-    reg [31-LP_BLOCK:0] block_num;
+    wire full_burst_present, remain_burst_present;
+    reg [31-LP_BLOCK:0] full_burst_cnt;
     reg [LP_BLOCK-7:0]  remain_len;
     wire cmd_done;
 
-    assign block_present  = (block_num != 0);
-    assign remain_present = (remain_len != 0);
+    assign full_burst_present  = (full_burst_cnt != 0);
+    assign remain_burst_present = (remain_len != 0);
 
-    // Block counter: decrements on each B response
+    // Full burst counter: decrements on each B response
     always @(posedge clk_i) begin
-        if (cmd_fifo_rd_en)      block_num <= cmd_fifo_dout[31:LP_BLOCK];
-        else if (m_axi_bvalid_i & m_axi_bready_o) block_num <= block_num - 1'b1;
+        if (cmd_fifo_rd_en)      full_burst_cnt <= cmd_fifo_dout[31:LP_BLOCK];
+        else if (m_axi_bvalid_i & m_axi_bready_o) full_burst_cnt <= full_burst_cnt - 1'b1;
     end
 
     // Remain register
@@ -393,24 +394,21 @@ module bresp_channel #(
     end
 
     // Done edge detection (cmd_done is in AXI clock domain)
-    reg cmd_done_r0, cmd_done_r1, cmd_done_r2;
+    reg [2:0] cmd_done_sync_q;
     always @(posedge clk_i) begin
-        if (rst_i) begin
-            cmd_done_r0 <= 1'b0; cmd_done_r1 <= 1'b0; cmd_done_r2 <= 1'b0;
-        end else begin
-            cmd_done_r0 <= cmd_done;
-            cmd_done_r1 <= cmd_done_r0;
-            cmd_done_r2 <= cmd_done_r1;
-        end
+        if (rst_i)
+            cmd_done_sync_q <= 3'b000;
+        else
+            cmd_done_sync_q <= {cmd_done_sync_q[1:0], cmd_done};
     end
-    assign cmd_done_o = cmd_done_r1 & ~cmd_done_r2;  // rising edge
+    assign cmd_done_o = cmd_done_sync_q[1] & ~cmd_done_sync_q[2];  // rising edge
 
     // B response FSM
-    bresp_channel_fsm inst_fsm (
+    bresp_channel_fsm u_fsm (
         .clk_i(clk_i), .rst_i(rst_i),
         .cmd_fifo_empty_i(cmd_fifo_empty),
-        .block_present_i(block_present),
-        .remain_present_i(remain_present),
+        .full_burst_present_i(full_burst_present),
+        .remain_burst_present_i(remain_burst_present),
         .valid_i(m_axi_bvalid_i),
         .cmd_fifo_rd_en_o(cmd_fifo_rd_en),
         .ready_o(m_axi_bready_o),
@@ -422,7 +420,7 @@ endmodule
 Key properties:
 - B channel has its own command FIFO — completely independent from AW/W
 - Block counter tracks expected B responses per DMA command
-- Completion when all B responses received (block_num == 0 && remain == 0)
+- Completion when all B responses received (full_burst_cnt == 0 && remain == 0)
 - Done is edge-detected for clean single-cycle pulse
 
 ## Pattern 6: Top-level integration (fully decoupled)
@@ -440,7 +438,7 @@ module dma_top #(...)(
     assign cmd_fifo_full_o = ar_full | aw_full | b_full;
 
     // AR channel: independent command FIFO + FSM
-    addr_channel #(...) inst_ar_channel (
+    addr_channel #(...) u_ar_channel (
         .fifo_din_i({src_addr, data_len}),
         .fifo_wr_en_i(cmd_fifo_wr_en_i),
         .fifo_full_o(ar_full),
@@ -451,7 +449,7 @@ module dma_top #(...)(
     );
 
     // AW channel: same module, different instance
-    addr_channel #(...) inst_aw_channel (
+    addr_channel #(...) u_aw_channel (
         .fifo_din_i({dst_addr, data_len}),
         .fifo_wr_en_i(cmd_fifo_wr_en_i),
         .fifo_full_o(aw_full),
@@ -462,13 +460,13 @@ module dma_top #(...)(
     );
 
     // R channel → data FIFO
-    rd_data_channel #(...) inst_rd_data (...);
+    rd_data_channel #(...) u_rd_data (...);
 
     // data FIFO → W channel
-    wr_data_channel #(...) inst_wr_data (...);
+    wr_data_channel #(...) u_wr_data (...);
 
     // B channel: independent tracking
-    bresp_channel #(...) inst_bresp (
+    bresp_channel #(...) u_bresp (
         .fifo_din_i(data_len),
         .fifo_wr_en_i(cmd_fifo_wr_en_i),
         .fifo_full_o(b_full),
@@ -517,12 +515,12 @@ The reference design separates each AXI channel into two layers:
 addr_channel (datapath)
 ├── cmd FIFO
 ├── address register
-├── block counter
+├── full burst counter
 ├── remain register
 └── cdma_channel_fsm (control)
     ├── state register
     ├── next-state logic
-    └── output enables (cmd_fifo_rd_en, load_block, send_next, valid)
+    └── output enables (cmd_fifo_rd_en, load_full_burst, send_next, valid)
 ```
 
 Why this matters:
