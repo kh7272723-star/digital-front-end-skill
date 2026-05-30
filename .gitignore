@@ -35,6 +35,11 @@ sim.vcd
 *.ps
 *.pdf
 
+# Experiment test projects (findings documented in SKILL_CHANGELOG.md)
+projects/test-8c-*/
+projects/test-principles-ab/
+projects/test-workflow-round*/
+
 # Temporary files
 *.tmp
 *.swp
