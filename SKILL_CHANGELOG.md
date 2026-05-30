@@ -64,6 +64,54 @@ R5-R8 四轮 A/B 实验的复盘分析发现了 7 个根因：
 
 ---
 
+## 2026-05-30 — Testbench 基础设施：Icarus 陷阱 + 标准骨架 + APB/AXI-Stream BFM
+
+### 背景
+
+R5-R8 四轮 A/B 实验共发现 19 个 testbench 基础设施 bug，其中旧工作流 Agent A 贡献了 73%。R6 报告明确指出"skill 缺少常见 Icarus testbench 陷阱 reference"。这是 R5-R8 暴露的最大单一基础设施空白。
+
+### 新增/改动文件
+
+| 文件 | 改动 | 行数 |
+|------|------|:---:|
+| `references/verification/icarus-common-pitfalls.md` | **新建** — 16 个 Icarus 陷阱，分 5 类 (A-E)，全部含 broken/fix 代码、权威引用、实验来源 | 512 |
+| `references/verification/tb-examples.md` | 新增 Section 0 标准骨架（含输出协议），APB BFM（write/read/check/PSLVERR），AXI-Stream BFM（send/recv/packet） | 491→822 |
+| `references/verification/simulation-loop.md` | 新增 Authority 段落 | — |
+| `references/reference-index.md` | 新增 pitfall 索引 | — |
+| `SKILL.md` Step 9 | 新增 "Before writing testbench, read icarus-common-pitfalls.md" | +2 |
+
+### Pitfall 分类
+
+| 类别 | 数量 | 典型陷阱 |
+|------|:---:|------|
+| A: 语法兼容 | 5 | `return`/`break`/`ref` 不支持, `fork` 变量共享, 循环双计数 |
+| B: 时序/Delta | 6 | APB delta-cycle race, 组合输出时序, #1 settling, NBA race, APB 写顺序, while(busy_o) |
+| C: 协议标记 | 2 | $finish 无标记, 首失败即退出 |
+| D: 结构 | 2 | 地址解码别名, 超时太短 |
+| E: 多时钟/CDC | 1 | CDC 同步延迟 |
+
+### 权威性验证
+
+全部 12 个核心 claim 通过了三重验证：
+1. **实证：** A1-A3 在本地 iverilog 直接编译测试确认
+2. **权威：** IEEE 1364-2001 §5.3, Cummings SNUG 1999/2000/2002/2008, ARM IHI 0024C, ARM IHI 0051B
+3. **实验：** R5-R8 各项目的 DEVELOPMENT_LOG.md 中的实际 bug 修复记录
+
+详见 `references/verification/citation-verification-report.md`。
+
+### E2E 验证发现
+
+用 AXI-Stream to APB Write Bridge 项目跑端到端验证，agent 使用新 testbench 模板和 pitfalls 后：
+- 36/36 测试一次通过，零 testbench bug
+- 主动避开了 B4 (negedge drive) 和 B3 (#1 settling delay)
+- 发现了新 pitfall B6 (`while(busy_o)` 在 NBA 之前求值)
+
+### SKILL.md 行数
+
+~340 / 500 行
+
+---
+
 ## 2026-05-30 — A/B 实验 Round 8（最终轮）：UART TX + I2C 工作流稳定性验证
 
 ### 实验设计
