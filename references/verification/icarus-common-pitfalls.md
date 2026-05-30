@@ -177,8 +177,9 @@ These cause the simulation to behave differently from what the RTL actually does
 ### B1: Combinational `assign` + `posedge` sampling = delta-cycle race
 
 **Symptom:** APB writes silently dropped. Register values never change. STATUS always reads 0. Testbench drives `psel_i=1, penable_i=1, pwrite_i=1` on posedge, but the DUT samples old `penable_i=0`.
-**Source:** IEEE 1364-2001 §5.3 (stratified event queue: `assign` evaluates in active region, `always @(posedge clk)` samples from NBA region — the assign sees values from BEFORE the NBA update). Cummings, SNUG 2000 §4 "Verilog Stratified Event Queue" explains the delta-cycle mechanism. Cummings, SNUG 2000 §8.1: "Recommendation: Inline combinational conditions inside sequential blocks."
-**Experiment:** R8 Agent A (iter 2 — the APB delta-cycle race wasted 1 iteration)
+**Source:** IEEE 1364-2001 §5.3 (stratified event queue: `assign` evaluates in active region; NBA updates from testbench `<=` assignments are in NBA region → `assign` sees pre-NBA values). Cummings, SNUG 2000 §4 "Verilog Stratified Event Queue" explains the mechanism. Cummings, SNUG 2000 §8.1: "Recommendation: Inline combinational conditions inside sequential blocks — eliminates dependency on simulator scheduling order."
+**Note:** This race is **simulator-dependent** — it did not reproduce in a synthetic local iverilog test (2026-05-30), but DID manifest in R8 Agent A's actual APB slave where `assign apb_write` caused all register writes to be silently dropped. The inconsistency IS the reason to fix it: a race that only triggers under specific conditions is MORE dangerous than one that always triggers. See `references/verification/citation-verification-report.md` for full verification details.
+**Experiment:** R8 Agent A (iter 2 — the APB delta-cycle race wasted 1 iteration; all APB register writes were silently dropped until the `assign` was inlined)
 
 ```verilog
 // ❌ BROKEN — delta-cycle race in iverilog
