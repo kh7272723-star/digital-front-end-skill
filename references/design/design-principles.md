@@ -4,7 +4,24 @@
 
 This document defines 6 core design principles that an experienced digital front-end engineer applies unconsciously. Each principle generates a family of specific bug patterns — the principle is the root, the patterns are branches.
 
-**How to use:** After generating RTL (Step 7) and before structural self-review (Step 8), read each principle and its active-search questions. For each question, scan the design and report findings. Then proceed to Step 8 (structural checklist) and Step 8c (principle-driven review).
+**How to use:** The 6 principles are reviewed at three checkpoints during the design flow — not all at once at the end. This distributes the review burden and catches issues at the cheapest fix point:
+
+| Checkpoint | Principles | Why this timing |
+|------------|-----------|-----------------|
+| **Step 2a** (after timing contract) | P4 Independence, P6 Boundaries | Architecture coupling and boundary mismatches are cheapest to fix before any RTL exists |
+| **Step 5a** (after cycle trace) | P1 Timing Contract, P2 FSM Safety | The cycle trace is the best place to verify signal timing and FSM behavior — before code |
+| **Step 8c** (after RTL generation) | P3 Known Values, P5 Physical World | These require actual RTL code to review: register initialization, physical constraints |
+
+For each checkpoint, do NOT treat this document as a checklist to fill out. Instead:
+
+1. Read each principle and its active-search questions.
+2. For each principle, look at YOUR specific RTL code — your signal names, your FSM states, your module boundaries.
+3. Generate 3-5 specific questions that target YOUR design. (Example: not "is every pulse using transition detection?" but "done_o is set in S_DONE state of pattern_gen_fsm — if continuous=1 and S_DONE transitions to S_GENERATE, is done_o still exactly 1 cycle wide?")
+4. Answer each question by tracing actual signal paths through your code.
+5. Fix everything that doesn't pass your own scrutiny.
+6. Then proceed to Step 8 (structural checklist) and Step 8c (principle-driven self-interrogation in SKILL.md).
+
+The active-search questions below are **prompts to help you generate your own questions** — they are not a prefabricated checklist. A YES/NO answer to a generic question is worthless. A concrete answer that references your specific signals and traces their cycle-level behavior is valuable.
 
 **Relationship to bug-pattern-library.md:** The 57 patterns in the bug-pattern library are specific instances of these 6 principles. When you find a violation during principle-driven review, map it to the nearest pattern ID. When you encounter a bug that doesn't match any existing pattern, derive a new pattern from the relevant principle.
 

@@ -52,6 +52,65 @@ end
 
 ---
 
+## E1b. Output port declared `reg` but driven by `assign`
+
+**Tool warning:**
+- Yosys: `Warning: reg '\signal' is assigned in a continuous assignment`
+- Vivado: `[Synth 8-4620] output port is reg type, driven by continuous assignment`
+
+**Root cause:** Module output ports are declared as `output reg` in the port list but are driven by `assign` statements (or connected to a sub-module output via `assign`). The `reg` keyword is misleading — the signal is actually a wire from the perspective of this module. This often happens when a module declares `output reg` out of habit, then instantiates a sub-module and uses `assign` to connect its output to the port.
+
+**Why it matters:** (1) The `reg` keyword signals "I will drive this from an `always` block" — when you instead use `assign`, a reader scanning port declarations will be misled. (2) If the `output reg` was intended to be driven by an `always` block but is accidentally driven by `assign` instead, a critical register is missing — this was Bug 4 in the A/B experiment, where `fixed_data_o`, `lfsr_seed_o`, `lfsr_poly_o` were declared `output reg` but the internal `_q` registers were never connected to them, causing 'x' propagation. (3) Some synthesis tools treat `output reg` differently from `output wire` in hierarchy flattening.
+
+**Bug code:**
+```verilog
+// BUG: output reg but driven by assign — misleading, and the internal _q
+// registers are never connected to the output ports
+module pattern_gen_apb_regs (
+    output reg  [31:0] fixed_data_o,    // declares "I will drive this"
+    output reg  [31:0] lfsr_seed_o,
+    ...
+);
+    reg [31:0] fixed_data_q;
+    // fixed_data_q is updated in always block...
+    // BUG: fixed_data_o never assigned — driven by nothing, stays X
+    // (Or worse: driven by assign from a different signal that was added later)
+endmodule
+```
+
+**Correct code:**
+```verilog
+// Option A: Actually drive the output from always block (if owned by this module)
+module pattern_gen_apb_regs (
+    output reg [31:0] fixed_data_o,    // reg: driven by always block below
+    ...
+);
+    always @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni)
+            fixed_data_o <= 32'h0;
+        else if (write_en)
+            fixed_data_o <= pwdata_i;
+    end
+endmodule
+
+// Option B: Use wire (or just 'output') if driven by assign or sub-module
+module pattern_gen_top (
+    output wire [31:0] tdata_o,    // wire: driven by assign or sub-module
+    ...
+);
+    assign tdata_o = core_data;    // explicit: wire driven by assign
+endmodule
+```
+
+**Prevention rule:** Match the port declaration to the driver:
+- Driven by `always @(posedge clk)` block → `output reg`
+- Driven by `assign` statement → `output wire` (or just `output`, wire is default)
+- Connected to sub-module output port → `output wire` (unless the wire is then used as RHS of a sequential assignment)
+
+**Self-review check:** For every `output reg` port, verify it appears on the LHS of `<=` in exactly one `always @(posedge clk)` block within the same module. If it does not, it should be `output wire`.
+
+---
+
 ## E2. Latch inference
 
 **Tool warning:**

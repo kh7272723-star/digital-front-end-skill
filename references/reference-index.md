@@ -24,6 +24,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - Staged implementation: `references/architecture/staged-bringup-guidelines.md`
 - Arbiters: `references/patterns/advanced-patterns.md` and `references/patterns/arbiter-examples.md`
 - **Underspecified or vague requirements → structured contract:** `references/architecture/requirement-extraction-template.md` — use BEFORE writing any timing contract; classifies dimensions as Required/Implied/Assumed/Unknown, documents design decisions
+- **Sub-agent delegation:** `references/architecture/sub-agent-delegation.md` — prompt template, inline critical rules, multi-module integration rules
 
 ## Specialized patterns
 
@@ -44,6 +45,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 
 - Verification requests: `references/verification/verification-guidance.md`, `references/verification/tb-examples.md`, `references/verification/assertion-examples.md`, and for SVA `references/verification/assertion-quality-checklist.md`
 - Verification planning: `references/verification/verification-matrix-template.md`, `references/verification/verification-planning.md`
+- **RTL self-review checklist:** `references/verification/self-review-checklist.md` — complete 13-category 65-item checklist used in SKILL.md Step 8
 - Coverage models: `references/verification/coverage-models.md`
 - Formal properties: `references/verification/formal-properties.md`
 - UVM templates: `references/verification/uvm-templates.md`

@@ -112,6 +112,18 @@ For full systems, do not start with RTL. Produce a system contract, submodule de
 
 Before writing code, produce a short timing contract using `references/timing/timing-contract-template.md`. Include: module purpose, clock domains, reset style, input/output handshake, data latency, stall/flush behavior, boundary behavior, illegal cases.
 
+### 2a. Principle check — Independence and Boundaries (P4, P6)
+
+**Why now:** Architecture-level coupling and boundary mismatches are cheapest to fix before any RTL exists. R1 experiment: Agent A's tready isolation bug (APB corrupted AXI-Stream data) would have been prevented by a 2-minute P4 check at contract time.
+
+Read `references/design/design-principles.md` P4 and P6. Ask 3-5 questions about YOUR contract:
+
+**P4 (Independence):** Are there independent channels/paths/domains in this design? Does the contract specify that they are decoupled? Can a transaction on one interface accidentally consume or corrupt data on another? Can one channel's backpressure block another's progress?
+
+**P6 (Boundaries):** Does every module boundary have matching port widths? Are error signals propagated from sub-modules to top-level outputs? Is the completion signal style (pulse vs level) consistent across the integration chain?
+
+Fix contract-level issues now. Document any architectural decisions changed.
+
 ### 3. Freeze the contract
 
 Turn the timing contract into a short design spec with: ports and signal widths, naming conventions, reset and idle behavior, handshake or protocol rules, corner cases.
@@ -123,6 +135,18 @@ List registers or memories that carry state: state registers, FIFO storage, acce
 ### 5. Write the cycle trace
 
 Use `references/timing/cycle-trace-guidelines.md`. Include pre-edge state, combinational condition, active-edge update, next visible state, and invariant.
+
+### 5a. Principle check — Timing Contracts and FSM Safety (P1, P2)
+
+**Why now:** The cycle trace is the best place to verify signal timing and FSM behavior — before RTL is written, when you can still redesign without rewriting code.
+
+Read `references/design/design-principles.md` P1 and P2. For each signal and FSM state in your cycle trace:
+
+**P1 (Timing Contract):** For every output in the trace: is it pulse (1-cycle), level (sustained), or registered (delayed)? Are pulse outputs guaranteed exactly 1 cycle wide in every trace path? For valid/ready handshakes: does valid hold until ready? Is data stable during backpressure?
+
+**P2 (FSM Safety):** From every non-IDLE state, trace the path back to IDLE. What happens if a waited-on signal never arrives? For states entered by a request: if the request deasserts while in an intermediate state, is there an abort path? After reset, does the FSM start in IDLE with all outputs safe?
+
+Fix any issue found in the cycle trace. Only then freeze the trace and proceed to pattern selection.
 
 ### 6. Choose a pattern
 
@@ -146,119 +170,33 @@ Write synthesizable code following `references/rtl/coding-guidelines.md`: clear 
 
 Apply power/timing/area rules from `references/design/power-timing-area.md`: clock-enable over gating (P1), memory access qualification (P5), bit-width discipline (A3), balanced operator trees (A1). For FPGA targets: DSP/BRAM/SRL inference patterns (A4, A5, P6).
 
+**Module boundary discipline (PH1):** Prefer registered outputs when signals cross module hierarchy boundaries. Combinational outputs from sub-modules (via `assign` or combinational `always @(*)`) create timing closure difficulties, complicate testbench sampling, and risk glitches during state transitions. If a module drives AXI-Stream tvalid/tdata/tlast or APB prdata through purely combinational paths from its sub-modules, the testbench must account for combinational propagation delay, and any state change in the driving FSM creates a window where outputs may glitch before settling. Registered outputs avoid all of these issues at the cost of one cycle of latency. See `references/advanced/physical-awareness-guidelines.md` PH1 and the A/B experiment results in SKILL_CHANGELOG.md.
+
 ### 8. RTL self-review against skill constraints
 
-Before simulation, review the generated RTL against this checklist. Each item must be explicitly checked and marked pass/fail. For each FAIL item, fix before proceeding and state what was changed. For each ✅ item, cite the specific line numbers or signal names that satisfy the check — do not mark items as passed without evidence.
+Before simulation, review the generated RTL against the full self-review checklist in `references/verification/self-review-checklist.md`. Each item must be explicitly checked and marked pass/fail. For each FAIL item, fix before proceeding and state what was changed. For each ✅ item, cite the specific line numbers or signal names that satisfy the check — do not mark items as passed without evidence.
 
-**Handshake (cite `references/debug/bug-pattern-library.md` H1-H8):**
-- [ ] VALID holds until READY (no premature deassertion) — H1, H8
-- [ ] VALID not gated by non-protocol conditions (outstanding count, FIFO status, flow control) — H8
-- [ ] Payload stable while VALID high — H1
-- [ ] No combinational ready loop across modules — H2
+The checklist covers the following categories. Read the reference for the full item list:
 
-**Data path (cite DP1-DP5, F1):**
-- [ ] All error capture points traced to completion output — DP5, `references/architecture/integration-invariants.md`
-- [ ] Bit-slicing avoided when value can equal 2^n (use if/else) — DP4
-- [ ] WSTRB correctly computed for unaligned addresses — `references/axi-dma/axi-dma-channel-guidelines.md`
-- [ ] Data-path FIFOs use FWFT (combinational) output, NOT registered output — F1, `references/rtl/fifo-examples.md`
-
-**Naming (cite `references/timing/naming-guidelines.md`):**
-- [ ] All ports use `*_i`/`*_o` suffixes
-- [ ] All registered state uses `*_q` suffix
-- [ ] Combinational signals do NOT use `*_q` suffix
-- [ ] FIFO ops use `wr_do`/`rd_do` naming
-
-**RTL correctness (cite `references/rtl/correctness-rules.md`):**
-- [ ] Every reg/wire has exactly one driving source — E1
-- [ ] Every combinational block assigns defaults before conditional branches — E2
-- [ ] No implicit truncation — explicit part-selects on width mismatches — E3
-- [ ] `<=` in sequential blocks, `=` in combinational blocks, never mixed — E4
-- [ ] All combinational blocks use `always @(*)` — E5
-- [ ] All registers have explicit reset (or documented justification) — E6
-- [ ] No combinational feedback loops — E7
-- [ ] Every `.v` file starts with `` `default_nettype none `` — E8
-
-**FSM (cite C2, C3, SM1, SM2):**
-- [ ] All combinational blocks have default assignments — C3
-- [ ] FSM has default case → IDLE — C2
-- [ ] Two-process style for >3 states — `references/rtl/fsm-examples.md`
-- [ ] No multi-bit datapath `_d` assignments inside the FSM combinational block (`state_d` is exempt) — SM1
-- [ ] No second `always @(*)` block computing multi-bit `_d` values gated on state — SM2
-- [ ] All multi-bit register updates use synchronous `always @(posedge clk)` gated by single-bit enables from the FSM — `references/rtl/fsm-examples.md` pattern 5
-
-**Protocol (cite P4, P5, P9, P11, P12, P13, IHI0022E A3.3):**
-- [ ] Completion on B response, not last W beat — P4
-- [ ] WVALID holds until WREADY — P11
-- [ ] WVALID holds for entire burst (no mid-burst deassertion) — P12, IHI0022E A3.3.1
-- [ ] ARVALID/AWVALID hold until corresponding READY — P11, IHI0022E A3.3.1
-- [ ] VALID not dependent on READY (no combinational path) — IHI0022E A3.3.2
-- [ ] Write engine does NOT use sequential AW→W→B FSM — P13, use independent AW/W/B controllers
-- [ ] AW/W/B channels have independent valid/ready control — `references/axi-dma/axi-dma-channel-guidelines.md`
-- [ ] Data FIFO depth >= max burst length, or burst-ready gate on WVALID — P12
-- [ ] WVALID does NOT depend on FIFO empty/full state mid-burst — P12, `references/axi-dma/axi-dma-channel-guidelines.md` burst-ready gate pattern
-- [ ] 4KB boundary: `12'h1000`, not `12'h800` — `references/axi-dma/axi-dma-channel-guidelines.md`
-- [ ] WSTRB last beat: handle `last_offset == 0` (all bytes valid) — `references/axi-dma/axi-dma-channel-guidelines.md`
-
-**APB (if APB interface present, cite `references/bus/apb-guidelines.md`):**
-- [ ] PSEL asserted only in SETUP and ACCESS phases
-- [ ] PENABLE asserted only in ACCESS phase
-- [ ] PADDR/PWDATA/PWRITE latched in SETUP, held through ACCESS
-- [ ] PSLVERR mapped to upstream error response
-- [ ] PSEL deasserted between transactions
-- [ ] If APB slave uses registered PRDATA: bridge samples one cycle after PREADY=1
-
-**AXI-Stream (if AXI-Stream interface present, cite `references/axi-dma/axi-stream-guidelines.md`):**
-- [ ] TLAST propagated exactly on every beat
-- [ ] TKEEP propagated exactly on every beat
-- [ ] Payload stable while TVALID=1 and TREADY=0 — H1
-- [ ] TVALID not dependent on TREADY — A3.3.2
-- [ ] Backpressure propagation documented (combinational or registered)
-- [ ] Packet boundary behavior defined (state at TLAST)
-
-**CDC (if multiple clock domains, cite `references/synthesis/cdc-guidelines.md`):**
-- [ ] Multi-bit CDC uses gray code or handshake (not independent bit synchronization)
-- [ ] Synchronizer flip-flops marked with `(* ASYNC_REG = "TRUE" *)` attribute
-- [ ] Reset: async assertion, sync deassertion per destination domain
-- [ ] No combinational paths across clock domains
-
-**Integration:**
-- [ ] All per-channel errors OR'd into completion tracker — DP5
-- [ ] Outstanding counter saturation doesn't block drain — `references/architecture/integration-invariants.md`
-- [ ] Reset clears all valid-like outputs — R2
-- [ ] All module ports are referenced in the module body (no dead ports)
-- [ ] No dead modules (all instantiated modules are used; unused modules are deleted or documented as reference-only)
-- [ ] Completion signal style matches spec: pulse (1-cycle) for per-command done, level (sticky) for status — `references/timing/timing-contract-template.md`
-
-**Engineering intuition (cite `references/design/engineering-intuition-checklist.md`; automated via `scripts/rtl_complexity_check.py`):**
-- [ ] No `always @(*)` block exceeds 50 lines — C1 (RMM §7.3)
-- [ ] No if-else nesting exceeds 3 levels — C2 (RMM §7.4)
-- [ ] No single module exceeds 300 lines without decomposition — C3 (RMM §7.2)
-- [ ] Combinational depth from input to output < 7 gate levels — D1 (Synopsys DC)
-- [ ] No wide comparator (>32-bit) on critical path without pipelining — D2 (UG901)
-- [ ] No register array > 64 entries without RAM inference — A1 (UG901, Intel UG-20136)
-- [ ] No hard-coded constants that should be parameters — A3 (RMM §3.3)
-
-**Low-power (when power management is in scope, cite `references/advanced/low-power-guidelines.md`):**
-- [ ] Clock gating uses ICG cell or clock-enable style, not `clk & en` — CL1
-- [ ] Isolation enable asserts before power-off, deasserts after power-on — LP1
-- [ ] Retention save completes before power-off, restore after power-on — LP2
-- [ ] Power state machine has no illegal transitions, uses two-process FSM — LP3
-- [ ] Gated clock domain crossings use pulse synchronizers (not level) — LP4
-- [ ] DVFS frequency change gated by bus idle — LP5
-- [ ] Operand isolation applied to wide (>32-bit) combinational logic — LP6
-- [ ] Pulse outputs (ack, done, save, restore) use transition detection, not state comparison — LP7
-- [ ] FSM intermediate states have abort path on request deassertion — SM3
-- [ ] Wide combinational logic (>32-bit) has operand isolation — LP6
-
-**Physical awareness (for ASIC targets, cite `references/advanced/physical-awareness-guidelines.md`):**
-- [ ] Module boundaries have registered I/O (no cross-hierarchy combinational paths) — PH1
-- [ ] High-fanout nets (>50) have `max_fanout` attribute or register replication — PH2
-- [ ] Memory macros in same module hierarchy as primary consumer — PH3
-- [ ] Bus signals grouped by channel at partition ports — PH4
+| Category | Items | Key References |
+|----------|:-----:|----------------|
+| Handshake | 4 | bug-pattern-library.md H1-H8 |
+| Data Path | 4 | DP1-DP5, F1 |
+| Naming | 4 | naming-guidelines.md |
+| RTL Correctness | 9 | correctness-rules.md E1-E8, E1b |
+| FSM | 6 | fsm-examples.md, C2-C3, SM1-SM2 |
+| Protocol (AXI) | 11 | P4-P13, IHI0022E A3.3 |
+| APB | 6 | apb-guidelines.md |
+| AXI-Stream | 6 | axi-stream-guidelines.md |
+| CDC | 4 | cdc-guidelines.md |
+| Integration | 7 | integration-invariants.md, P4 |
+| Engineering Intuition | 7 | engineering-intuition-checklist.md |
+| Low-Power | 9 | low-power-guidelines.md |
+| Physical Awareness | 4 | physical-awareness-guidelines.md |
 
 State the review result: PASS (all items checked) or FAIL (list items fixed).
 
-**Critical limitation:** This checklist verifies STRUCTURAL correctness only (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness (output values, computation results). A design can pass all items and still produce wrong results. See bug-pattern P18 (CRC pipeline latency) and Crossbar project (routing logic bug) — both passed structural review but failed functional tests.
+**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8b and Step 9.
 
 ### 8b. Functional verification (mandatory)
 
@@ -286,57 +224,45 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 - Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
 - Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
 
-### 8c. Design principle review (mandatory)
+### 8c. Principle check — Known Values and Physical World (P3, P5)
 
-**The 57 patterns in the bug-pattern library are specific instances of 6 core principles.** Before simulation, apply each principle to the design holistically. This catches functional issues that structural checklist items miss (P18, BUG-1-BUG-4).
+**Note:** P1/P2 were reviewed at Step 5a (cycle trace). P4/P6 were reviewed at Step 2a (contract). Step 8c only covers the two principles that require actual RTL code to review: P3 (register initialization) and P5 (physical constraints).
 
-Read `references/design/design-principles.md` and answer these 6 questions. For each "no" or "unclear", fix before proceeding. Cite specific signal names or line numbers.
+Read `references/design/design-principles.md` P3 and P5.
 
-| Principle | Question | YES/NO/NA | Evidence |
-|-----------|----------|-----------|----------|
-| P1: Timing Contract | Is every output's signal type (pulse/level/registered) documented in the interface contract? | | |
-| P2: FSM Safety | Can every FSM state find a path back to IDLE? Do intermediate states have abort paths? | | |
-| P3: Known Values | Does every register have a known value after reset? Are unreset memories documented with init strategy? | | |
-| P4: Independence | Are independent channels/paths/domains decoupled? No AXI channels sharing a single FSM? | | |
-| P5: Physical World | Are isolation/retention/clock-gate sequences correct? Wide combinational paths isolated when unused? | | |
-| P6: Boundaries | Does every module boundary have an explicit contract (port widths, signal types, reset behavior)? | | |
+**Complexity gate:** Adapt review depth to design complexity.
 
-**After completing the table:** For any "NO" — fix the design. For any "UNCLEAR" — either fix or document as a residual risk. This step takes 2-3 minutes and prevents the most common class of functional bugs that structural review misses.
+| Complexity | Criteria | Review depth |
+|------------|----------|--------------|
+| **Leaf module** | ≤300 lines, ≤2 FSM states, single interface protocol | Fast: 1-2 questions per principle |
+| **Subsystem** | >300 lines, or multi-module, or multi-protocol | Full: 3-5 questions per principle, signal tracing required |
+
+**P3 (Known Values):** Generate design-specific questions about register initialization. Scan your `always @(posedge clk)` blocks. Does every register have an explicit reset? Any unreset arrays or memories? Can any register reach an unexpected state (seed=0, counter wrap, shift register all-zeros)?
+
+**P5 (Physical World):** Generate design-specific questions about physical constraints. Are internal counters toggling when idle? Are bit widths from `$clog2` or hardcoded? Are module I/O registered? Any wide combinational paths active when unused?
+
+**Output format:** Design-specific questions citing YOUR signal names and line numbers. See Step 5a for the good/bad example.
+
+**Fix discipline** (same as Step 5a):
+
+| Priority | Strategy | What to try |
+|:--:|------|-------------|
+| **1** | **Delete** | Remove redundant registers, unused states |
+| **2** | **Retime** | Move signal earlier/later, reorder state transitions |
+| **3** | **Constrain** | FSM guard (`!busy`, gating), enable qualification |
+| **4** | **Add** | Hardware as last resort — document why 1-3 don't work |
+
+### 8d. Using principle reviews during debug
+
+After any simulation failure: before guessing at a fix, revisit your Step 2a/5a/8c review documents. They contain a signal-level map of your design that lets you locate root causes faster than adding `$display` statements. Four rounds of A/B experiments showed that agents with principle review documents debug 34% faster because they already understand the signal因果关系.
 
 ### 9. Generate verification and run simulation loop
 
-Provide at least one of: testbench skeleton, directed test list, assertions, waveform checkpoints, expected cycle-by-cycle behavior. For nontrivial stateful logic, include at least one pass/fail check. For queues, arbiters, adapters, multi-stage pipelines, or subsystems, include a compact verification matrix.
+Provide at least one of: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI designs, use `references/verification/axi-verification.md`.
 
-For AXI designs, use `references/verification/axi-verification.md`: BFM tasks for driving/monitoring transactions, scoreboard for DMA data integrity, and AXI-specific functional coverage points. At minimum, provide the 10-test coverage-driven plan from that file.
+**Simulation loop:** Follow `references/verification/simulation-loop.md` (lint→compile→simulate→analyze→fix→re-simulate, max 3 iterations). Testbench must follow output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`.
 
-**Simulation loop (when tools are available):** Follow `references/verification/simulation-loop.md`:
-1. **Lint first:** `verilator --lint-only -Wall` — fix all errors before simulation
-2. **Compile:** `iverilog -g2012 -o sim.vvp <sources> <testbench>`
-3. **Simulate:** `timeout <sec> vvp sim.vvp` — parse output for PASS/FAIL/HANG
-4. **Analyze failures:** match against `references/debug/bug-pattern-library.md`, apply minimal fix
-5. **Re-review fix against Step 8 checklist:** before re-simulating, verify the fix does not violate skill constraints. Common violations during debug: adding `data_available` to WVALID (P12), using registered FIFO output to "fix" timing (F1), adding `_d` combinational signals (SM2), coupling read/write paths. If the fix violates a constraint, find an alternative fix that stays within the rules.
-6. **Re-simulate:** maximum 3 fix-and-rerun iterations
-7. **Report:** quote tool output, show what changed at each iteration, state residual issues
-
-The testbench must follow the output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`. This enables automated result parsing.
-
-If simulation tools are unavailable, state this explicitly and fall back to static self-review only. Do not claim simulation correctness without running a tool.
-
-**Synthesis feedback (after simulation passes):** When yosys is available and simulation confirms functional correctness, run synthesis to find structural issues that simulation cannot detect:
-
-```bash
-yosys -p "read_verilog -sv <sources>; synth -top <module>; check -assert; stat; ltp" 2>&1
-```
-
-Check for:
-- **Latch inference** (`$_DLATCH_*` in cell list) — always a bug in synchronous design (E2)
-- **Combinational loops** (loop warnings in ltp output) — check if real (E7) or false positive (feedback through registers)
-- **Critical path length** (ltp length) — target < 25 gates for 100MHz
-- **Cell count** — compare against expectations; unexpectedly high count may indicate dead logic
-
-See `references/verification/synthesis-feedback-guide.md` for the full methodology and `scripts/yosys_extract.py` for automated report extraction.
-
-Fix synthesis issues, then **re-simulate** to confirm fixes don't break functionality. Report both: simulation PASS + synthesis clean.
+**Synthesis feedback:** After simulation passes, run yosys to check for latches, combinational loops, and critical path. See `references/verification/synthesis-feedback-guide.md` and `scripts/yosys_extract.py`.
 
 ### 10. Review and iterate
 
@@ -355,43 +281,7 @@ Before finalizing, check RTL against the timing contract and cycle trace: curren
 
 ### 12. Sub-agent delegation
 
-When delegating RTL work to sub-agents (parallel module generation, testbench writing, etc.), the sub-agent does not automatically load this skill. Without explicit rules, the sub-agent falls back to its training data — which produces the exact anti-patterns this skill exists to prevent (single-process FSMs, multi-bit values in FSM combinational blocks, mixed AW/W/B channels, wrong naming conventions).
-
-**Rule:** When spawning a sub-agent for RTL tasks, the prompt must include one of:
-
-1. **Skill loading directive:** Tell the sub-agent to load this skill first (e.g., "Before writing any code, read and follow the rules in `<path>/SKILL.md` and the references it points to").
-
-2. **Inline critical rules:** If the sub-agent cannot load the skill, include the key constraints directly in the prompt. At minimum, these rules must be present:
-   - Two-process FSM style (state register in `always @(posedge clk)`, next-state + outputs in `always @(*)`)
-   - Single-bit control rule: FSM combinational block assigns only single-bit enables and `state_d`. Multi-bit registers (addr, counter, len, data, wstrb) updated in synchronous blocks gated by those enables
-   - Naming: `*_i`/`*_o` ports, `*_q`/`*_d` registered state, `wr_do`/`rd_do` for FIFO ops
-   - AXI channel separation: AW/W/B independent valid/ready, RD/WR command paths independent
-   - No `always @(*)` block computing multi-bit `_d` values gated on state (the "shadow datapath" anti-pattern)
-
-3. **Post-generation review:** After the sub-agent delivers RTL, run the self-review checklist (step 8) against its output before accepting it. Fix violations before integrating.
-
-The prompt template for sub-agents:
-```
-You are writing RTL for module `<module_name>`. Before writing code:
-1. Read `<skill_path>/SKILL.md` and follow its workflow.
-2. Read the interface contract at `<contract_path>` — pay special attention to port widths, signal semantics, and inter-module handshake rules.
-3. Read the relevant pattern reference from `references/rtl/` or `references/axi-dma/`.
-4. Read `references/debug/bug-pattern-library.md` SM1, SM2 for the single-bit control rule.
-5. After writing RTL, self-review against the checklist in SKILL.md step 8.
-6. Verify that your module's port widths and signal semantics MATCH the interface contract exactly.
-```
-
-**Critical additions for multi-module projects:**
-- Sub-agents MUST read the interface contract file — not just the skill
-- Port widths must be derived from the SAME parameters as the driving module
-- Byte-to-beats conversions must use the ceiling division formula, not bit extraction
-- Document whether `cmd_len_i` (or similar) is in bytes or beats — ambiguity causes integration bugs
-
-**Design request:** Assumptions → Design contract → State elements → Cycle trace → RTL → Verification notes → Risks/corner cases → Review status.
-
-**Review/debug request:** Observed evidence → Likely contract violation → Minimal fix → What to recheck → Residual uncertainty.
-
-**Subsystem/full system:** Assumptions → System contract → Submodule decomposition → Interface contracts → Integration invariants → Local cycle traces → Implementation sequence → Verification strategy → Residual risks.
+Sub-agents do not automatically load this skill and will fall back to training-data anti-patterns. The prompt must include either: (1) a skill loading directive, or (2) inlined critical rules. After delivery, run Step 8 review before accepting. Full prompt template and multi-module rules: see `references/architecture/sub-agent-delegation.md`.
 
 ## Debugging rules
 

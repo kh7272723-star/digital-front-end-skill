@@ -4,6 +4,114 @@
 
 ---
 
+## 2026-05-30 — 工作流重构：原则审查分散化 + 复杂度闸门 + 8c 定位调整
+
+### 问题背景
+
+四轮 A/B 实验暴露了工作流层面的三个结构性问题：
+
+1. **6 原则全部堆在 Step 8c**（RTL 完成后），导致审查负担过重（18-30 个问题），且错失了早期发现架构问题的机会（R1 的 tready 隔离 bug 如果在合约阶段审查 P4 就不会出现）
+2. **8c 被定位为"仿真前的门"**，但实际 Agent 行为是先跑仿真再补文档——工作流暗示瀑布，但真实过程是迭代
+3. **所有设计同等对待**——100 行 leaf module 和 1500 行子系统走相同的 8c 流程
+
+### 改动
+
+| # | 改动 | 文件 |
+|---|------|------|
+| 1 | **原则审查分散到三个检查点**：Step 2a（合约后，P4+P6）→ Step 5a（迹线后，P1+P2）→ Step 8c（RTL 后，P3+P5） | `SKILL.md` |
+| 2 | **复杂度闸门**：leaf module（≤300 行）做快速审查（1-2 问/原则），子系统做完整审查（3-5 问/原则） | `SKILL.md` Step 8c |
+| 3 | **新增 Step 8d**："仿真失败后，对照原则审查文档定位根因"——8c 从前置门变为 debug 工具 | `SKILL.md` |
+| 4 | `design-principles.md` "How to use" 更新为三检查点表 | `references/design/design-principles.md` |
+
+### 审查时机设计
+
+| 检查点 | 原则 | 时机理由 |
+|--------|------|---------|
+| Step 2a | P4 独立性, P6 边界 | 架构耦合和边界不匹配在写代码前修复成本最低 |
+| Step 5a | P1 时序合约, P2 FSM 安全 | 周期迹线是验证信号时序和 FSM 行为的最佳时机 |
+| Step 8c | P3 已知值, P5 物理世界 | 需要实际 RTL 代码才能审查：寄存器初始化、物理约束 |
+
+### SKILL.md 行数
+
+~305 / 500 行
+
+### 实验依据
+
+- R1: Agent A 的 tready 隔离 bug（P4）——如果在 Step 2a 审查 P4 就能预防
+- R3: Agent B 的 4 个 8c 发现中 2 个是 P1/P2 问题——如果在 Step 5a 审查就能更早发现
+- R4: Agent B 的 8c 发现全部是 P1/P3/P5——分散到三个检查点后每步只需审查 2 个原则
+- R1-R4 汇总：有原则审查文档的 Agent debug 快 34%
+
+---
+
+## 2026-05-29 — SKILL.md 索引优化 + Step 8c 修复纪律
+
+### SKILL.md 瘦身
+
+SKILL.md 从 ~467 行减至 ~330 行。策略：offload 详细规则到 references/，SKILL.md 保留目录式入口。
+
+| 改动 | offload 到 | 节省 |
+|------|-----------|:--:|
+| Step 8 自审清单（65 项） | `references/verification/self-review-checklist.md`（新建） | ~95 行 |
+| Step 12 子代理 prompt 模板 | `references/architecture/sub-agent-delegation.md`（新建） | ~32 行 |
+| Step 9 仿真循环+综合步骤 | 已有 references（simulation-loop.md, synthesis-feedback-guide.md） | ~25 行 |
+
+### Step 8c 修复纪律
+
+基于 R3 实验：Agent B 用 8c 发现 4 个 bug 但倾向"加硬件"修复（如新增 4 个锁存寄存器），引入复杂度反噬→3 个残留问题。Agent A 用 FSM 级门控自然规避。新增修复优先级：**1.删 → 2.改时序 → 3.FSM级约束 → 4.加硬件（最后手段）**。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `SKILL.md` | Step 8→routing table; Step 9/12 压缩; Step 8c+修复纪律 |
+| `references/verification/self-review-checklist.md` | **新建** |
+| `references/architecture/sub-agent-delegation.md` | **新建** |
+
+### SKILL.md 行数
+
+~330 / 500 行
+
+---
+
+## 2026-05-29 — Step 8c 自审化 + A/B 实验驱动改进
+
+### A/B 对比实验
+
+验证 Step 8c（设计原则审查）的"主动搜索"效果：两个子代理并行实现 Pattern Generator (APB+AXI-Stream)，Agent A 用旧流程（Step 8 only）、Agent B 用新流程（Step 8c→Step 8→Step 9）。
+
+**核心发现：**
+- 两者均 10/10 仿真通过，Yosys 0 latch
+- 8c checklist 式审查（预编写 YES/NO 表）**未主动预防任何 bug**——所有 bug 均为仿真发现后回溯映射到原则
+- 但 Agent B（有 8c）的架构质量更优：FSM 作为唯一控制源、纯 datapath core、无 P4 架构缺陷
+- Agent A（无 8c）出现了关键 P4 独立性 bug：APB 事务期间 AXI-Stream beat 被意外消耗，需 testbench workaround
+- 8c 作为 **架构 mindset**（设计前阅读原则）可能比作为 **形式化审查工具**（填表）更有价值
+
+### 据此改进（4 项）
+
+| # | 改动 | 文件 |
+|---|------|------|
+| P0 | Step 8 Integration 新增 P4 独立性检查：APB/配置路径与数据路径不得共享状态，APB 事务不得意外消耗 AXI-Stream 数据 | `SKILL.md` Step 8 |
+| P2 | Step 7 新增模块边界 discipline段落：推荐 registered I/O，解释 combinational 跨层次输出的风险（时序、glitch、testbench 时序复杂性） | `SKILL.md` Step 7 |
+| P3 | 新增 E1b 反模式：`output reg` + `assign` 混用 — 含 Yosys warning、Bug 4 案例、正确/错误代码对比 | `references/rtl/correctness-rules.md` |
+| — | **Step 8c 从 checklist 式重写为自审式**：不再用预编写 YES/NO 表格，改为要求 Agent 针对自己的具体 RTL 动态生成审查问题，引用实际信号名、FSM 状态、模块边界，追踪周期级行为。含 good/bad 示例对比 | `SKILL.md` Step 8c |
+| — | `design-principles.md` "How to use" 更新：明确 active-search questions 是生成自审问题的**提示**，不是预制 checklist | `references/design/design-principles.md` |
+
+### Step 8c 核心变化
+
+```
+旧：读原则 → 填预制 YES/NO 表 → 交差
+新：读原则 → 看自己的 RTL → 自问自答具体问题（"done_o 在 S_DONE→S_GENERATE 转换时脉冲多宽？"）→ 追踪信号路径 → 修复 → 记录
+```
+
+这一步的关键洞察来自用户：**如果在原则之上再套一层 checklist，那为什么还需要凝练出六大原则？** 原则的价值在于思维方式的变化——从"逐条匹配"变为"原则驱动自审"——而不是把 checklist 从 57 项压缩成 6 项。
+
+### SKILL.md 行数
+
+~467 / 500 行
+
+---
+
 ## 2026-05-29 — 设计原则驱动重构（缺陷 #4：单点经验 → 原则体系）
 
 ### 问题背景
