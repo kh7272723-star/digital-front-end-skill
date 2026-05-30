@@ -102,11 +102,21 @@ Before reusing an example, check: reset style match, handshake naming match, bou
 
 ### 1. Parse the request
 
-Summarize the requested block and list open questions. If working in an existing project, inspect local conventions first. Classify as leaf module, subsystem, or full system.
+Summarize the requested block and list open questions. If working in an existing project, inspect local conventions first. Classify the design using the three-tier complexity gate:
+
+| Level | Criteria | Principle review | Agent strategy |
+|:-----:|----------|:----------------:|----------------|
+| **L0: Trivial** | ≤200 lines, ≤8 FSM states, linear flow (no branches other than counter completion), single protocol | **Skip 2a/5a. Only P3 at 8c** (register audit). Inline in dev log. | Single agent |
+| **L1: Leaf** | 200-500 lines, or nonlinear FSM, or dual protocol (e.g. APB + UART) | **FAST: 1-2 questions/principle** at 2a/5a/8c. Separate .md files. | Single agent |
+| **L2: Subsystem** | >500 lines, or multi-module, or multi-clock, or 3+ protocols | **FULL: 3-5 questions/principle** at 2a/5a/8c. Signal tracing required. | **Consider decomposing into 2-3 sub-agents with interface contracts** if estimated >400 lines. Multi-agent coordination via Step 12. |
+
+**L0 note:** Four rounds of A/B experiments (R5-R8) showed that for modules ≤200 lines with linear FSMs, the distributed principle checkpoints (2a/5a) found ZERO bugs. The overhead of writing separate review documents is wasted effort. However, the P3 register audit at 8c consistently catches naming mismatches and initialization gaps even in simple modules — keep that.
+
+**L2 decomposition note:** R8b experiment showed that projects >500 lines / >10 FSM states exceed a single sub-agent's reliable completion window (~600s). The distributed workflow's documentation overhead (~30%) pushes near-limit projects over the edge. When classifying as L2, produce a submodule decomposition plan with interface contracts BEFORE any RTL.
 
 If the specification is underspecified or vague (missing protocol details, data widths, error handling, throughput targets, CRC parameters, etc.), run the requirement extraction framework from `references/architecture/requirement-extraction-template.md` before proceeding to Step 2. Classify every design dimension as Required/Implied/Assumed/Unknown. Attach the filled checklist + design decision log to the timing contract. If more than 3 Required dimensions are unanswered, pause and ask the user before writing any RTL.
 
-For full systems, do not start with RTL. Produce a system contract, submodule decomposition, interface contracts, integration invariants, risky local traces, implementation sequence, and verification strategy.
+For full systems (L2 with >3 sub-modules), do not start with RTL. Produce a system contract, submodule decomposition, interface contracts, integration invariants, risky local traces, implementation sequence, and verification strategy.
 
 ### 2. Build the timing contract first
 
@@ -114,9 +124,11 @@ Before writing code, produce a short timing contract using `references/timing/ti
 
 ### 2a. Principle check — Independence and Boundaries (P4, P6)
 
+**SKIP if Level 0 (Trivial).** For L1/L2, continue below.
+
 **Why now:** Architecture-level coupling and boundary mismatches are cheapest to fix before any RTL exists. R1 experiment: Agent A's tready isolation bug (APB corrupted AXI-Stream data) would have been prevented by a 2-minute P4 check at contract time.
 
-Read `references/design/design-principles.md` P4 and P6. Ask 3-5 questions about YOUR contract:
+Read `references/design/design-principles.md` P4 and P6. Before asking questions, check the "When to skip" section in each principle — some principles may not apply to your design type. For L1: ask 1-2 questions. For L2: ask 3-5 questions.
 
 **P4 (Independence):** Are there independent channels/paths/domains in this design? Does the contract specify that they are decoupled? Can a transaction on one interface accidentally consume or corrupt data on another? Can one channel's backpressure block another's progress?
 
@@ -138,9 +150,11 @@ Use `references/timing/cycle-trace-guidelines.md`. Include pre-edge state, combi
 
 ### 5a. Principle check — Timing Contracts and FSM Safety (P1, P2)
 
+**SKIP if Level 0 (Trivial).** For L1/L2, continue below.
+
 **Why now:** The cycle trace is the best place to verify signal timing and FSM behavior — before RTL is written, when you can still redesign without rewriting code.
 
-Read `references/design/design-principles.md` P1 and P2. For each signal and FSM state in your cycle trace:
+Read `references/design/design-principles.md` P1 and P2. Before asking questions, check the "When to skip/lite" section in each principle. For L1 linear FSMs: use P2 LITE (1-2 questions, no abort-path analysis needed). For L2: full P2 (3-5 questions with abort/recovery analysis).
 
 **P1 (Timing Contract):** For every output in the trace: is it pulse (1-cycle), level (sustained), or registered (delayed)? Are pulse outputs guaranteed exactly 1 cycle wide in every trace path? For valid/ready handshakes: does valid hold until ready? Is data stable during backpressure?
 
@@ -224,43 +238,62 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 - Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
 - Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
 
-### 8c. Principle check — Known Values and Physical World (P3, P5)
+### 8c. Principle check — Known Values and Output Discipline (P3, P5a, P5b)
 
-**Note:** P1/P2 were reviewed at Step 5a (cycle trace). P4/P6 were reviewed at Step 2a (contract). Step 8c only covers the two principles that require actual RTL code to review: P3 (register initialization) and P5 (physical constraints).
+**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8c covers the principles that require actual RTL code to review.
 
-Read `references/design/design-principles.md` P3 and P5.
+Read `references/design/design-principles.md` P3, P5a, P5b.
 
-**Complexity gate:** Adapt review depth to design complexity.
+**Complexity gate (same three-tier as Step 1):**
 
-| Complexity | Criteria | Review depth |
-|------------|----------|--------------|
-| **Leaf module** | ≤300 lines, ≤2 FSM states, single interface protocol | Fast: 1-2 questions per principle |
-| **Subsystem** | >300 lines, or multi-module, or multi-protocol | Full: 3-5 questions per principle, signal tracing required |
+| Level | Review scope | Format |
+|:-----:|-------------|--------|
+| **L0: Trivial** | **P3 only** (register audit). Skip P5a/P5b. | 1 paragraph in dev log, no separate file |
+| **L1: Leaf** | P3 + **P5a** (Output Discipline). Skip P5b. | 1-2 questions each. `principle_review_8c.md` |
+| **L2: Subsystem** | P3 + P5a + **P5b** (Physical Implementation). | 3-5 questions each. Signal tracing required. `principle_review_8c.md` |
 
-**P3 (Known Values):** Generate design-specific questions about register initialization. Scan your `always @(posedge clk)` blocks. Does every register have an explicit reset? Any unreset arrays or memories? Can any register reach an unexpected state (seed=0, counter wrap, shift register all-zeros)?
+**Why P5 was split:** Four rounds of A/B experiments (R5-R8) found ZERO P5 issues — because the principle mixed output discipline (always applicable) with physical implementation (ASIC-only). Agents saw LP/PH questions and marked NA. The split ensures every module gets the applicable part.
 
-**P5 (Physical World):** Generate design-specific questions about physical constraints. Are internal counters toggling when idle? Are bit widths from `$clog2` or hardcoded? Are module I/O registered? Any wide combinational paths active when unused?
+**P3 (Known Values):** Generate design-specific questions about register initialization. Scan your `always @(posedge clk)` blocks. Does every register have an explicit reset? Any unreset arrays or memories? Can any register reach an unexpected state (seed=0, counter wrap, shift register all-zeros)? Are all combinational signals driven by exactly one source?
+
+**P5a (Output Discipline — always applicable for L1/L2):** Generate design-specific questions about output quality:
+1. Are all module boundary outputs driven from registers (not combinational `case(state_q)`)? Combinational outputs cause glitches during FSM transitions and complicate testbench sampling. See PH1.
+2. Are internal counters gated by state (not free-running when idle)? Free-running counters burn power and can wrap unexpectedly.
+3. Are bit widths derived from `$clog2` (not hardcoded)? Hardcoded widths create silent bugs when parameters change.
+4. Is the baud/divider counter's terminal count correct (counts DIVIDER cycles, not DIVIDER+1)?
+
+**P5b (Physical Implementation — L2/ASIC only):** Power gating sequences, DVFS timing, isolation/retention, fanout, placement. See `references/design/design-principles.md` P5b for active-search questions. Skip for FPGA targets and L0/L1 modules.
 
 **Output format:** Design-specific questions citing YOUR signal names and line numbers. See Step 5a for the good/bad example.
 
-**Fix discipline** (same as Step 5a):
+**Fix discipline** (applies to all findings at any checkpoint):
 
 | Priority | Strategy | What to try |
 |:--:|------|-------------|
-| **1** | **Delete** | Remove redundant registers, unused states |
+| **1** | **Delete** | Remove redundant registers, unused states, dead code |
 | **2** | **Retime** | Move signal earlier/later, reorder state transitions |
 | **3** | **Constrain** | FSM guard (`!busy`, gating), enable qualification |
 | **4** | **Add** | Hardware as last resort — document why 1-3 don't work |
-
-### 8d. Using principle reviews during debug
-
-After any simulation failure: before guessing at a fix, revisit your Step 2a/5a/8c review documents. They contain a signal-level map of your design that lets you locate root causes faster than adding `$display` statements. Four rounds of A/B experiments showed that agents with principle review documents debug 34% faster because they already understand the signal因果关系.
 
 ### 9. Generate verification and run simulation loop
 
 Provide at least one of: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI designs, use `references/verification/axi-verification.md`.
 
 **Simulation loop:** Follow `references/verification/simulation-loop.md` (lint→compile→simulate→analyze→fix→re-simulate, max 3 iterations). Testbench must follow output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`.
+
+**During Phase 4 (Failure Analysis) — Principle-driven debug (was Step 8d):** Before guessing at a fix, re-read your principle review documents (2a/5a/8c). They contain a signal-level map of your design:
+
+1. **Categorize the failure:** compile error / testbench infrastructure / RTL functional bug
+2. **For RTL functional bugs:** map the failure signal/symptom to the relevant principle doc:
+   - Wrong signal timing / pulse width? → re-read P1 review
+   - FSM stuck / wrong state / missing transition? → re-read P2 review
+   - Wrong register value / 'x' propagation / uninitialized? → re-read P3 review
+   - One channel blocking another / APB corrupting data? → re-read P4 review
+   - Combinational output glitch / timing closure issue? → re-read P5a review
+3. **Match** the symptom against `references/debug/bug-pattern-library.md`. Cite pattern ID if found.
+4. **Fix** minimally. Re-run Step 8 checklist on the changed code (debug fixes are the #1 source of constraint violations).
+
+The principle review documents let you locate root causes faster than adding `$display` statements — they already trace every signal's timing contract, every FSM state's exit path, and every register's initialization.
 
 **Synthesis feedback:** After simulation passes, run yosys to check for latches, combinational loops, and critical path. See `references/verification/synthesis-feedback-guide.md` and `scripts/yosys_extract.py`.
 

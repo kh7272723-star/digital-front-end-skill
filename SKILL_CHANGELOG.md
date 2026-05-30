@@ -4,6 +4,66 @@
 
 ---
 
+## 2026-05-30 — R5-R8 复盘驱动的工作流迭代（三档闸门 + P5 拆分 + 原则可跳过 + 8d 迁移）
+
+### 背景
+
+R5-R8 四轮 A/B 实验的复盘分析发现了 7 个根因：
+1. P5 物理世界原则 4 轮零触发 — "output discipline" 和 "power gating" 混在一起
+2. Agent B 在 I2C 项目上 3 次超时 — 复杂度闸门只有 1D（代码行数）
+3. UART TX 的 2a/5a 零发现 — 检查点是固定指派的，不是按需触发的
+4. Step 8d 从未被需要 — 夹在 8c 和 9 之间，仿真直接过就跳过了
+5. 旧流程 8c 漏了 APB delta-cycle race — 原则抓不住新的 failure mode
+6. I2C 无 reference → agent 模式断裂 — 没有 "first-contact protocol" 回退
+7. R7 实验合同不匹配 — 缺少 contract compliance check
+
+### 改动文件
+
+| 文件 | 改动 | 行数变化 |
+|------|------|:---:|
+| `SKILL.md` | Step 1: 三档复杂度闸门 (L0/L1/L2) + 分解建议；Step 2a/5a: L0 跳过条件；Step 8c: 三档闸门 + P5a/P5b 拆分；Step 9: 集成原 8d 到 Phase 4 | 305→338 (+33) |
+| `references/design/design-principles.md` | P5 拆为 P5a(Output Discipline) + P5b(Physical Impl)；P1-P6 每个增加 "When to skip/lite"；P4/P6 增加协议无关首问；更新检查点表和映射表 | ~200→257 (+57) |
+
+### 改动详情
+
+**三档复杂度闸门：**
+| Level | 标准 | 审查范围 |
+|:---:|---|------|
+| **L0: Trivial** | ≤200行, ≤8 FSM states, 线性流 | 跳过 2a/5a，仅 P3 at 8c |
+| **L1: Leaf** | 200-500行, 或非线性FSM, 或双协议 | FAST: 1-2 问/原则 |
+| **L2: Subsystem** | >500行, 或多模块, 或多时钟 | FULL: 3-5 问/原则 + P5b + 分解建议 |
+
+**P5 拆分：**
+- P5a (Output Discipline): 始终适用于 L1/L2 — registered I/O, counter gating, bit widths, pulse width
+- P5b (Physical Implementation): 仅 L2/ASIC — power gating, DVFS, placement, fanout
+
+**原则可跳过判定：**
+- P1: L0 skip (信号分类在合约阶段内联完成)
+- P2: LITE 模式 (线性 FSM 跳过 abort 路径分析), 无 FSM 则完全跳过
+- P3: 所有 level 适用 (最一致地抓到 bug)
+- P4: 单通道/单时钟域/无并发 → skip
+- P5a: L0 skip
+- P5b: L0/L1 skip, FPGA skip
+- P6: 单模块 LITE (只检查端口宽度)
+
+**P4/P6 协议无关化：**
+- 每个原则首问改为 protocol-independent (列举独立关注点 → 检查解耦)，然后才切入协议特化问题 (AXI/Serial/CDC)
+- 解决了 I2C/UART 等非 AXI 协议下 agent 标记 NA 的问题
+
+**Step 8d 迁移：**
+- 从独立步骤 (夹在 8c 和 9 间) 迁移到 Step 9 Phase 4 (Failure Analysis) 的第一步
+- 不再是被跳过的独立步骤，而是仿真 debug 的标准流程
+
+### 实验依据
+
+详细分析见 `projects/test-workflow-round8/SKILL_IMPROVEMENT_ANALYSIS.md`。
+
+### SKILL.md 行数
+
+~338 / 500 行
+
+---
+
 ## 2026-05-30 — A/B 实验 Round 8（最终轮）：UART TX + I2C 工作流稳定性验证
 
 ### 实验设计
