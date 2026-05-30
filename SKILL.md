@@ -279,6 +279,8 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 
 Provide at least one of: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI designs, use `references/verification/axi-verification.md`.
 
+**Before writing the testbench, read `references/verification/icarus-common-pitfalls.md`.** It documents 15 Icarus-specific pitfalls discovered across R5-R8 experiments — `return`/`break` syntax, APB delta-cycle races, combinational output timing, address aliasing, and more. Most are 2-line fixes that save 1-2 simulation iterations. Also use `references/verification/tb-examples.md` section 0 (standard skeleton) as your starting template.
+
 **Simulation loop:** Follow `references/verification/simulation-loop.md` (lint→compile→simulate→analyze→fix→re-simulate, max 3 iterations). Testbench must follow output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`.
 
 **During Phase 4 (Failure Analysis) — Principle-driven debug (was Step 8d):** Before guessing at a fix, re-read your principle review documents (2a/5a/8c). They contain a signal-level map of your design:

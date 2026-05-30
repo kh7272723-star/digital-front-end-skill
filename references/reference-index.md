@@ -44,6 +44,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 ## Verification
 
 - Verification requests: `references/verification/verification-guidance.md`, `references/verification/tb-examples.md`, `references/verification/assertion-examples.md`, and for SVA `references/verification/assertion-quality-checklist.md`
+- **Testbench pitfalls (mandatory):** `references/verification/icarus-common-pitfalls.md` — 15 Icarus-specific pitfalls that wasted simulation iterations across R5-R8 experiments. Read BEFORE writing any testbench.
 - Verification planning: `references/verification/verification-matrix-template.md`, `references/verification/verification-planning.md`
 - **RTL self-review checklist:** `references/verification/self-review-checklist.md` — complete 13-category 65-item checklist used in SKILL.md Step 8
 - Coverage models: `references/verification/coverage-models.md`

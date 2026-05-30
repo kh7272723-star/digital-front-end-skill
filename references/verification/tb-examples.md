@@ -1,8 +1,334 @@
+
 # Verilog testbench example patterns
 
 ## Source policy
 Use testbench examples that are small, directed, and easy to extend.
 Prefer plain Verilog testbench structure unless the user specifically asks for SystemVerilog features.
+
+**Before writing any testbench:** Read `references/verification/icarus-common-pitfalls.md` — 15 documented Icarus-specific pitfalls that have wasted simulation iterations across R5-R8 experiments. Most are 2-line fixes.
+
+---
+
+## 0. Standard Testbench Skeleton (START HERE)
+
+This skeleton includes safe clock generation, error accumulation, output protocol markers, and timeout watchdog. Copy this template as your starting point, then add your DUT-specific tests.
+
+```verilog
+`default_nettype none
+`timescale 1ns / 1ps
+
+module tb_<name>;
+    //========================================================================
+    // Parameters
+    //========================================================================
+    parameter CLK_PERIOD = 20;   // 50 MHz = 20 ns
+    parameter MAX_TIME   = 1_000_000;  // 1 ms timeout
+
+    //========================================================================
+    // DUT signals
+    //========================================================================
+    reg        clk_i;
+    reg        rst_ni;
+    // ... add your DUT I/O signals here ...
+
+    //========================================================================
+    // DUT instantiation
+    //========================================================================
+    <dut_name> #(
+        .PARAM_A(VAL_A),
+        .PARAM_B(VAL_B)
+    ) u_dut (
+        .clk_i  (clk_i),
+        .rst_ni (rst_ni),
+        // ... ports ...
+    );
+
+    //========================================================================
+    // Clock generation (safe — no time-0 posedge)
+    //========================================================================
+    initial begin
+        clk_i = 1'b0;
+        #(CLK_PERIOD/2);
+        forever #(CLK_PERIOD/2) clk_i = ~clk_i;
+    end
+
+    //========================================================================
+    // Reset sequence
+    //========================================================================
+    initial begin
+        rst_ni = 1'b0;
+        repeat (8) @(posedge clk_i);
+        rst_ni = 1'b1;
+        repeat (4) @(posedge clk_i);
+        $display("RESET_RELEASED");
+    end
+
+    //========================================================================
+    // Error counter and timeout
+    //========================================================================
+    integer error_cnt;
+    initial error_cnt = 0;
+
+    initial begin
+        #MAX_TIME;
+        $display("FAIL: SIMULATION_TIMEOUT at %0t", $time);
+        $finish;
+    end
+
+    //========================================================================
+    // Main test sequence
+    //========================================================================
+    initial begin
+        $display("SIMULATION_START");
+        wait(rst_ni === 1'b1);
+        repeat (4) @(posedge clk_i);
+
+        // Test 1: Reset check
+        test_reset();
+        // Test 2: ...
+        // test_xxx();
+
+        // Summary
+        if (error_cnt == 0)
+            $display("ALL_TESTS_PASS");
+        else
+            $display("FAIL: %0d errors", error_cnt);
+        $display("SIMULATION_DONE");
+        $finish;
+    end
+
+    //========================================================================
+    // APB Bus Functional Model (write/read/check tasks)
+    //========================================================================
+    // See APB BFM section below — copy those tasks here
+
+    //========================================================================
+    // Test tasks — one per test
+    //========================================================================
+    task test_reset;
+    begin : task_body
+        $display("TEST_START test_reset");
+        @(negedge clk_i);
+        rst_ni = 1'b0;
+        repeat (4) @(posedge clk_i);
+        // Check DUT outputs at reset
+        if (tx_o !== 1'b1) begin
+            $display("FAIL: tx_o=%b at reset, expected 1", tx_o);
+            error_cnt = error_cnt + 1;
+        end
+        rst_ni = 1'b1;
+        repeat (4) @(posedge clk_i);
+        $display("TEST_PASS test_reset");
+    end
+    endtask
+
+    // ... add more test tasks ...
+endmodule
+`default_nettype wire
+```
+
+**Checklist before running simulation:**
+- [ ] Clock: `initial begin clk=0; #p/2; forever #p/2 clk=~clk; end` (NOT `reg clk=0; always`)
+- [ ] Reset: `RESET_RELEASED` marker after reset deassertion
+- [ ] Timeout: wall-clock `#MAX_TIME` (not cycle-based)
+- [ ] Errors: accumulated in `error_cnt`, never `$finish` on first failure
+- [ ] Protocol: `SIMULATION_START` → `RESET_RELEASED` → `TEST_START/PASS` → `ALL_TESTS_PASS` → `SIMULATION_DONE`
+- [ ] Pitfalls scanned: see `icarus-common-pitfalls.md` A1-A5, B1-B5, C1-C2, D1-D2
+
+---
+
+## APB Bus Functional Model
+
+Copy these tasks into your testbench for standardized APB register access. Handles SETUP→ACCESS phase timing, PSLVERR checking, and combinational output timing.
+
+```verilog
+// APB BFM — standard for all APB slave testbenches
+reg        apb_psel;
+reg        apb_penable;
+reg [5:0]  apb_paddr;
+reg        apb_pwrite;
+reg [31:0] apb_pwdata;
+wire [31:0] apb_prdata;
+wire       apb_pready;
+wire       apb_pslverr;
+
+// Connect to DUT
+assign psel_i    = apb_psel;
+assign penable_i = apb_penable;
+assign paddr_i   = apb_paddr;
+assign pwrite_i  = apb_pwrite;
+assign pwdata_i  = apb_pwdata;
+
+//========================================================================
+// APB Write — standard SETUP→ACCESS sequence
+//========================================================================
+task apb_write;
+    input [5:0]  addr;
+    input [31:0] data;
+begin
+    // SETUP phase
+    @(negedge clk_i);
+    apb_psel    = 1'b1;
+    apb_penable = 1'b0;
+    apb_paddr   = addr;
+    apb_pwrite  = 1'b1;
+    apb_pwdata  = data;
+    // ACCESS phase
+    @(negedge clk_i);
+    apb_penable = 1'b1;
+    @(negedge clk_i);
+    // Cleanup
+    apb_psel    = 1'b0;
+    apb_penable = 1'b0;
+end
+endtask
+
+//========================================================================
+// APB Read — returns data read from bus
+//========================================================================
+reg [31:0] apb_rdata;
+task apb_read;
+    input [5:0] addr;
+begin
+    // SETUP phase
+    @(negedge clk_i);
+    apb_psel    = 1'b1;
+    apb_penable = 1'b0;
+    apb_paddr   = addr;
+    apb_pwrite  = 1'b0;
+    // ACCESS phase
+    @(negedge clk_i);
+    apb_penable = 1'b1;
+    @(negedge clk_i);
+    // Sample BEFORE deassert — PRDATA is combinational from address
+    apb_rdata = prdata_o;
+    // Cleanup
+    apb_psel    = 1'b0;
+    apb_penable = 1'b0;
+end
+endtask
+
+//========================================================================
+// APB Write + Read-back check (golden reference Strategy C)
+//========================================================================
+task apb_check_reg;
+    input [5:0]  addr;
+    input [31:0] wr_data;
+    input [31:0] expected;  // may differ from wr_data due to read-only bits
+begin
+    apb_write(addr, wr_data);
+    repeat (2) @(posedge clk_i);  // let write settle
+    apb_read(addr);
+    if (apb_rdata !== expected) begin
+        $display("FAIL: reg@%02h readback — got %08h, expected %08h",
+                 addr, apb_rdata, expected);
+        error_cnt = error_cnt + 1;
+    end else begin
+        $display("READBACK_PASS @%02h: %08h", addr, apb_rdata);
+    end
+end
+endtask
+
+//========================================================================
+// APB PSLVERR check — write to invalid address, expect PSLVERR
+//========================================================================
+task apb_check_pslverr;
+    input [5:0] addr;
+begin
+    @(negedge clk_i);
+    apb_psel    = 1'b1;
+    apb_penable = 1'b0;
+    apb_paddr   = addr;
+    apb_pwrite  = 1'b1;
+    apb_pwdata  = 32'h0;
+    @(negedge clk_i);
+    apb_penable = 1'b1;
+    @(negedge clk_i);
+    // Check PSLVERR BEFORE deassert — it's combinational from address
+    if (pslverr_o !== 1'b1) begin
+        $display("FAIL: PSLVERR not asserted for invalid addr %02h", addr);
+        error_cnt = error_cnt + 1;
+    end else begin
+        $display("PSLVERR_PASS @%02h", addr);
+    end
+    apb_psel    = 1'b0;
+    apb_penable = 1'b0;
+end
+endtask
+```
+
+**APB BFM key rules:**
+1. Drive on `@(negedge clk_i)` — stable before DUT samples on posedge (pitfall B4)
+2. Sample PRDATA/PSLVERR in ACCESS phase BEFORE deasserting PSEL (pitfall B2)
+3. Two-cycle SETUP→ACCESS sequence per APB spec
+4. `apb_check_reg` includes a 2-cycle settle delay between write and read
+
+---
+
+## AXI-Stream BFM Tasks
+
+```verilog
+//========================================================================
+// AXI-Stream Send (master → DUT slave port)
+// Drives on negedge, holds until handshake
+//========================================================================
+task axis_send_beat;
+    input [DATA_W-1:0] data;
+    input              tlast;
+    input [KEEP_W-1:0] tkeep;
+begin
+    @(negedge clk_i);
+    s_axis_tdata_i  = data;
+    s_axis_tkeep_i  = tkeep;
+    s_axis_tlast_i  = tlast;
+    s_axis_tvalid_i = 1'b1;
+    // Wait for handshake
+    @(negedge clk_i);
+    while (!s_axis_tready_o) @(negedge clk_i);
+    s_axis_tvalid_i = 1'b0;
+end
+endtask
+
+//========================================================================
+// AXI-Stream Receive (DUT master → slave checker)
+// Samples on posedge with #1 settling delay
+//========================================================================
+task axis_recv_beat;
+    output [DATA_W-1:0] data;
+    output              tlast;
+    output [KEEP_W-1:0] tkeep;
+begin
+    // Wait for handshake
+    @(posedge clk_i);
+    while (!(m_axis_tvalid_o && m_axis_tready_i)) @(posedge clk_i);
+    #1;  // settling delay (pitfall B3)
+    data  = m_axis_tdata_o;
+    tkeep = m_axis_tkeep_o;
+    tlast = m_axis_tlast_o;
+end
+endtask
+
+//========================================================================
+// AXI-Stream packet send (multi-beat, auto TLAST)
+//========================================================================
+task axis_send_packet;
+    input [7:0] n_beats;  // number of beats in this packet
+begin
+    for (k = 0; k < n_beats; k = k + 1) begin : pkt_loop
+        axis_send_beat(test_data[k], (k == n_beats - 1), {KEEP_W{1'b1}});
+        if (k == n_beats - 1) disable pkt_loop;  // safe exit (pitfall A2)
+    end
+end
+endtask
+```
+
+**AXI-Stream BFM key rules:**
+1. Send: drive on negedge, wait for tready handshake
+2. Receive: sample on posedge with `#1` settling delay
+3. TLAST on last beat of packet; TKEEP = all-1s unless byte-enable needed
+4. Never use `break` in loops — use named block + `disable` (pitfall A2)
+
+---
 
 ## 1. Basic clock and reset
 
