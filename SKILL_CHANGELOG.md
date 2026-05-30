@@ -4,6 +4,67 @@
 
 ---
 
+## 2026-05-30 — A/B 实验 Round 6：新工作流端到端验证
+
+### 实验设计
+
+**项目：** AXI4-Stream 2×2 Switch with APB Routing（子系统，4 子模块，双协议）
+
+**对照：** Agent A 用旧工作流（6 原则堆在 Step 8c），Agent B 用新工作流（三检查点分散 + 复杂度闸门 FULL + 修复纪律）
+
+### 核心结果
+
+| 指标 | Agent A（旧） | Agent B（新） | 差异 |
+|------|:---:|:---:|:---:|
+| 仿真 | 12/12 PASS | 7/7 PASS | — |
+| 仿真迭代 | **3** | **1** | B 快 3× |
+| Yosys cells | 791 | 948 | B 大 20%（多 registered I/O） |
+| Yosys DFFs | 82 | 202 | B 多 120 flops |
+| Yosys latch | 0 | 0 | 都干净 |
+| 设计 bug（预仿真） | 2（Step 7） | **1（Step 5a）** | B 发现更早 |
+| Testbench bug | 6 | 0 | B 干净 |
+
+### Bug 发现时机对比
+
+| 检查点 | Agent A | Agent B |
+|--------|:---:|:---:|
+| Step 2a（合约：P4+P6） | ❌ 跳过 | 0 bug |
+| **Step 5a（迹线：P1+P2）** | ❌ 跳过 | **1 bug：仲裁器 grant 卡死** |
+| Step 7（RTL 自审） | 2 bug | — |
+| Step 8c（RTL 后） | 0 bug | 0 bug |
+| Step 9（仿真） | 6 bug（全 testbench） | 0 bug |
+
+### 架构差异
+
+| 决策 | Agent A | Agent B |
+|------|---------|---------|
+| Router tready | Combinational | **Registered** |
+| Arbiter 输出 | Combinational (wire) | **Registered (flop)** |
+| PH1 合规性 | PARTIAL（自评） | Full |
+| 数据路径延迟 | 0 cycle | 1 cycle |
+
+### 关键发现
+
+1. **分布式审查让 bug 在 Step 5a 被发现**——Agent B 在写 RTL 之前通过 P2 FSM 安全性检查抓到了仲裁器 race condition（grant 选中但 valid 撤销→永久卡死），修复只需修改迹线。Agent A 的等价 bug 在 Step 7（RTL 写完后）才发现。
+
+2. **复杂度闸门产生更安全的架构**——Agent B 的 PH1 registered I/O 决策是 Step 5a P1 时序分析的直接结果；Agent A 把所有原则堆到最后，默认走了组合透传。
+
+3. **认知负荷降低是真实效果**——2 原则/次 × 3-5 问 vs 6 原则/次 × 42 问。Agent A 在 42 问中错过了地址解码别名（`paddr_i[4:2]` 把 0x40 映射为 0x00），直到仿真第 3 轮才被 PSLVERR 测试抓到。
+
+4. **Step 8d 未触发**——Agent B 仿真一次通过，不需要用原则文档 debug。需要后续实验专门注入 bug 来验证 Step 8d 效果。
+
+5. **6 个 testbench 基础设施 bug 是独立信号**——skill 缺少"常见 Icarus testbench 陷阱"reference。
+
+### 结论
+
+**新工作流验证有效。** 三检查点分散 + 复杂度闸门应该成为永久设计。详见 `projects/test-workflow-round6/EXPERIMENT_REPORT.md`。
+
+### SKILL.md 行数
+
+~305 / 500 行（本轮无文件改动，纯实验验证）
+
+---
+
 ## 2026-05-30 — 工作流重构：原则审查分散化 + 复杂度闸门 + 8c 定位调整
 
 ### 问题背景
