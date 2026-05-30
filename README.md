@@ -16,19 +16,21 @@ This skill fixes those problems by encoding the engineering discipline that expe
 
 ## What it does
 
-Given a digital front-end design request, the skill forces the agent through a structured 12-step workflow:
+Given a digital front-end design request, the skill forces the agent through a structured 12-step workflow with **three-tier complexity gating** (L0/L1/L2) and **distributed principle checkpoints** (2a/5a/8c):
 
-1. Parse and classify the request (leaf module / subsystem / full system)
+1. Parse and classify the request (L0: trivial, L1: leaf, L2: subsystem — auto-skip checkpoints for L0)
 2. Build a timing contract (clock, reset, handshake, latency, stall, flush, boundary)
+2a. Principle check — P4 Independence + P6 Boundaries (skipped for L0)
 3. Freeze the design spec (ports, widths, naming, protocol rules)
 4. Identify state elements (registers, memories, movement conditions)
 5. Write a cycle trace (pre-edge, combinational condition, active-edge update, next visible state)
+5a. Principle check — P1 Timing Contract + P2 FSM Safety (LITE mode for linear FSMs)
 6. Choose a design pattern (FSM, FIFO, pipeline, arbiter, etc.)
-7. Generate synthesizable RTL (Verilog-first, conservative defaults, bug-pattern scan)
-8. Structural self-review (57-item checklist across 10 categories)
+7. Generate synthesizable RTL (Verilog-first, conservative defaults, bug-pattern scan, pitfall-aware)
+8. Structural self-review (79-item checklist across 13 categories)
 8b. Functional verification (mandatory — golden reference methodology, 6 strategies)
-8c. Design principle review (mandatory — 6 principles, active-search questions)
-9. Simulation loop (lint → compile → simulate → VCD analysis → fix → re-simulate)
+8c. Principle check — P3 Known Values + P5a Output Discipline (P5b Physical Impl for L2 only)
+9. Simulation loop with principle-driven debug (read icarus-common-pitfalls.md first, then lint → compile → simulate → Phase 4 principle review → fix → re-simulate)
 10. Synthesis feedback (Yosys: latch/loop/critical-path/cell-count checks)
 11. Review and iterate
 12. Verify timing against contract and trace
@@ -39,10 +41,10 @@ For large systems (DMA engines, bus bridges, multi-channel controllers), the ski
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # Skill definition (415 lines)
-├── SKILL_CHANGELOG.md                # Full iteration history
+├── SKILL.md                          # Skill definition (340 lines, three-tier gate)
+├── SKILL_CHANGELOG.md                # Full iteration history (R5-R8 experiments)
 ├── README.md / README_CN.md          # This file
-├── references/                       # 87 curated knowledge documents
+├── references/                       # 88 curated knowledge documents
 │   ├── reference-index.md            # Task-to-reference mapping
 │   ├── timing/                       # Timing semantics, contracts, naming, protocols
 │   ├── architecture/                 # Hierarchy, system contracts, integration invariants
@@ -51,9 +53,9 @@ digital-front-end-skill/
 │   ├── rtl/                          # Coding guidelines, FSM/FIFO/pipeline/handshake examples
 │   ├── patterns/                     # Arbiter, credit-based, CRC, ECC, width converter, etc.
 │   ├── synthesis/                    # CDC, constraints, synthesis guidance
-│   ├── verification/                 # TB examples, assertions, simulation loop, golden reference
-│   ├── debug/                        # Bug pattern library (57 patterns)
-│   ├── design/                       # **6 design principles**, heuristics, PTA rules, intuition checklist
+│   ├── verification/                 # TB examples (skeleton+BFM), assertions, simulation loop, golden reference, **Icarus pitfalls**
+│   ├── debug/                        # Bug pattern library (66+ patterns)
+│   ├── design/                       # **7 design principles (P5a/P5b split)**, heuristics, PTA rules, intuition checklist
 │   ├── project/                      # Brownfield, large module guidance
 │   └── advanced/                     # Low-power, DFT, UVM, physical awareness
 ├── evals/
@@ -63,38 +65,31 @@ digital-front-end-skill/
 │   ├── fixtures/                     # 4 bug fixtures for debug evaluation
 │   └── trials/                       # 23 executable RTL + testbench trials
 ├── scripts/                          # 10 Python automation scripts
-│   ├── skill_static_check.py         # Package health checks
-│   ├── eval_benchmark_check.py       # Eval dimension coverage checker
-│   ├── rtl_check.py                  # Single trial compile + sim
-│   ├── run_all_trials.py             # Batch-run all 23 trials
-│   ├── rtl_complexity_check.py       # Engineering intuition checks + Yosys integration
-│   ├── vcd_extract.py                # VCD waveform analysis + protocol reconstruction
-│   └── yosys_extract.py              # Yosys synthesis report extraction
-└── projects/                         # 13 validated RTL projects
-    ├── test-cdc-capture/
-    ├── test-dma-datapath/
-    ├── test-dma-subsystem/
-    ├── test-fuzzy-spec/
-    ├── test-lowpower-soc/
-    └── test-validation/
+├── projects/                         # 14 validated RTL projects + A/B experiments
+│   ├── test-workflow-round5/         # R5: AXI-S FIFO A/B experiment
+│   ├── test-workflow-round6/         # R6: AXI-S 2x2 Switch A/B experiment
+│   ├── test-workflow-round8/         # R8: UART TX + I2C A/B experiment + improvement analysis
+│   ├── test-e2e-validation/          # E2E: AXI-Stream→APB Bridge (36/36, workflow validated)
+│   └── ...                           # (13 original validated projects)
 ```
 
 ## Key capabilities
 
-### 6 Design Principles (core innovation)
+### 7 Design Principles (with complexity-gated application)
 
-The skill's 57 bug patterns are organized under 6 core design principles. Instead of scanning 57 patterns one by one, the agent applies these principles as an "active search" lens to catch functional bugs before they become patterns:
+The skill's 66+ bug patterns are organized under 7 core design principles. **P5 was split** (R5-R8 experiment data showed P5 never triggered on leaf modules — output discipline and physical implementation are orthogonal concerns). Each principle has **When-to-skip/lite** rules to avoid wasting time on inapplicable questions:
 
-| # | Principle | Key Question |
-|---|-----------|-------------|
-| P1 | Every Signal Has a Timing Contract | Is every output's signal type (pulse/level/registered) documented? |
-| P2 | Every FSM Must Find Its Way Home | Can every state find a path back to IDLE? Abort paths for intermediate states? |
-| P3 | Every Register Has a Known Value | What value does every register hold after reset? Uninitialized memories? |
-| P4 | Independent Things Stay Independent | Are AXI channels, clock domains, read/write paths decoupled? |
-| P5 | The Physical World Always Wins | Are power sequences, isolation, operand gating correct for physical implementation? |
-| P6 | Boundaries Are Where Bugs Hide | Does every module boundary have an explicit contract? |
+| # | Principle | Applies to | Key Question |
+|---|-----------|:---:|-------------|
+| P1 | Every Signal Has a Timing Contract | L1/L2 | Is every output's signal type (pulse/level/registered) documented? |
+| P2 | Every FSM Must Find Its Way Home | L1/L2 (LITE for linear) | Can every state find a path back to IDLE? Abort paths? |
+| P3 | Every Register Has a Known Value | **All levels** | What value does every register hold after reset? |
+| P4 | Independent Things Stay Independent | L1/L2 (skip single-channel) | Are independent channels/paths/domains decoupled? |
+| P5a | Every Output Respects the Next Engineer | L1/L2 | Are boundary outputs registered (not combinational from state_q)? |
+| P5b | The Physical World Always Wins | L2/ASIC only | Power gating, DVFS, placement — skip for FPGA and L0/L1 |
+| P6 | Boundaries Are Where Bugs Hide | All (LITE for single-module) | Does every module boundary have an explicit contract? |
 
-See `references/design/design-principles.md` for the full active-search question set.
+See `references/design/design-principles.md` for full active-search questions, protocol-agnostic guidance, and skip/lite rules.
 
 ### Contract-first, always
 
@@ -104,9 +99,9 @@ The agent must write a timing contract before any RTL. This is not a suggestion 
 
 Step 8b requires running functional tests with known inputs and expected outputs. Six golden reference strategies cover every module type: known I/O pairs (CRC/ECC), software reference model (algorithms), write-readback scoreboard (register blocks), data integrity scoreboard (DMA/FIFO), invariant checking (arbiters), and latency verification (pipelines). All 6 strategies validated across 10 real projects.
 
-### 57 bug patterns with authoritative sources
+### 66+ bug patterns with authoritative sources
 
-The bug pattern library encodes known RTL failure modes discovered through 13 real projects:
+The bug pattern library encodes known RTL failure modes discovered through 14 real projects and 4 A/B experiment rounds. All patterns trace to authoritative sources (IEEE 1364, ARM IHI specs, Cummings SNUG papers).
 
 | Category | Patterns | Examples |
 |----------|----------|---------|
@@ -118,21 +113,34 @@ The bug pattern library encodes known RTL failure modes discovered through 13 re
 | RTL Correctness (E1-E8) | 8 | Latch inference, multi-driver, truncation, blocking/nonblocking |
 | FIFO (F1-F2) | 2 | FWFT output shift, registered output race |
 | CDC (D1-D2) | 2 | Gray code, ASYNC_REG |
-| Low-Power (LP1-LP7) | 7 | Isolation timing, retention handshake, PSM states, CDC pulse sync, DVFS gate, operand isolation, pulse transition |
+| Low-Power (LP1-LP7) | 7 | Isolation timing, retention handshake, PSM states, DVFS gate |
 | Physical (PH1-PH4) | 4 | Registered I/O, fanout control, SRAM proximity, bus grouping |
 | Verification (V1) | 1 | Structural PASS but functional FAIL |
+| **Testbench Pitfalls (A1-E1)** | **16** | **Icarus-specific: return/break unsupported, delta-cycle race, #1 settling, address aliasing, while(busy_o) timing** |
 
-### Simulation loop + VCD analysis
+### Simulation loop + principle-driven debug
 
-Full closed-loop verification: `iverilog` compile → `vvp` simulate → parse PASS/FAIL → `vcd_extract.py` waveform analysis (signal timeline extraction, AXI/APB protocol reconstruction, violation detection) → bug pattern matching → minimal fix → re-simulate. Maximum 3 fix-and-rerun iterations.
+Full closed-loop verification: read `icarus-common-pitfalls.md` (mandatory) → `iverilog` compile → `vvp` simulate → parse PASS/FAIL → Phase 4 principle-driven debug (re-read 2a/5a/8c review docs before fixing) → bug pattern matching → minimal fix → re-simulate. Maximum 3 fix-and-rerun iterations.
+
+### Icarus testbench pitfalls (16 documented)
+
+R5-R8 experiments uncovered 16 recurring Icarus-specific testbench bugs. Each pitfall is documented with broken/fix code, authoritative source citation, and empirical verification. Categories: language gaps (return/break/ref), delta-cycle timing, protocol compliance, structural issues, CDC. See `references/verification/icarus-common-pitfalls.md`.
+
+### Standard testbench skeleton + BFM library
+
+`references/verification/tb-examples.md` Section 0 provides a copy-paste skeleton with safe clock gen, error accumulation, output protocol markers. APB BFM (write/read/check/PSLVERR tasks, ARM IHI 0024C compliant) and AXI-Stream BFM (send/recv/packet tasks, ARM IHI 0051B compliant) included.
 
 ### Synthesis awareness (Yosys)
 
 Post-simulation synthesis check: latch detection, combinational loop detection, critical path analysis (ltp), cell count verification. `yosys_extract.py` for automated report extraction.
 
-### Multi-module integration
+### Multi-module integration + sub-agent delegation
 
-Sub-agent delegation with interface contracts ensuring port width consistency and signal type alignment across independently generated modules. Validated on UART (4 sub-agents), DMA subsystem (4 sub-agents), and Low-Power SoC (5 sub-agents).
+Sub-agent delegation with interface contracts ensuring port width consistency. Step 12 prompt template with mandatory skill loading directive. L2 decomposition recommendation for modules >400 lines. Validated on UART (4 sub-agents), DMA subsystem (4 sub-agents), Low-Power SoC (5 sub-agents), and E2E validation.
+
+### A/B experiment methodology (4 rounds validated)
+
+R5-R8 experiments established the evidence base for workflow decisions. Distributed checkpoints reduce simulation iterations 3× for subsystems. Principle fatigue confirmed — 6-at-once review misses bugs. Complexity gate calibrated from data. See `SKILL_CHANGELOG.md` for full experiment reports.
 
 ## Design philosophy
 
@@ -166,7 +174,7 @@ Default output is plain Verilog. SystemVerilog features are used only when expli
 
 Ready/valid register slice, skid buffer, FIFO, pipeline stage, FSM (two-process), arbiter (fixed/round-robin), credit-based flow control, retry buffer, width converter, CRC generator, SECDED ECC, multi-bank memory scheduler, counter/register slice, req/ack adapter, rate limiter, frame assembler, CAM, AXI DMA slice.
 
-## Validated projects (13)
+## Validated projects (14 + 4 A/B experiments)
 
 | Project | Type | Tests | Key findings |
 |---------|------|-------|-------------|
@@ -182,7 +190,17 @@ Ready/valid register slice, skid buffer, FIFO, pipeline stage, FSM (two-process)
 | Arbiter | Arbitration | 6/6 | Synthesis awareness, mask reset bug |
 | Clock Gate | Low-power | 8/8 | P1 rule verified, zero design defects |
 | SPI Master | Complex FSM | 5/5 | 6-state FSM, first Yosys synthesis pass |
-| **Low-Power SoC** | **Subsystem** | **28/28** | **LP1-LP7 + PH1-PH4 validated, SM3+LP7 patterns** |
+| **Low-Power SoC** | **Subsystem** | **28/28** | **LP1-LP7 + PH1-PH4 validated** |
+| **AXI-S→APB Bridge** | **Dual-protocol** | **36/36** | **E2E workflow validation, B6 pitfall discovered** |
+
+### A/B Experiment Rounds
+
+| Round | Project | Result | Core finding |
+|:---:|------|------|------|
+| R5 | AXI-S Packet FIFO | Both 12/12 | First distributed-checkpoint trial |
+| **R6** | **AXI-S 2×2 Switch** | **New: 0 RTL bug, Old: 2 bugs** | **3× fewer iterations, bug at Step 5a** |
+| R7 | Width Converter | Invalid (contract mismatch) | Experimental design lesson |
+| R8 | UART TX + I2C | Both 6/6 (UART) | Leaf module ceiling confirmed |
 
 ## Usage
 

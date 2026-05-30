@@ -14,19 +14,21 @@
 
 这个 Skill 通过编码资深 RTL 工程师内化的工程纪律来解决这些问题。
 
-## 工作流（12 步）
+## 工作流（12 步 + 三档闸门）
 
-1. 解析需求（叶子模块/子系统/全系统分类）
+1. 解析需求并三档分类（L0：简单 / L1：叶子模块 / L2：子系统 — L0 自动跳过早期检查点）
 2. 建立时序合同（时钟、复位、握手、延迟、停顿、冲刷、边界行为）
+2a. 原则检查 — P4 独立性 + P6 边界（L0 跳过）
 3. 冻结设计规格（端口、宽度、命名、协议规则）
 4. 识别状态元素（寄存器、存储器、移动条件）
 5. 编写周期迹线（沿前状态、组合条件、有效沿更新、下一可见状态）
+5a. 原则检查 — P1 时序合同 + P2 FSM 安全（线性 FSM 用 LITE 模式）
 6. 选择设计模式（FSM、FIFO、流水线、仲裁器等）
-7. 生成可综合 RTL（Verilog 优先、保守默认值、bug pattern 扫描）
-8. 结构自审（10 大类 57 项检查）
+7. 生成可综合 RTL（Verilog 优先、保守默认值、bug pattern 扫描、pitfall 感知）
+8. 结构自审（13 大类 79 项检查）
 8b. 功能验证（强制 — Golden Reference 方法论，6 种策略）
-8c. 设计原则审查（强制 — 6 核心原则 + 主动搜索问题）
-9. 仿真闭环（lint → 编译 → 仿真 → VCD 波形分析 → 修复 → 重跑）
+8c. 原则检查 — P3 已知值 + P5a 输出纪律（P5b 物理实现仅 L2）
+9. 仿真闭环 + 原则驱动 debug（先读 icarus-common-pitfalls.md，再 lint → 编译 → 仿真 → Phase 4 原则审查 → 修复 → 重跑）
 10. 综合反馈（Yosys：latch/loop/关键路径/cell count 检查）
 11. 审查迭代
 12. 验证时序对齐
@@ -35,10 +37,10 @@
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # Skill 定义（415 行）
-├── SKILL_CHANGELOG.md                # 完整迭代历史
+├── SKILL.md                          # Skill 定义（340 行，三档闸门）
+├── SKILL_CHANGELOG.md                # 完整迭代历史（R5-R8 A/B 实验）
 ├── README.md / README_CN.md          # 本文件
-├── references/                       # 87 个知识文档
+├── references/                       # 88 个知识文档
 │   ├── reference-index.md            # 任务到参考文件的映射
 │   ├── timing/                       # 时序语义、合同、命名、协议
 │   ├── architecture/                 # 层次结构、系统合同、集成不变量
@@ -47,64 +49,70 @@ digital-front-end-skill/
 │   ├── rtl/                          # 编码指南、FSM/FIFO/流水线/握手示例
 │   ├── patterns/                     # 仲裁器、信用流控、CRC、ECC、宽度转换等
 │   ├── synthesis/                    # CDC、约束、综合指导
-│   ├── verification/                 # 测试台、断言、仿真闭环、Golden Reference
-│   ├── debug/                        # Bug pattern 库（57 个 pattern）
-│   ├── design/                       # **6 大设计原则**、启发式、PTA 规则、直觉检查表
+│   ├── verification/                 # 测试台（骨架+BFM）、断言、仿真闭环、Golden Reference、**Icarus 陷阱**
+│   ├── debug/                        # Bug pattern 库（66+ pattern）
+│   ├── design/                       # **7 大设计原则（P5a/P5b 拆分）**、启发式、PTA 规则
 │   ├── project/                      # 棕地开发、大模块指导
 │   └── advanced/                     # 低功耗、DFT、UVM、物理感知
 ├── evals/                            # 63 个评估 prompt、23 个试用、4 个 bug fixture
 ├── scripts/                          # 10 个 Python 脚本
-└── projects/                         # 13 个已验证 RTL 项目
+└── projects/                         # 14 个已验证项目 + A/B 实验
 ```
 
 ## 核心能力
 
-### 6 大设计原则（核心创新）
+### 7 大设计原则（核心创新，含复杂度闸门）
 
-57 个 bug pattern 被组织在 6 个核心设计原则之下。Agent 不再逐条扫描 57 个 pattern，而是用这些原则作为"主动搜索"透镜来发现功能 bug：
+66+ 个 bug pattern 被组织在 7 个核心设计原则之下。**P5 已被拆分**（R5-R8 实验数据显示 P5 在 leaf module 上从未触发——输出纪律和物理实现是正交的关注点）。每个原则都有**何时跳过/简化**规则，避免在不适用的问题上浪费时间：
 
-| # | 原则 | 核心问题 |
-|---|------|---------|
-| P1 | 每个信号都有时序合同 | 每个输出的信号类型（脉冲/电平/寄存器）是否已文档化？ |
-| P2 | 每个状态机都必须能回到家 | 每个状态是否能回到 IDLE？中间状态是否有 abort 路径？ |
-| P3 | 每个寄存器在任何时刻的值都必须可知 | 复位后每个寄存器是什么值？未初始化的存储器有策略吗？ |
-| P4 | 独立的事物必须保持独立 | AXI 通道/时钟域/读写路径是否解耦？ |
-| P5 | 物理世界永远赢 | 功耗序列、隔离、操作数门控是否正确？ |
-| P6 | Bug 藏在边界处 | 每个模块边界是否有显式合同（端口宽度、信号类型、复位行为）？ |
+| # | 原则 | 适用范围 | 核心问题 |
+|---|------|:---:|---------|
+| P1 | 每个信号都有时序合同 | L1/L2 | 每个输出的信号类型（脉冲/电平/寄存器）是否已文档化？ |
+| P2 | 每个状态机都必须能回家 | L1/L2（线性 FSM 简化） | 每个状态是否能回到 IDLE？是否有 abort 路径？ |
+| P3 | 每个寄存器在任何时刻的值都必须可知 | **全部** | 复位后每个寄存器是什么值？ |
+| P4 | 独立的事物必须保持独立 | L1/L2（单通道跳过） | 独立通道/路径/时钟域是否解耦？ |
+| P5a | 每个输出都对下一个工程师负责 | L1/L2 | 模块边界输出是否从寄存器驱动（非组合 state_q）？ |
+| P5b | 物理世界永远赢 | 仅 L2/ASIC | 功耗门控、DVFS、布局——FPGA 和 L0/L1 跳过 |
+| P6 | Bug 藏在边界处 | 全部（单模块简化） | 每个模块边界是否有显式合同？ |
 
-详见 `references/design/design-principles.md`。
+详见 `references/design/design-principles.md`（含主动搜索问题、协议无关化、跳过/简化规则）。
 
-### 57 个 Bug Pattern（带权威来源）
+### 66+ 个 Bug Pattern（全部带权威来源）
 
 | 类别 | 数量 | 示例 |
 |------|------|------|
 | 握手 (H1-H8) | 8 | 载荷稳定性、ready 循环、valid 门控 |
 | 协议 (P4-P13) | 10 | AXI 通道分离、WVALID burst、APB 时序 |
 | 计数器/状态 (P14-P18) | 5 | 自动重载竞争、专用清除、流水线延迟 |
-| 状态机 (SM1-SM3) | 3 | 影子数据通路、FSM 中多比特 _d、FSM abort 路径 |
+| 状态机 (SM1-SM3) | 3 | 影子数据通路、FSM abort 路径 |
 | 数据通路 (DP1-DP5) | 5 | 宽度转换、bit-slicing、错误路径 |
 | RTL 正确性 (E1-E8) | 8 | Latch 推断、多驱动、截断、阻塞/非阻塞 |
 | FIFO (F1-F2) | 2 | FWFT 输出偏移、寄存器输出竞态 |
 | CDC (D1-D2) | 2 | 格雷码、ASYNC_REG |
-| 低功耗 (LP1-LP7) | 7 | 隔离时序、保持握手、PSM 状态、CDC 脉冲同步、DVFS 门控、操作数隔离、脉冲转换检测 |
+| 低功耗 (LP1-LP7) | 7 | 隔离时序、保持握手、DVFS 门控 |
 | 物理感知 (PH1-PH4) | 4 | 注册 I/O、扇出控制、SRAM 邻近、总线分组 |
 | 验证盲点 (V1) | 1 | 结构 PASS 但功能 FAIL |
+| **Testbench 陷阱 (A1-E1)** | **16** | **Icarus 特定：return/break 不支持、delta-cycle race、#1 settling、地址别名、while(busy_o) 时序** |
+
+### Icarus Testbench 陷阱（16 个已文档化）
+
+R5-R8 实验发现 16 个反复出现的 Icarus 特定 testbench bug。每个陷阱都有 broken/fix 代码、权威来源引用和实证验证。分类：语法兼容（return/break/ref）、delta-cycle 时序、协议合规、结构问题、CDC。详见 `references/verification/icarus-common-pitfalls.md`。
+
+### 标准 Testbench 骨架 + BFM 库
+
+`references/verification/tb-examples.md` Section 0 提供可直接复制的骨架（含安全时钟生成、错误累计、输出协议标记）。APB BFM（write/read/check/PSLVERR，符合 ARM IHI 0024C）和 AXI-Stream BFM（send/recv/packet，符合 ARM IHI 0051B）。
 
 ### Golden Reference 功能验证（强制）
 
-Step 8b 要求用已知输入和预期输出运行功能测试。6 种 Golden Reference 策略覆盖所有模块类型：已知 I/O 对（CRC/ECC）、软件参考模型（算法）、写回读记分板（寄存器块）、数据完整性记分板（DMA/FIFO）、不变量检查（仲裁器）、延迟验证（流水线）。全部 6 种策略已在 10 个真实项目中验证。
+6 种 Golden Reference 策略覆盖所有模块类型。全部 6 种策略已在 10+ 个真实项目中验证。
 
-### 仿真闭环 + VCD 波形分析
+### 仿真闭环 + 原则驱动 Debug
 
-完整的闭环验证：`iverilog` 编译 → `vvp` 仿真 → PASS/FAIL 解析 → `vcd_extract.py` 波形分析（信号时间线提取、AXI/APB 协议重建、违规检测）→ bug pattern 匹配 → 最小修复 → 重跑仿真。最多 3 次迭代。
+完整的闭环验证：先读 `icarus-common-pitfalls.md`（强制）→ `iverilog` 编译 → `vvp` 仿真 → Phase 4 原则驱动 debug（重读 2a/5a/8c 原则审查文档再修 bug）→ bug pattern 匹配 → 最小修复 → 重跑。最多 3 次迭代。
 
-### Yosys 综合反馈
+### A/B 实验方法论（4 轮已验证）
 
-仿真通过后运行综合检查：latch 推断、组合环路、关键路径（ltp）、cell count。`yosys_extract.py` 自动化报告提取。
-
-### 多模块集成
-
-子代理委托 + 接口合约确保独立生成的模块端口宽度一致。已在 UART（4 子代理）、DMA 子系统（4 子代理）、Low-Power SoC（5 子代理）上验证。
+R5-R8 实验为工作流决策建立了证据基础。分布式检查点将子系统仿真迭代减少 3×。原则疲劳已确认——6 原则堆在一起会漏 bug。复杂度闸门从数据中校准。
 
 ## 协议覆盖
 
@@ -120,7 +128,7 @@ Step 8b 要求用已知输入和预期输出运行功能测试。6 种 Golden Re
 
 Ready/valid 寄存器切片、Skid buffer、FIFO、流水线阶段、FSM（双进程）、仲裁器（固定/轮询）、信用流控、重试缓冲、宽度转换、CRC 生成器、SECDED ECC、多 bank 存储调度、计数器/寄存器切片、req/ack 适配器、限速器、帧组装器、CAM、AXI DMA 切片。
 
-## 已验证项目（13 个）
+## 已验证项目（14 个 + 4 轮 A/B 实验）
 
 | 项目 | 类型 | 测试 | 关键发现 |
 |------|------|------|---------|
@@ -136,7 +144,17 @@ Ready/valid 寄存器切片、Skid buffer、FIFO、流水线阶段、FSM（双�
 | Arbiter | 仲裁器 | 6/6 | 综合感知、mask 重置 bug |
 | Clock Gate | 低功耗 | 8/8 | P1 规则验证、零设计缺陷 |
 | SPI Master | 复杂 FSM | 5/5 | 6 状态 FSM、首次 Yosys 综合 |
-| **Low-Power SoC** | **子系统** | **28/28** | **LP1-LP7 + PH1-PH4 全验证，SM3+LP7 新 pattern** |
+| **Low-Power SoC** | **子系统** | **28/28** | **LP1-LP7 + PH1-PH4 全验证** |
+| **AXI-S→APB Bridge** | **双协议** | **36/36** | **E2E 工作流验证，发现 B6 pitfall** |
+
+### A/B 实验轮次
+
+| 轮次 | 项目 | 结果 | 核心发现 |
+|:---:|------|------|------|
+| R5 | AXI-S Packet FIFO | 双方 12/12 | 首次分布式检查点试验 |
+| **R6** | **AXI-S 2×2 Switch** | **新：0 RTL bug，旧：2 bug** | **3× 更少迭代，bug 在 Step 5a 被发现** |
+| R7 | Width Converter | 无效（合同不匹配） | 实验设计教训 |
+| R8 | UART TX + I2C | 双方 6/6（UART） | Leaf module 天花板确认 |
 
 ## 使用方法
 
