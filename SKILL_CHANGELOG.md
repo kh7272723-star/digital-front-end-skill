@@ -4,6 +4,78 @@
 
 ---
 
+## 2026-05-30 — A/B 实验 Round 8（最终轮）：UART TX + I2C 工作流稳定性验证
+
+### 实验设计
+
+**项目：** UART Transmitter + APB（~240 行，Leaf）+ I2C Master Controller + APB（~614 行，Leaf++，补充数据）
+
+**对照：** Agent A（旧工作流，6 原则全堆 Step 8c）vs Agent B（新工作流，三检查点 + FAST 闸门）
+
+### 核心结果（UART TX）
+
+| 指标 | Agent A（旧）| Agent B（新）| 差异 |
+|------|:---:|:---:|:---:|
+| 仿真 | 6/6 PASS | 6/6 PASS | — |
+| 仿真迭代 | **4** | **2** | B 快 2× |
+| RTL 行数 | 240 | 357 | B 多 117 行（更完整的文档和 registered outputs）|
+| RTL bug（预仿真）| 0 | **1（Step 8c）** | B 发现更早 |
+| RTL bug（仿真）| **1（iter 2）** | 0 | A 的 APB delta-cycle race 被仿真抓到 |
+| Testbench bug | 2 | 0 | B 的 testbench 更干净 |
+
+### Bug 发现时机对比（UART TX）
+
+| 检查点 | Agent A | Agent B |
+|--------|:---:|:---:|
+| Step 2a（P4+P6）| ❌ 跳过 | 0 bug |
+| Step 5a（P1+P2）| ❌ 跳过 | 0 bug |
+| **Step 8c（P3+P5）** | 0 bug（6 原则全 PASS，漏了 APB race）| **1 bug: fifo_rd_en_o 名字不匹配** |
+| Step 9 iter 1 | 编译错误 | 编译错误 |
+| Step 9 iter 2 | **APB delta-cycle race** | 时序调整 |
+| Step 9 iter 3 | T2 测试顺序 | — |
+| Step 9 iter 4 | All PASS | All PASS (iter 2) |
+
+### I2C 补充实验
+
+| Agent | 结果 | 备注 |
+|-------|------|------|
+| Agent A（旧）| ✅ 29/29 PASS, 614 行, 8 bug | P7 agent, ~36 分钟 |
+| Agent B（新）| ❌ 3 次超时 | 1 次 harness error, 2 次 watchdog stall |
+
+I2C controller 的复杂度（13 FSM 状态 + SCL 生成 + 时钟拉伸 + ACK 追踪 + 9 APB 寄存器）超出单 sub-agent 的 600s 窗口。Agent A 仅在 P7 的结构化方法下才完成，Agent B 的分布式检查点文档开销推高了时间。
+
+### 跨轮次分析（R5-R8）
+
+| 项目复杂度 | 工作流差异 | 证据 |
+|-----------|-----------|------|
+| **低**（UART TX, FIFO, Width Conv）| 极小 — 两者正确，1-2 次迭代差 | R5, R7, R8 |
+| **中-高**（AXI-S Switch, I2C）| **显著** — 3× 更少迭代，bug 在 Step 5a 被抓 | R6 |
+| **很高**（I2C 全特性）| Sub-agent 模型不可完成 | R8b |
+
+### 关键发现
+
+1. **Leaf module 天花板确认：** 对 ≤300 行的简单模块，分布式检查点的价值是边际的。复杂度闸门应该**更激进**：对 ≤200 行 + 线性 FSM 的项目，直接跳过 Step 2a 和 5a。
+
+2. **P5 物理世界原则仍是短板：** R5-R8 共 4 轮实验，P5 零问题发现。不是因为设计完美——因为问题太抽象。Leaf module 需要更具体的 P5 检查项（如"所有输出是否从寄存器驱动而非组合 state_q"）。
+
+3. **Sub-agent 可扩展性天花板：** ~500 行 / ~10 FSM 状态是单 sub-agent 的可靠上限。分布式工作流增加约 30% 的文档开销，可能把接近上限的项目推过边界。
+
+4. **复杂度闸门需要"分解建议"：** 不只是 Leaf vs Subsystem 审查深度，还需要在预计 >400 行时建议拆分为多 agent。
+
+5. **Step 8d 仍未压力测试：** 4 轮实验中没有一次需要在仿真失败后深挖原则文档——所有项目在 1-4 次迭代内通过。
+
+### 结论
+
+**分布式检查点工作流对子系统级设计（>300 行、多模块、多协议）验证有效。** 对 leaf module 应更激进地跳过早期检查点。工作流应成为永久设计，增加按复杂度自动分类的机制。
+
+详见 `projects/test-workflow-round8/EXPERIMENT_REPORT.md`。
+
+### SKILL.md 行数
+
+~305 / 500 行（本轮纯实验验证，无文件改动）
+
+---
+
 ## 2026-05-30 — A/B 实验 Round 6：新工作流端到端验证
 
 ### 实验设计
