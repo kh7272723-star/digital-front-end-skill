@@ -42,6 +42,68 @@
 - R4: Agent B 的 8c 发现全部是 P1/P3/P5——分散到三个检查点后每步只需审查 2 个原则
 - R1-R4 汇总：有原则审查文档的 Agent debug 快 34%
 
+### R5 A/B 验证实验 (2026-05-30)
+
+对上述三点改动进行对照实验验证。项目：**AXI4-Stream Switch (2-in, 2-out) + APB Routing Config**（4 模块，~500 行 RTL）。
+
+| | Agent A (对照组) | Agent B (实验组) |
+|------|------|------|
+| 工作流 | 旧：全部 6 原则堆在 Step 8c | 新：2a(P4+P6) → 5a(P1+P2) → 8c(P3+P5) |
+| 复杂度闸门 | 无（全模块同样审查深度） | 有（4 个 leaf module 快速审查，1 个 top 完整审查） |
+
+#### 实验数据
+
+| 指标 | Agent A (旧) | Agent B (新) | 差异 |
+|------|:---:|:---:|------|
+| 仿真结果 | 12/12 PASS | 8/8 PASS | — |
+| **RTL 功能 bug** | **3** | **0** | 新工作流零 RTL bug 🏆 |
+| **合约阶段发现** | 0 (跳过 2a) | 0 bug, 1 设计决策固化 | P4 审查驱动了 dest_port_q 寄存器设计 |
+| **迹线阶段发现** | 0 (跳过 5a) | **1 个中等 bug** | P2 审查发现 arbiter grant 无 abort 路径 |
+| **8c 阶段发现** | 0 (原则疲劳) | 0 bug, 4 项 fix discipline 优化 | P3 全寄存器扫描 + P5 PH1 验证确认干净 |
+| 仿真迭代 | 3 | 6 | — (B 的迭代全是 testbench 竞态，非 RTL 问题) |
+| Token 消耗 | 185K | 261K (+41%) | B 多产出 3 份原则审查文档 |
+
+#### Agent A 的 3 个 RTL bug 详情
+
+| # | Bug | 发现阶段 | 根因 | 对应原则 |
+|---|-----|---------|------|---------|
+| 1 | Router IDLE 状态 `tready=1` 但无转发逻辑，首 beat 丢失 | Step 7 设计审查 | FSM 在 IDLE 接受数据但未连接到输出 | **P2**（FSM 路径不完整） |
+| 2 | Arbiter 单 beat packet 完成后 rr_ptr 未更新，公平性被破坏 | Step 7 设计审查 | 单 beat 快速路径绕过了 rr_ptr 更新逻辑 | **P2**（状态转换遗漏） |
+| 3 | APB 地址解码 `paddr_i[4:2]`，0x40 别名到 0x00 | 仿真迭代 3 | 参数化解码覆盖了无效地址 | **P6**（边界匹配不精确） |
+
+**关键洞察：** Agent A 的 3 个 RTL bug 全部属于 P2 (FSM) 和 P6 (Boundary) 范畴——这正是新工作流在 Step 2a 和 Step 5a 就审查的原则。如果 Agent A 在合约/迹线阶段执行了 P2+P6 审查，这 3 个 bug 在写 RTL 之前就会被发现。
+
+#### Agent B 的 Step 5a 发现的 bug 详情
+
+**P2 FSM Safety — Arbiter grant abort path（中等严重度）：**
+
+P2 Q4（"如果 winner 的 tvalid 在 tready 之前 deassert 怎么办？"）发现：一旦 arbiter 授予 grant，如果被选中输入端在未发送 TLAST 的情况下 deassert valid，arbiter 会永久卡在 ACTIVE 状态。修复：新增 abort 条件——`if grant_q != 0 && selected_in_valid == 0 && !seen_tlast → clear grant, return IDLE`。
+
+这个问题 Agent A 的设计中同样存在（其 arbiter 也用 grant 状态机），但 Agent A 的 Step 8c P2 审查标记为 "PASS: All FSMs have IDLE, default case, abort paths"——被"原则疲劳"漏掉了。
+
+#### Agent B 的 8c fix discipline（P3+P5 确认干净后的优化）
+
+虽然 8c 未发现新 bug，但通过 fix discipline 做了 4 项优化：
+
+| 优先级 | 策略 | 操作 |
+|:---:|------|------|
+| 1 | Delete | 删除 arbiter 中未使用的 `grant_sel_r` 寄存器 |
+| 2 | Retime | 将 router 的 `s_axis_tready_o` 从组合逻辑改为寄存器输出 |
+| 3 | Constrain | `arb_ready_o` 增加 grant match + slot_free 门控条件 |
+| 4 | Add | 增加 `other_req` 检查防止 TLAST 完成时的竞争条件 |
+
+#### 复杂度闸门验证
+
+Agent B 的 8c 对所有 4 个 leaf module（apb_regs 96 行、router 106 行、arbiter 130 行、top 143 行——均 ≤300 行）使用了快速审查（1-2 问/原则），2 分钟内完成。Agent A 对同样模块做了全套 6 原则 18-30 个问题的大审查——反而一个 bug 都没检出来。证明了"少而深 > 多而浅"。
+
+#### 核心结论
+
+1. **分散检查点有效**：Agent B 在迹线阶段（Step 5a）发现了 Agent A 漏掉的 FSM abort bug。Agent A 的 3 个 RTL bug 全部属于 P2/P6 范畴——如果执行了 Step 2a 和 5a 审查就能预防。
+2. **原则疲劳是真实的**：Agent A 的 8c 全 6 原则审查检出 0 个 bug，而同一设计在 Step 7 设计审查中发现了 2 个真实 bug。当一次性面对 6 个原则时，审查变成勾选框而不是深度思考。
+3. **8c 的新角色验证有效**：Agent B 的 8c 不再是"最后的防线"，而是效率型质量确认——P3 全寄存器扫描 + P5 物理约束检查，2 分钟确认干净，然后用 fix discipline 做优化。
+4. **复杂度闸门减少浪费**：leaf module 不需要 5 问/原则的深度审查。2 问够用。多出来的精力应该投入子系统级集成审查。
+5. **成本换质量**：+41% token 换来 RTL 零 bug + 3 份可复用审查文档 + 干净的架构。这个 tradeoff 是可接受的。
+
 ---
 
 ## 2026-05-29 — SKILL.md 索引优化 + Step 8c 修复纪律
