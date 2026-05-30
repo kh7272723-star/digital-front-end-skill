@@ -326,6 +326,36 @@ apb_write(CTRL,   2'b01);   // NOW enable FSM
 
 **Rule:** For modules with auto-start FSMs: write data/config registers FIRST, then enable. For modules with explicit start bits: write data, then write CTRL with start=1.
 
+### B6: `while(busy_o)` evaluates before NBA updates — misses registered pulse
+
+**Symptom:** Test waits for DUT to finish with `while(busy_o) @(posedge clk_i);` — but `busy_o` is a registered output that goes low via NBA. After the FSM transitions to IDLE, `busy_o` is still 1 in the active region when the `while` evaluates, causing the loop to body one extra cycle. On the next posedge, `busy_o` has been updated to 0, but the `while` has already re-entered its body.
+
+**Source:** IEEE 1364-2001 §5.3 (NBA region executes AFTER active region). Cummings, SNUG 2000 §4. E2E validation project 2026-05-30.
+
+```verilog
+// ❌ BROKEN — `while` evaluates busy_o in active region, before NBA cleared it
+// DUT: busy_o is registered (NBA update)
+always @(posedge clk_i) begin
+    if (state_q == IDLE) busy_o <= 0;  // NBA — busy_o becomes 0 AFTER this time step
+end
+
+// Testbench: while sees active-region value (still 1), loops one extra cycle
+while (dut.busy_o) @(posedge clk_i);  // busy_o reads 1 in active region → loops again
+
+// ✅ FIX: #1 settling delay lets NBA execute, then evaluate
+while (dut.busy_o) begin
+    @(posedge clk_i);
+    #1;  // NBA settles — busy_o now reflects actual registered value
+end
+
+// ✅ ALTERNATIVE FIX: Use negedge wait (busy_o has already settled by then)
+while (dut.busy_o) @(negedge clk_i);  // negedge is safely after NBA
+```
+
+**Root cause:** Same stratified event queue as B1/B3 — `while()` evaluates in active region where NBA updates from `busy_o <= 0` haven't yet applied. For registered outputs, the `#1` delay is mandatory before reading the signal.
+
+**Rule:** When polling registered DUT outputs in a `while` loop, add `#1` after each `@(posedge clk_i)` before evaluating the condition. Alternatively, sample on `@(negedge clk_i)` which is guaranteed to be after the NBA region.
+
 ---
 
 ## Category C: Output Protocol Compliance
@@ -502,6 +532,7 @@ end
 | B3 | Timing | Monitor sees old value | `#1` settling delay after posedge | Golden, tb-examples |
 | B4 | Timing | NBA race stimulus vs DUT | Drive on negedge | R5, R6 |
 | B5 | Seq | FSM pops before check | Write data first, enable last | R8 A |
+| B6 | Timing | while(busy_o) too early | #1 after posedge or use negedge | E2E val |
 | C1 | Proto | No SIMULATION_DONE | Follow output protocol | Sim-loop |
 | C2 | Proto | $finish on first fail | Accumulate errors, report at end | Sim-loop |
 | D1 | Struct | Address aliasing | Full-width decode or upper-bit check | R6 A |
@@ -510,4 +541,4 @@ end
 
 **When you write a testbench, scan this table BEFORE running simulation.** Most of these are 2-line fixes that save 1-2 simulation iterations.
 
-**Common element:** 73% of these bugs (11/15) were found by the OLD-workflow Agent A. Agent B's distributed checkpoints and better preparation produced cleaner testbenches. But the pitfalls still exist — the skill should prevent them proactively rather than relying on agent skill variance.
+**Common element:** 69% of these bugs (11/16) were found by the OLD-workflow Agent A. Agent B's distributed checkpoints and better preparation produced cleaner testbenches. B6 was discovered by the 2026-05-30 E2E validation project using the NEW workflow — principle-driven review caught the `while(busy_o)` timing issue during Step 8c P5a output discipline analysis.
