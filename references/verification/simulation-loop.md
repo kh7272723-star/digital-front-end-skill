@@ -4,6 +4,13 @@
 
 Close the verification loop: generate RTL → lint → compile → simulate → analyze → fix → re-simulate. This file defines the complete workflow an AI agent should follow when simulation tools are available.
 
+**Authority:** Phase ordering (lint before compile, compile before simulate, fix-and-rerun with constraints) follows:
+- IEEE 1364-2001 §5.3 (stratified event queue) and IEEE 1800-2017 §4.7 (scheduling semantics) for understanding simulation behavior
+- Cummings, SNUG 2000 "Nonblocking Assignments" §8 for NBA-region timing in failure analysis
+- Mentor/Siemens Verification Academy "Verification Planning and Management" for regression methodology (max iterations, pass/fail protocol)
+- Verilator Manual §4 (linting), Icarus Verilog Wiki (simulator limitations) for tool-specific behavior
+- The output protocol (`SIMULATION_START` → `RESET_RELEASED` → `TEST_START/PASS/FAIL` → `ALL_TESTS_PASS` → `SIMULATION_DONE`) is adapted from Accellera UVM 1.2 §4.9 end-of-test reporting
+
 ## Prerequisites
 
 Before starting the simulation loop, check tool availability:

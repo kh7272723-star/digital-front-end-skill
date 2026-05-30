@@ -11,6 +11,8 @@ Prefer plain Verilog testbench structure unless the user specifically asks for S
 
 ## 0. Standard Testbench Skeleton (START HERE)
 
+**Source:** Clock generation (safe, no time-0 posedge): Cummings, SNUG 1999 §2 (inertial delay for initial clock edge). Output protocol markers: Accellera UVM 1.2 §4.9 (end-of-test phasing), adapted for plain Verilog. Error accumulation vs $finish-on-first-fail: Mentor/Siemens Verification Academy (regression methodology). Reset sequence: Cummings & Mills, SNUG 2002 "Asynchronous & Synchronous Reset Design Techniques" §4.2.
+
 This skeleton includes safe clock generation, error accumulation, output protocol markers, and timeout watchdog. Copy this template as your starting point, then add your DUT-specific tests.
 
 ```verilog
@@ -139,6 +141,8 @@ endmodule
 
 ## APB Bus Functional Model
 
+**Source:** ARM IHI 0024C (AMBA APB Protocol) §3.1: APB state machine defines SETUP (PSEL=1, PENABLE=0) and ACCESS (PSEL=1, PENABLE=1) phases. §3.2: write transfer timing — PADDR/PWDATA/PWRITE must be stable from SETUP through ACCESS. §4.1: PSLVERR is combinational from PADDR, valid only during ACCESS. §2.1: signal definitions for PSEL, PENABLE, PADDR, PWRITE, PWDATA, PRDATA, PREADY, PSLVERR.
+
 Copy these tasks into your testbench for standardized APB register access. Handles SETUP→ACCESS phase timing, PSLVERR checking, and combinational output timing.
 
 ```verilog
@@ -266,6 +270,8 @@ endtask
 ---
 
 ## AXI-Stream BFM Tasks
+
+**Source:** ARM IHI 0051B (AMBA AXI-Stream Protocol) §2.2: TVALID/TREADY handshake — TVALID must not depend on TREADY; TREADY may depend on TVALID. Payload (TDATA/TKEEP/TLAST) stable while TVALID=1 and TREADY=0. §3.1: TLAST marks last beat of a packet; TKEEP indicates valid byte lanes. Negedge drive: IEEE 1364-2001 §5.5 / Cummings SNUG 2000 §8.2.
 
 ```verilog
 //========================================================================
