@@ -4,6 +4,57 @@
 
 ---
 
+## 2026-05-31 — Step 8d 压力测试（R9）：原则驱动 debug 闭环验证
+
+### 背景
+
+R5-R8 四轮 A/B 实验中，Step 8d（原则驱动 debug）从未被真实触发——所有项目在 1-4 次仿真迭代内通过。Step 8d 是整个工作流中**唯一未被验证的组件**。
+
+### 实验设计
+
+在 Agent B 的已验证 UART TX RTL（357 行，6/6 测试通过）中注入一个 P2 FSM bug：
+- **Bug：** STOP 状态无条件返回 IDLE，忽略 FIFO 中待发送的 byte
+- **效果：** 多字节 TX 只发送第一个 byte，剩余卡死在 FIFO 中
+- **原则违反：** P2（FSM Safety）——"STOP 应在 FIFO 非空时链接到 START"
+
+给 debug agent：buggy RTL + 原则审查文档（正确的行为记录）+ 失败的仿真输出 + Step 8d 指令。
+
+### 结果
+
+| 指标 | 值 |
+|------|-----|
+| 故障分类 | ✅ 正确：RTL 功能 bug |
+| 原则映射 | ✅ P2 + 交叉 P4（start_q 自清除 + IDLE 无法重入） |
+| 原则文档查阅 | ✅ `principle_review_5a.md` P2 Q3 |
+| 找到 bug 位置 | ✅ STOP state `state_d = S_IDLE` 无条件 |
+| 修复 | ✅ 1 行逻辑修复（fifo_empty 条件判断 + START 链接） |
+| 修复后仿真 | ✅ ALL_TESTS_PASS |
+| Token 消耗 | 32,290 |
+| 耗时 | ~44 秒 |
+| $display 撒网 | 0 个 |
+
+### 关键发现
+
+1. **Step 8d 工作流有效。** 原则审查文档作为"信号级地图"让 agent 直接从"多字节失败"跳转到"STOP→START 转换缺失"，零猜测、零 $display 撒网式 debug。
+
+2. **设计特异的文档比通用 pattern 更有价值。** P2 review 记录了 THIS 设计的 STOP→START 转换，不是通用的"检查所有 FSM 转换"——这种特异性是 debug 效率的关键。
+
+3. **跨原则交叉分析自然产生。** Agent 独立发现 start_q 自清除（P4 关注点）与 STOP→IDLE bug 交互导致永久卡死——这正是 8d 设计时预期的多原则推理能力。
+
+4. **8d 缺数据不是因为不需要，而是未触发。** 之前 4 轮实验的零数据是因为项目在触发 8d 之前就通过了。当真实的 FSM bug 存在时，8d 证明了它的价值。
+
+### Keeper Test 裁决
+
+**Step 8d 应保留。** 32K token、44 秒定位真实 FSM bug 的效率是基准。没有 8d 的情况下，同样的 bug 需要多轮 $display 迭代或波形分析。
+
+详见 `projects/test-workflow-round9/EXPERIMENT_REPORT.md`。
+
+### SKILL.md 行数
+
+~338 / 500 行（无文件改动——8d 已集成在 Step 9 Phase 4）
+
+---
+
 ## 2026-05-30 — R5-R8 复盘驱动的工作流迭代（三档闸门 + P5 拆分 + 原则可跳过 + 8d 迁移）
 
 ### 背景
