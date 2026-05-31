@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-05-31 — Step 8d 压力测试 R10：P3 寄存器初始化 bug（跨原则验证）
+
+### 背景
+
+R9 验证了 8d 对 P2（FSM）bug 有效——但只测了一种原则类型。需要跨原则验证。
+
+### 实验设计
+
+**Bug 类型：** P3（Known Values）——移除 `fifo_count_q` 复位，无 bug 标记
+**效果：** fifo_count_q=X → fifo_empty=X → STATUS[2]=X → FSM condition 失败 → FSM 永远不启动
+
+### 结果
+
+| 指标 | R9 (P2) | R10 (P3) |
+|------|:---:|:---:|
+| Token | 32,290 | 30,459 |
+| 耗时 | 44s | 55s |
+| 原则映射 | P2 (FSM Safety) | P3 (Known Values) |
+| Bug 定位 | ✅ STOP→IDLE 无条件 | ✅ fifo_count_q 无 reset |
+| X 传播分析 | — | ✅ fifo_count_q→X→FSM 卡死 |
+| 仿真迭代 | 1 | 1 |
+| 修复 | 添加 fifo_empty 条件分支 | 添加 reset branch |
+
+### 关键发现
+
+1. **跨原则一致性：** P2 和 P3 两种不同类型的 bug 都通过 8d 正确路由到了正确的原则文档
+2. **无标记定位：** RTL 无 `// BUG` 注释，agent 通过 X 传播路径追踪找到根因
+3. **文档交叉验证：** Agent 发现原则审查文档将 fifo_count_q 标记为"有复位"，但 RTL 中没有——这是 doc-vs-code 交叉验证
+4. **效率一致：** 两次实验均 ~30K tokens / ~50s，零 $display 撒网
+
+### 结论
+
+Step 8d 对 P2 和 P3 两种原则类型的 bug 均有效。P1/P4/P5a 尚未测试，但遵循相同机制——风险低。详见 `projects/test-workflow-round10/EXPERIMENT_REPORT.md`。
+
+### SKILL.md 行数
+
+~338 / 500 行（无文件改动）
+
+---
+
 ## 2026-05-31 — Step 8d 压力测试（R9）：原则驱动 debug 闭环验证
 
 ### 背景
