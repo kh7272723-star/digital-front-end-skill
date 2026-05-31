@@ -25,6 +25,9 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - Arbiters: `references/patterns/advanced-patterns.md` and `references/patterns/arbiter-examples.md`
 - **Underspecified or vague requirements → structured contract:** `references/architecture/requirement-extraction-template.md` — use BEFORE writing any timing contract; classifies dimensions as Required/Implied/Assumed/Unknown, documents design decisions
 - **Sub-agent delegation:** `references/architecture/sub-agent-delegation.md` — prompt template, inline critical rules, multi-module integration rules
+- **Pipeline design patterns:** `references/architecture/pipeline-design-patterns.md` — feed-forward, feedback, multi-rate, fork-join, cut-through vs store-forward; RTL templates + common errors + backpressure propagation rules
+- **Memory hierarchy & buffer strategy:** `references/architecture/memory-hierarchy.md` — FIFO depth formulas, SKID buffer, ping-pong, arbitration comparison, prefetch strategies, WSTRB alignment
+- **Performance analysis:** `references/architecture/performance-analysis.md` — throughput calculation, latency budgeting, backpressure deadlock detection, utilization analysis, Little's Law for hardware
 
 ## Specialized patterns
 

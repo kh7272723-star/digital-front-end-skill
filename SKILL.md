@@ -57,7 +57,7 @@ Treat standards and methodology documents as source material, not as answer text
 Read `references/reference-index.md` for a task-to-reference mapping. Key directories:
 
 - **Timing/protocol**: `references/timing/` — timing semantics, contracts, naming, protocol rules, cycle traces, clock/reset
-- **Architecture**: `references/architecture/` — hierarchy, system contracts, integration invariants, tradeoffs, staged bring-up
+- **Architecture**: `references/architecture/` — hierarchy, system contracts, integration invariants, tradeoffs, staged bring-up, pipeline design patterns, memory hierarchy & buffer strategy, performance analysis
 - **AXI/DMA**: `references/axi-dma/` — AXI full/Lite/Stream, DMA channel guidelines, CDMA examples, outstanding rules
 - **Bus protocols**: `references/bus/` — APB, AHB-Lite
 - **RTL patterns**: `references/rtl/` — coding guidelines, FSM examples, FIFO examples, handshake examples, pipeline examples, naming conventions, correctness rules (multi-driven, latch, width, blocking/nonblocking, reset, loops, implicit wires)
@@ -129,6 +129,11 @@ Before writing code, produce a short timing contract using `references/timing/ti
 **Why now:** Architecture-level coupling and boundary mismatches are cheapest to fix before any RTL exists. R1 experiment: Agent A's tready isolation bug (APB corrupted AXI-Stream data) would have been prevented by a 2-minute P4 check at contract time.
 
 Read `references/design/design-principles.md` P4 and P6. Before asking questions, check the "When to skip" section in each principle — some principles may not apply to your design type. For L1: ask 1-2 questions. For L2: ask 3-5 questions.
+
+**For L2 multi-module designs, also consult:**
+- `references/architecture/pipeline-design-patterns.md` — identify the pipeline topology, check backpressure propagation, flag any multi-rate or fork-join structures
+- `references/architecture/memory-hierarchy.md` — compute FIFO depths, check buffer placement, audit arbitration strategy
+- `references/architecture/performance-analysis.md` — calculate throughput, identify bottleneck, check for deadlock cycles in the backpressure graph
 
 **P4 (Independence):** Are there independent channels/paths/domains in this design? Does the contract specify that they are decoupled? Can a transaction on one interface accidentally consume or corrupt data on another? Can one channel's backpressure block another's progress?
 
