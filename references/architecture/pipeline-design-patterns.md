@@ -106,6 +106,31 @@ end endgenerate
 | ready computed as `ready_i` only | Stage 0 stalls even when stage 1 empty | `ready_o = ready_i \|\| !valid_o` |
 | Data path skips stall register | First beat lost, subsequent beats shifted | All data paths go through stage register |
 | No explicit valid reset | X propagation after reset | Reset valid_q to 0 |
+| **Multi-stage: `valid_q <= valid_i` clears data under backpressure** | Stage N has data, Stage N+1 is stalled, `valid_i=0` → stage N overwrites its valid data with 0. Data silently lost. | **Gate the capture condition:** only update stage N when data moves to N+1 OR stage N is empty: `if (sN_to_sN+1 \|\| !sN_valid_q) sN_valid_q <= valid_i` (see corrected pattern below) |
+
+### Corrected Multi-Stage Pattern
+
+The standard single-stage template (`valid_q <= valid_i`) is correct for a single stage. In a multi-stage chain, each intermediate stage must only accept new input when it can forward its current data or is empty:
+
+```verilog
+// Stage N (intermediate): corrected gating for multi-stage chains
+wire sN_not_stalled = ready_i;   // downstream can accept
+wire sN_to_next = sN_valid_q && sN_not_stalled;
+
+always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+        sN_valid_q <= 1'b0;
+        sN_data_q  <= 0;
+    end else if (sN_to_next || !sN_valid_q) begin
+        // Update only when: data moves forward, OR stage is empty
+        sN_valid_q <= valid_i;
+        sN_data_q  <= data_i;
+    end
+    // else: has data but downstream stalled → hold
+end
+```
+
+**Why the standard template fails:** `valid_q <= valid_i` couples the stage's internal state to an external input. When `valid_i=0` and the stage has held data (downstream stalled), the template overwrites the held data with zero. The corrected gating restores the principle: each stage decides its own state based on its own conditions.
 
 ### Performance
 
@@ -314,6 +339,31 @@ endmodule
 ```
 
 **Note:** Use level flags (not pulses) for `path_done_i`. If a path completes before the joiner starts monitoring, the level flag preserves the event.
+
+### Common Errors
+
+| Error | Symptom | Fix |
+|-------|---------|-----|
+| **Fixed-length delay line for path alignment** | Stats path uses a shift register to delay its output by N cycles to match Data Path latency. When Data Path is stalled (backpressure), the shift register keeps advancing → stats_valid "falls off" the end → Joiner never fires because the aligned stats signal is lost. Pipeline hangs permanently after a stall. | **Don't use a fixed-length delay line.** The Data Path output itself carries the timing information. When TLAST emerges from the pipeline, the join condition is satisfied — no separate alignment needed. If alignment IS required, gate the delay line with the pipeline's own stall signal so it pauses when the pipeline pauses. |
+| Forked paths use pulses for completion | One path completes before the Joiner starts monitoring → completion pulse missed → Joiner waits forever | Use level flags (stored event registers) for all cross-path completion signals. See Design Rule #2 above. |
+
+**Anti-pattern explained — fixed-length alignment delay line:**
+
+```verilog
+// ❌ ANTI-PATTERN: Fixed delay line for stats alignment
+// Works only under zero backpressure. Fails silently when pipeline stalls.
+always @(posedge clk_i) begin
+    align_d0 <= split_accept && s_axis_tlast_i;
+    align_d1 <= align_d0;   // shifts every cycle — even when pipeline stalled!
+    align_d2 <= align_d1;
+end
+assign joiner_fire = pipe_tlast_out && align_d2;  // align_d2 may be 0 after stall
+
+// ✅ CORRECT: Observe pipeline output directly
+// Beat counter accumulates during split_accept — naturally aligned with pipeline.
+// When pipe_tlast_out fires, the beat count is correct. No delay line needed.
+assign joiner_fire = pkt_in_flight && pipe_tlast_out;
+```
 
 ---
 
