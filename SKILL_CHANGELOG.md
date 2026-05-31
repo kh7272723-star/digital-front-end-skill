@@ -4,6 +4,58 @@
 
 ---
 
+## 2026-05-31 — NVMe 领域扩展 Phase 1：Admin Command Engine（首个领域项目）
+
+### 背景
+
+Skill v2 在通用 RTL 设计上成熟后，首次进入 NVMe 存储协议领域。利用现有 AXI/DMA/FIFO/credit 模式基础，从零构建 NVMe 控制器控制路径。
+
+### 项目范围
+
+NVMe Admin Command Engine — 5 模块 L2 子系统，~1492 行：
+- BAR0 寄存器文件（CAP/VS/CC/CSTS/AQA/ASQ/ACQ + 门铃检测）
+- SQ 抓取引擎（64-byte SQE 抓取 + 解析，基于信用的门铃→抓取流程）
+- Admin 命令执行器（Identify/Create CQ/Create SQ）
+- CQ 提交引擎（16-byte CQE 组装 + Phase Tag + AXI 写入）
+- AXI 适配器（AR/AW/W 通道混排）
+
+### 结果
+
+**2/2 测试通过（控制器使能 + Identify Controller），零编译错误。**
+
+CQE 字段验证全部正确：CID=1, SQID=0, SQHD=1, P=1, Status=0。
+
+### 集成发现（6 个 bug）
+
+| 类别 | Bug | 根因 |
+|------|-----|------|
+| 集成 | cpl_sqhd 多驱动 | admin_exec 输出 + assign 同时驱动 |
+| Testbench | AXI R channel 只发 1 beat | 缺少流式 R channel FSM |
+| 架构 | Identify 数据路径未连接 | 合同规定了输出但未规定如何到达 host memory |
+| 时序 | cq_data_done 脉冲丢失 | admin_exec DATA_XFER 在 cq_post 到达 WAIT_DATA 之前已完成 |
+| 协议 | Phase Tag 复位为 0 | NVMe 规范规定第一个 pass 写 P=1（从 host 初始值 0 toggle） |
+| Testbench | CQE bit 索引错误 | DW3[16] vs DW2[16] 混淆 |
+
+### 关键发现
+
+1. **多 agent 子系统集成可行：** 5 个独立 agent 生成的模块零端口不匹配，iverilog 首次编译通过
+2. **协议首次接触成功：** NVMe guidelines reference 在无现有 pattern 的情况下提供了足够的上下文
+3. **现有 pattern 复用率高：** AXI 通道分离、FWFT、credit counter、two-process FSM 全部正确复用
+4. **合同覆盖度不足：** 模块接口匹配，但数据路径路由（Identify data → host memory）和多模块时序合同（cq_data_done vs cpl_valid）缺失
+
+### 新增 Skill 资产
+
+| 文件 | 用途 |
+|------|------|
+| `references/bus/nvme-guidelines.md` | NVMe 协议 reference |
+| `projects/nvme-admin-engine/` | 完整项目（RTL + TB + 报告） |
+
+### 下一步
+
+NVMe Phase 2 — NVM Read/Write I/O 命令 + PRP list 遍历 + 真实数据传输。
+
+---
+
 ## 2026-05-31 — Step 8d 压力测试 R10：P3 寄存器初始化 bug（跨原则验证）
 
 ### 背景
