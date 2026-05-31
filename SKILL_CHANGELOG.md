@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-05-31 — 系统架构基础：Pipeline + Memory + Performance（三个新 reference）
+
+### 背景
+
+NVMe Phase 1 暴露了 skill 在系统架构层的空白——多模块数据路径路由、跨模块时序合同、吞吐量/延迟分析均无方法论支撑。这三个 topic 是存储/编解码/网络等领域的共享底层能力。
+
+### 新增文件
+
+| 文件 | 行 | 覆盖 |
+|------|:---:|------|
+| `references/architecture/pipeline-design-patterns.md` | ~350 | 5 种拓扑（feed-forward/feedback/multi-rate/fork-join/cut-through）、反压传播公式、RTL 模板、常见错误 |
+| `references/architecture/memory-hierarchy.md` | ~250 | 缓冲深度公式（Little's Law）、SKID buffer、ping-pong、仲裁策略对比、预取策略、WSTRB 对齐 |
+| `references/architecture/performance-analysis.md` | ~260 | 吞吐量计算、延迟预算表、反压死锁检测、利用率分析、Little's Law 硬件应用 |
+
+### 权威来源验证
+
+对 7 个引用的来源进行了逐条核查：
+
+| 来源 | Tier | 验证结果 |
+|------|:---:|------|
+| Dally & Towles Ch.12-17 | 1 | ✅ **PRIMARY source** — 覆盖所有 5 种 pipeline pattern |
+| ARM IHI 0022E §A3.3 | 1 | ✅ VALID/READY 规则 — 反压公式是推导的非 spec |
+| Hennessy & Patterson "CA:AQA" Ch.1, App.C | 1 | ✅ 吞吐量/延迟/CPI 分析 |
+| Little's Law (1961) | 1 | ✅ L=λW — 缓冲深度核心公式 |
+| Patterson & Hennessy "CO&D" §4.5-4.8 | 1 | ⚠️ 仅限 CPU pipeline 基础，不含 valid/ready 握手 |
+| Cummings SNUG | 2 | ❌ 无 pipeline patterns 论文，保留用于 CDC/FIFO |
+| Xilinx UG901 | 2 | ❌ 无 valid/ready 模板，保留用于 FPGA 综合推断 |
+
+### 验证项目
+
+3 级 AXI-Stream feed-forward pipeline：5/5 beats 数据正确，3 周期延迟，零 mismatch。验证了 throughput=N/(N+STAGES) 公式、反压传播链、Little's Law 缓冲深度。
+
+### SKILL.md 改动
+
+- `references/architecture/` section 增加 pipeline/memory/performance 索引
+- Step 2a (P4+P6) 增加 L2 设计时查阅 pipeline/performance 分析的指引
+
+### SKILL.md 行数
+
+~338 / 500 行
+
+---
+
 ## 2026-05-31 — NVMe 领域扩展 Phase 1：Admin Command Engine（首个领域项目）
 
 ### 背景
