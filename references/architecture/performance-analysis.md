@@ -6,7 +6,7 @@ RTL simulation tells you "does it work?" — performance analysis tells you "doe
 
 **When to use:** Any L1/L2 design with throughput requirements, any pipeline, any multi-module system.
 
-**Authority:** Hennessy & Patterson "Computer Architecture: A Quantitative Approach" §1.5-1.9 (performance metrics), ARM IHI 0022E §A5 (AXI throughput analysis), Little's Law (MIT, 1961 — applied to hardware queueing).
+**Authority:** Hennessy & Patterson "Computer Architecture: A Quantitative Approach" Ch.1 (performance metrics: execution time, throughput, speedup, Amdahl's Law), App.C (pipeline CPI analysis under stalls), Dally & Towles "Principles and Practices of Interconnection Networks" Ch.14 (deadlock and livelock analysis), Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3), 1961 (hardware buffer sizing via queueing theory). Note: The Effective Throughput formula (Theoretical × Utilization × (1-Overhead)) is a derived engineering heuristic combining metrics from H&P Ch.1, not a directly stated formula in any single source.
 
 ---
 

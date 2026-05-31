@@ -6,7 +6,7 @@ Pipeline design is the most fundamental system architecture skill after RTL craf
 
 **When to use:** Any design with ≥2 processing stages, any multi-module data path, any protocol adapter with rate mismatch.
 
-**Authority:** Patterson & Hennessy "Computer Organization and Design" §4.5-4.8 (pipelining fundamentals), ARM IHI 0022E §A3 (AXI channel independence as pipeline model), Sutherland "Verilog Gotchas" Ch.6 (registered vs combinational outputs in pipelines).
+**Authority:** Dally & Towles "Principles and Practices of Interconnection Networks" Ch.12-13,16-17 (canonical pipeline topologies, credit-based flow control, router microarchitecture), ARM IHI 0022E §A3.3.1-A3.3.2 (VALID/READY handshake rules), Hennessy & Patterson "Computer Architecture: A Quantitative Approach" Ch.1, App.C (pipeline performance fundamentals), Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3), 1961 (buffer sizing theorem). Additional: Patterson & Hennessy "Computer Organization and Design" §4.5-4.8 (basic pipelining concepts — CPU context only, does not cover valid/ready handshakes); Sutherland "Verilog Gotchas" Ch.6 (registered vs combinational outputs).
 
 ---
 

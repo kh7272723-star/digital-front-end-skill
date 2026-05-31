@@ -6,7 +6,7 @@ Every data path between modules needs buffers. Getting buffer sizing, placement,
 
 **When to use:** Any multi-module design, any rate-mismatched interface, any pipeline with feedback paths.
 
-**Authority:** Patterson & Hennessy §5.1-5.4 (memory hierarchy fundamentals), ARM IHI 0022E §A5 (AXI outstanding transaction buffering), Xilinx UG901 §3 (FIFO inference and BRAM sizing), Wakerly "Digital Design" §7.8 (FIFO depth calculation).
+**Authority:** Dally & Towles "Principles and Practices of Interconnection Networks" Ch.12-13 (buffered flow control, FIFO sizing, backpressure buffering), Hennessy & Patterson "Computer Architecture: A Quantitative Approach" Ch.5, App.C (memory hierarchy, cache buffering, latency/bandwidth tradeoffs), ARM IHI 0022E §A5.3 (AXI outstanding transaction buffering), Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3), 1961 (core buffer sizing theorem). Additional: Patterson & Hennessy "Computer Organization and Design" §5.1-5.4 (memory hierarchy — CPU cache context, not general-purpose buffer sizing); Xilinx UG901 §3 (FIFO inference in Vivado — covers BRAM/SRL inference, not FIFO depth formulas).
 
 ---
 
