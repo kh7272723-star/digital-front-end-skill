@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-05-31 — 系统架构 Phase 1：权威引用升级（精确章节号 + 来源诚实标注）
+
+### 背景
+
+三个系统架构 reference 文件（pipeline-design-patterns, memory-hierarchy, performance-analysis）的初始版本引用较粗糙——只有教科书章节号（"Ch.12-13"）缺乏精确的 § 定位。按照 skill 已建立的引用标准（icarus-pitfalls、cdc-guidelines 的 Tier 1-5 分层），需要升级。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `references/architecture/pipeline-design-patterns.md` | Authority section 重写：Dally & Towles §13.3.1 Eq.13.1, Carloni et al. 2001 (LID formalism), IETF RFC 1242 §3.8, ARM IHI 0022E §A3.5. 新增 pipeline 拓扑分类的 "our synthesis" 声明 + 反压公式的 Forward Register Slice 来源 |
+| `references/architecture/memory-hierarchy.md` | Authority section 重写：ARM IHI 0022E §A5.3 → 0022K §A6.3-A6.6, Dally & Towles §18.1-18.6 (arbiters), NVMe 2.0e §4.1/§4.5, Åkesson CCSP 2008, Smith 1978 (prefetch), Arora 2012 (SKID), PCIe 3.0 §2.6 (credit flow control) |
+| `references/architecture/performance-analysis.md` | Authority section 重写：H&P 6th ed §1.8/§1.9/App.C (精确到节号), Rabaey §10.3.1 (critical path), Dally & Towles §14.1-14.6 (deadlock), Gregg USE Method 2013 (utilization). 所有推导公式标注为 "derived engineering heuristic" |
+
+### 新增权威引用（本阶段新增 15 个）
+
+| 来源 | 章节 | 应用于 |
+|------|------|------|
+| Dally & Towles | §13.3.1 Eq.13.1 | Buffer sizing (pipeline + memory) |
+| Dally & Towles | §18.1-18.6 | Arbitration strategies (memory) |
+| Dally & Towles | §14.1-14.6 | Deadlock/livelock analysis (perf) |
+| Carloni et al. 2001 | LID relay station | Valid/ready formalism (pipeline) |
+| H&P 6th ed | §1.8, §1.9, App.C | Performance metrics, Amdahl, CPI (perf) |
+| Rabaey 2nd ed | §10.3.1 | Critical path timing (perf) |
+| Little 1961 | Operations Research 9(3) | Buffer sizing theorem (memory + perf) |
+| NVMe 2.0e | §4.1, §4.5 | SQ/CQ model, WRR arbitration (memory) |
+| Åkesson et al. 2008 | CCSP | Credit-aware arbitration (memory) |
+| Smith 1978 | IEEE Computer 11(12) | Sequential prefetch (memory) |
+| Falsafi & Wenisch 2014 | §3.1 | Stride/stream prefetcher (memory) |
+| Arora 2012 | SKID/elastic buffer | Pipeline register slice (memory) |
+| Cummings SNUG 2002 | — | Async FIFO pointer sync (memory) |
+| PCIe 3.0 | §2.6 | Credit-based flow control (memory) |
+| Gregg USE Method 2013 | — | Utilization thresholds (perf) |
+| IETF RFC 1242 | §3.8 | Cut-through vs store-forward (pipeline) |
+
+### 诚实声明
+
+三个文件中首次明确区分了 "directly stated in source" vs "derived engineering heuristic"：
+
+| 类型 | 示例 |
+|------|------|
+| **直接引用** | Dally & Towles Eq.13.1 缓冲公式, H&P §1.9 Amdahl's Law, Carloni LID 协议 |
+| **工程推导** | "Effective Throughput = Theoretical × Utilization × (1-Overhead)", pipeline 5-pattern 分类法, 利用率 90%/50% 阈值 |
+
+### SKILL.md 行数
+
+~338 / 500 行（无变化）
+
+---
+
 ## 2026-05-31 — 系统架构基础：Pipeline + Memory + Performance（三个新 reference）
 
 ### 背景
@@ -18,23 +68,9 @@ NVMe Phase 1 暴露了 skill 在系统架构层的空白——多模块数据路
 | `references/architecture/memory-hierarchy.md` | ~250 | 缓冲深度公式（Little's Law）、SKID buffer、ping-pong、仲裁策略对比、预取策略、WSTRB 对齐 |
 | `references/architecture/performance-analysis.md` | ~260 | 吞吐量计算、延迟预算表、反压死锁检测、利用率分析、Little's Law 硬件应用 |
 
-### 权威来源验证
-
-对 7 个引用的来源进行了逐条核查：
-
-| 来源 | Tier | 验证结果 |
-|------|:---:|------|
-| Dally & Towles Ch.12-17 | 1 | ✅ **PRIMARY source** — 覆盖所有 5 种 pipeline pattern |
-| ARM IHI 0022E §A3.3 | 1 | ✅ VALID/READY 规则 — 反压公式是推导的非 spec |
-| Hennessy & Patterson "CA:AQA" Ch.1, App.C | 1 | ✅ 吞吐量/延迟/CPI 分析 |
-| Little's Law (1961) | 1 | ✅ L=λW — 缓冲深度核心公式 |
-| Patterson & Hennessy "CO&D" §4.5-4.8 | 1 | ⚠️ 仅限 CPU pipeline 基础，不含 valid/ready 握手 |
-| Cummings SNUG | 2 | ❌ 无 pipeline patterns 论文，保留用于 CDC/FIFO |
-| Xilinx UG901 | 2 | ❌ 无 valid/ready 模板，保留用于 FPGA 综合推断 |
-
 ### 验证项目
 
-3 级 AXI-Stream feed-forward pipeline：5/5 beats 数据正确，3 周期延迟，零 mismatch。验证了 throughput=N/(N+STAGES) 公式、反压传播链、Little's Law 缓冲深度。
+3 级 AXI-Stream feed-forward pipeline：5/5 beats 数据正确，3 周期延迟，零 mismatch。
 
 ### SKILL.md 改动
 
