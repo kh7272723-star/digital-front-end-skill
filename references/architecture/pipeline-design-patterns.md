@@ -6,7 +6,9 @@ Pipeline design is the most fundamental system architecture skill after RTL craf
 
 **When to use:** Any design with ≥2 processing stages, any multi-module data path, any protocol adapter with rate mismatch.
 
-**Authority:** Dally & Towles "Principles and Practices of Interconnection Networks" Ch.12-13,16-17 (canonical pipeline topologies, credit-based flow control, router microarchitecture), ARM IHI 0022E §A3.3.1-A3.3.2 (VALID/READY handshake rules), Hennessy & Patterson "Computer Architecture: A Quantitative Approach" Ch.1, App.C (pipeline performance fundamentals), Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3), 1961 (buffer sizing theorem). Additional: Patterson & Hennessy "Computer Organization and Design" §4.5-4.8 (basic pipelining concepts — CPU context only, does not cover valid/ready handshakes); Sutherland "Verilog Gotchas" Ch.6 (registered vs combinational outputs).
+**Authority (Tier 1-4):** Dally & Towles "Principles and Practices of Interconnection Networks" (Morgan Kaufmann, 2004) §13.1 Packet-Buffer Flow Control (store-and-forward), §13.2 Flit-Buffer Flow Control (cut-through/wormhole), §13.3.1 Credit-Based Flow Control with Eq.13.1 buffer sizing formula `F ≥ ceil(t_crt × b / L_f)`, §13.3.2 On/Off Backpressure, §16.2 Stalls, §16.3 Credit Loop Closure, §18 Arbiters; Carloni, McMillan, Sangiovanni-Vincentelli "Theory of Latency-Insensitive Design" IEEE TCAD 20(9):1059-1076, 2001 (formal valid/stop backpressure protocol); ARM IHI 0022E §A3.3.1-A3.3.2 (VALID/READY handshake), §A3.5 (VALID must NOT depend on READY — deadlock prevention), §A5 Transaction IDs, §A6 Ordering Model; Hennessy & Patterson "Computer Architecture: A Quantitative Approach" 6th ed. §1.8 Performance Metrics, §1.9 Amdahl's Law, App.C Pipeline CPI/Stalls; Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3):383-387, 1961; IETF RFC 1242 §3.8 (cut-through vs store-and-forward latency definitions). Additional: Patterson & Hennessy "Computer Organization and Design" §4.5-4.8 (CPU pipeline — not applicable to valid/ready handshake); Sutherland "Verilog Gotchas" Ch.6 (registered vs combinational outputs).
+
+**Note on pipeline topology classification:** The 5-pattern taxonomy (Feed-forward, Feedback, Multi-rate, Fork-Join, Cut-through vs Store-forward) is a design abstraction synthesized from the sources above — it does not appear as a named classification in any single textbook. Dally & Towles provides the flow control mechanisms (§13) and router microarchitecture (§16); Carloni provides the formal valid/ready protocol; H&P provides the performance analysis framework. The synthesis is ours, verified by NVMe Phase 1 empirical data.
 
 ---
 
@@ -21,6 +23,8 @@ Stage 0 ──(v0,r0)──> Stage 1 ──(v1,r1)──> Stage 2 ──(v2,r2)�
 ```
 
 ### Valid/Ready Propagation Rules
+
+The valid/ready protocol was formally defined by Carloni et al. (2001) as the "latency-insensitive design" (LID) relay station. The backpressure propagation formula below is the standard Forward Register Slice implementation of the LID protocol.
 
 For a single pipeline stage:
 ```

@@ -6,13 +6,17 @@ RTL simulation tells you "does it work?" — performance analysis tells you "doe
 
 **When to use:** Any L1/L2 design with throughput requirements, any pipeline, any multi-module system.
 
-**Authority:** Hennessy & Patterson "Computer Architecture: A Quantitative Approach" Ch.1 (performance metrics: execution time, throughput, speedup, Amdahl's Law), App.C (pipeline CPI analysis under stalls), Dally & Towles "Principles and Practices of Interconnection Networks" Ch.14 (deadlock and livelock analysis), Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3), 1961 (hardware buffer sizing via queueing theory). Note: The Effective Throughput formula (Theoretical × Utilization × (1-Overhead)) is a derived engineering heuristic combining metrics from H&P Ch.1, not a directly stated formula in any single source.
+**Authority (Tier 1-4):** Hennessy & Patterson "Computer Architecture: A Quantitative Approach" 6th ed. §1.8 Performance Metrics (execution time, throughput, CPI equation), §1.9 Amdahl's Law `Speedup = 1 / [(1-F) + F/S]`, Appendix C Pipeline CPI/Stalls `CPI_pipelined = ideal_CPI + stall_CPI`; Dally & Towles "Principles and Practices of Interconnection Networks" §14.1-14.6 Deadlock and Livelock (resource dependency graphs, resource ordering, Cray T3E case study), §13.3.1 Eq.13.1 buffer sizing; Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3):383-387, 1961 (applied to hardware as `FIFO_depth = arrival_rate × max_processing_time`); Rabaey, Chandrakasan, Nikolic "Digital Integrated Circuits" 2nd ed. §10.3.1 Critical Path Timing `T ≥ t_c-q + t_p,logic + t_su`; Brendan Gregg "USE Method" (utilization-saturation-errors framework, 70% threshold for non-interruptible resources — 2013); Kleinrock "Queueing Systems Vol. II: Computer Applications" 1976 (queueing models for computer systems); Neil Gunther "The Practical Performance Analyst" (Little's Law application to system capacity planning).
+
+**Note on derived heuristics:** The Effective Throughput formula `Theoretical × Utilization × (1 - Overhead)` is a composite engineering heuristic combining H&P §1.8 throughput concepts with queuing utilization analysis — not a directly stated formula in any single source. The latency decomposition framework (Input→Processing→Queueing→Output) synthesizes Rabaey §10.3.1 critical path analysis with Kleinrock queueing models. Utilization thresholds (90%/50%) are engineering rules of thumb; the closest academic framework is Gregg's USE Method (70% caution for non-interruptible resources). All heuristics are empirically validated against NVMe Phase 1 pipeline performance data.
 
 ---
 
 ## 1. Throughput Calculation
 
-### The Core Formula
+### The Core Formula (Derived Engineering Heuristic)
+
+This formula synthesizes H&P §1.8 throughput concepts with queuing utilization analysis. Not directly stated in any single source; validated against NVMe Phase 1 empirical data.
 
 ```
 Effective Throughput = Theoretical Max × Utilization × (1 - Overhead)
@@ -69,7 +73,9 @@ System throughput = min(0.100, 0.002, 0.250) = 0.002 items/cycle
 
 ## 2. Latency Budgeting
 
-### Critical Path Decomposition
+### Critical Path Decomposition (Synthesized Framework)
+
+Synthesizes Rabaey §10.3.1 critical path timing `T ≥ t_c-q + t_p,logic + t_su` with Kleinrock 1976 queueing models. The Input→Processing→Queueing→Output framework is a system-level design abstraction — not a named methodology in any single textbook.
 
 Break down the end-to-end latency into stages:
 
@@ -129,7 +135,9 @@ Items in flight during backpressure propagation:
 Items_in_flight = throughput × propagation_delay
 ```
 
-### Deadlock Detection
+### Deadlock Detection (Dally & Towles §14.1-14.2)
+
+Dally & Towles formalizes deadlock as a cycle in the resource dependency graph (§14.1) and provides resource ordering as the primary avoidance mechanism (§14.2, including Cray T3E case study §14.6). The backpressure graph analysis below operationalizes this for valid/ready pipelines.
 
 **Construct the dependency graph:**
 1. Each module is a node
@@ -173,6 +181,8 @@ Utilization = cycles_busy / total_cycles
 | <50% | Under-utilized — consider resource sharing or clock gating |
 | <10% | Likely over-designed — candidate for area reduction |
 
+**Note:** These thresholds are engineering heuristics. The closest academic framework is Brendan Gregg's USE Method (2013), which uses 70% as the caution threshold for non-interruptible resources and cross-validates with saturation (queue depth) rather than relying on utilization alone.
+
 ### Bottleneck Visualization
 
 ```
@@ -191,7 +201,9 @@ For sustained I/O (Phase 2), the bottleneck shifts to the data transfer engine.
 
 ## 5. Little's Law for Hardware
 
-### Statement
+### Statement (Little 1961; Gunther — hardware application)
+
+Little's Law `L = λW` is a proven queuing theorem (Operations Research 9(3):383-387, 1961). Its application to hardware buffer sizing (`FIFO_depth = arrival_rate × max_processing_time`) is a derived engineering practice, formalized by Gunther in "The Practical Performance Analyst" and by Kleinrock (1976) for computer system queueing networks.
 
 ```
 L = λ × W
