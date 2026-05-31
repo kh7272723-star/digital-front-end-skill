@@ -64,7 +64,7 @@ NVMe Phase 1 暴露了 skill 在系统架构层的空白——多模块数据路
 
 | 文件 | 行 | 覆盖 |
 |------|:---:|------|
-| `references/architecture/pipeline-design-patterns.md` | ~350 | 5 种拓扑（feed-forward/feedback/multi-rate/fork-join/cut-through）、反压传播公式、RTL 模板、常见错误 |
+| `references/architecture/pipeline-design-patterns.md` | ~350 | 5 种拓扑（feed-forward/feedback/multi-rate/split-merge/cut-through）、反压传播公式、RTL 模板、常见错误 |
 | `references/architecture/memory-hierarchy.md` | ~250 | 缓冲深度公式（Little's Law）、SKID buffer、ping-pong、仲裁策略对比、预取策略、WSTRB 对齐 |
 | `references/architecture/performance-analysis.md` | ~260 | 吞吐量计算、延迟预算表、反压死锁检测、利用率分析、Little's Law 硬件应用 |
 

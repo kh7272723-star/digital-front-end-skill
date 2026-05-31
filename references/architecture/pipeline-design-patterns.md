@@ -8,7 +8,7 @@ Pipeline design is the most fundamental system architecture skill after RTL craf
 
 **Authority (Tier 1-4):** Dally & Towles "Principles and Practices of Interconnection Networks" (Morgan Kaufmann, 2004) §13.1 Packet-Buffer Flow Control (store-and-forward), §13.2 Flit-Buffer Flow Control (cut-through/wormhole), §13.3.1 Credit-Based Flow Control with Eq.13.1 buffer sizing formula `F ≥ ceil(t_crt × b / L_f)`, §13.3.2 On/Off Backpressure, §16.2 Stalls, §16.3 Credit Loop Closure, §18 Arbiters; Carloni, McMillan, Sangiovanni-Vincentelli "Theory of Latency-Insensitive Design" IEEE TCAD 20(9):1059-1076, 2001 (formal valid/stop backpressure protocol); ARM IHI 0022E §A3.3.1-A3.3.2 (VALID/READY handshake), §A3.5 (VALID must NOT depend on READY — deadlock prevention), §A5 Transaction IDs, §A6 Ordering Model; Hennessy & Patterson "Computer Architecture: A Quantitative Approach" 6th ed. §1.8 Performance Metrics, §1.9 Amdahl's Law, App.C Pipeline CPI/Stalls; Little, J.D.C. "A Proof for the Queuing Formula: L=λW" Operations Research 9(3):383-387, 1961; IETF RFC 1242 §3.8 (cut-through vs store-and-forward latency definitions). Additional: Patterson & Hennessy "Computer Organization and Design" §4.5-4.8 (CPU pipeline — not applicable to valid/ready handshake); Sutherland "Verilog Gotchas" Ch.6 (registered vs combinational outputs).
 
-**Note on pipeline topology classification:** The 5-pattern taxonomy (Feed-forward, Feedback, Multi-rate, Fork-Join, Cut-through vs Store-forward) is a design abstraction synthesized from the sources above — it does not appear as a named classification in any single textbook. Dally & Towles provides the flow control mechanisms (§13) and router microarchitecture (§16); Carloni provides the formal valid/ready protocol; H&P provides the performance analysis framework. The synthesis is ours, verified by NVMe Phase 1 empirical data.
+**Note on pipeline topology classification:** The 5-pattern taxonomy (Feed-forward, Feedback, Multi-rate, Split-Merge, Cut-through vs Store-forward) is a design abstraction synthesized from the sources above — it does not appear as a named classification in any single textbook. Dally & Towles provides the flow control mechanisms (§13) and router microarchitecture (§16); Carloni provides the formal valid/ready protocol; H&P provides the performance analysis framework. The synthesis is ours, verified by NVMe Phase 1 empirical data.
 
 ---
 
@@ -263,7 +263,7 @@ depth_safe = burst_size  (conservative: buffer the entire burst)
 
 ---
 
-## 4. Fork-Join Pipeline
+## 4. Split-Merge Pipeline
 
 ### Concept
 
@@ -275,7 +275,7 @@ Input ──> Splitter ──┤                                 ├──> Join
                       └──> Path B (e.g., completion) ──┘
 ```
 
-### NVMe Identify (Fork-Join Bug)
+### NVMe Identify (Split-Merge Bug)
 
 The Identify command forks into two paths:
 1. **Data path:** 512 beats of controller data → PRP1 address in host memory
@@ -365,7 +365,7 @@ Beat 0..N-1 in ──> [assembly buffer] ──> output all at once when complet
 | Feed-forward | valid/data alignment across stages | Each stage independent backpressure | Stage port widths must match |
 | Feedback | Completion signal timing (level vs pulse) | Feedback path must not couple data path | Cross-module handshake contract |
 | Multi-rate | Beat counter timing, rate contract | Rate adapter decouples producer/consumer | Rate ratio documented in contract |
-| Fork-Join | Path completion detection (pulse→level) | Forked paths must be independent | Joiner must know N paths |
+| Split-Merge | Path completion detection (pulse→level) | Forked paths must be independent | Joiner must know N paths |
 | Cut-through | Beat-level valid stability | Forward regardless of remaining beats | Buffer depth exposed at boundary |
 
 ---

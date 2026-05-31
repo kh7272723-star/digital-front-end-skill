@@ -2,7 +2,7 @@
 
 // ============================================================================
 // fork_join_pipeline — Split-Path Pipeline with Completion Join
-// Validates Fork-Join (§4) + Feedback Completion (§2) pipeline patterns.
+// Validates Split-Merge (§4) + Feedback Completion (§2) pipeline patterns.
 //
 // FSM-free design: splitter feeds 2-stage pipeline continuously.
 // Joiner sets pkt_done (sticky level flag) when TLAST exits pipeline

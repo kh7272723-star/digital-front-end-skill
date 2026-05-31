@@ -131,7 +131,7 @@ Before writing code, produce a short timing contract using `references/timing/ti
 Read `references/design/design-principles.md` P4 and P6. Before asking questions, check the "When to skip" section in each principle — some principles may not apply to your design type. For L1: ask 1-2 questions. For L2: ask 3-5 questions.
 
 **For L2 multi-module designs, also consult:**
-- `references/architecture/pipeline-design-patterns.md` — identify the pipeline topology, check backpressure propagation, flag any multi-rate or fork-join structures
+- `references/architecture/pipeline-design-patterns.md` — identify the pipeline topology, check backpressure propagation, flag any multi-rate or split-merge structures
 - `references/architecture/memory-hierarchy.md` — compute FIFO depths, check buffer placement, audit arbitration strategy
 - `references/architecture/performance-analysis.md` — calculate throughput, identify bottleneck, check for deadlock cycles in the backpressure graph
 

@@ -3,7 +3,7 @@
 ## Purpose
 
 Validate two pipeline patterns from `references/architecture/pipeline-design-patterns.md`:
-1. **Fork-Join (§4):** Input splits into Data Path + Stats Path, rejoin at output
+1. **Split-Merge (§4):** Input splits into Data Path + Stats Path, rejoin at output
 2. **Feedback Completion (§2):** pkt_done_o level flag feeds back to gate next input
 
 ## Pipeline Topology
@@ -80,7 +80,7 @@ s_axis (AXI-Stream) ──> Splitter                               Joiner ──
 
 2. **Stats alignment delay = PIPELINE_STAGES:** The beat counter captures at input TLAST (cycle N). The data path TLAST emerges at cycle N+PIPELINE_STAGES. A shift register delays the stats valid signal to align.
 
-3. **Single-packet in-flight:** Simplifies credit management. The splitter blocks input while a packet is in the pipeline. This avoids the full credit-based flow control complexity while still testing the fork-join and feedback patterns.
+3. **Single-packet in-flight:** Simplifies credit management. The splitter blocks input while a packet is in the pipeline. This avoids the full credit-based flow control complexity while still testing the split-merge and feedback patterns.
 
 ## States
 - **IDLE:** No packet in pipeline. Wait for input valid. Clear done flags.
@@ -93,4 +93,4 @@ s_axis (AXI-Stream) ──> Splitter                               Joiner ──
 2. **T2 (multi-beat packet, 5 beats):** Verify data integrity, beat_count_o = 5, pkt_done_o timing
 3. **T3 (back-to-back packets):** 2 packets in sequence, verify pkt_done_o deasserts between packets
 4. **T4 (backpressure):** Downstream m_axis_tready_i=0 stalls pipeline, verify data not lost, pkt_done_o delayed correctly
-5. **T5 (Fork-Join timing):** Verify that pkt_done_o does NOT assert before BOTH data TLAST AND stats alignment complete
+5. **T5 (Split-Merge timing):** Verify that pkt_done_o does NOT assert before BOTH data TLAST AND stats alignment complete
