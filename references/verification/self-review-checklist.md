@@ -4,6 +4,16 @@ Complete checklist extracted from SKILL.md Step 8. Each item must be explicitly 
 
 **Critical limitation:** This checklist verifies STRUCTURAL correctness only (naming, FSM style, protocol compliance, reset). It does NOT verify FUNCTIONAL correctness. See bug-pattern P18 (CRC pipeline latency) and Crossbar project. Always follow with Step 8b (functional verification) and Step 9 (simulation).
 
+## Signal Type Cross-Check (P1 Contract ↔ RTL)
+
+For every output classified in the timing contract as **pulse / level / registered**, verify the RTL produces that behavior:
+
+- [ ] **Pulse outputs:** Does each pulse output deassert after exactly 1 cycle? Uses transition detection (`prev != state_q`), not state comparison (`state_q == TARGET`)? — bug-pattern LP7, BUG-1
+- [ ] **Level outputs:** Does each level output sustain until a clear condition (W1C, next-packet-start, FSM exit)? Can the testbench safely poll it at any time? — timing-contract-template.md
+- [ ] **Registered outputs:** Is each registered output driven from a flip-flop (not combinational `assign` or `always @(*)` from `state_q`)? Does the timing contract document the +1 cycle latency? — P18, F2, PH1
+
+**If mismatch found:** The contract or the RTL is wrong — fix one of them before simulation. A signal classified as "level" in the contract but implemented as a 1-cycle pulse will pass structural review, appear correct in waveform, but silently fail when the testbench samples it at the wrong cycle.
+
 ## Handshake
 
 - [ ] VALID holds until READY (no premature deassertion) — H1, H8

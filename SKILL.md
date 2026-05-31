@@ -215,6 +215,20 @@ The checklist covers the following categories. Read the reference for the full i
 
 State the review result: PASS (all items checked) or FAIL (list items fixed).
 
+**Signal type cross-check (mandatory for L1/L2):** Before leaving Step 8, cross-check the timing contract's signal classification (from Step 2 and Step 5a) against the actual RTL implementation. This bridges the gap between contract-level P1 review and RTL-level review — and prevents the most common contract-implementation mismatch: a signal classified as "level" in the contract but implemented as a 1-cycle pulse in the RTL.
+
+For every output port classified in the timing contract as **pulse / level / registered**, trace the RTL and verify the implementation produces that behavior:
+
+| Contract classification | RTL check | If mismatch found |
+|-------------------------|-----------|-------------------|
+| **Pulse** (1-cycle) | Does the output deassert after exactly 1 cycle? Uses transition detection (`prev != state_q`), not state comparison (`state_q == TARGET`)? | Revisit Step 5a P1 — the cycle trace was wrong, or the RTL diverged from the trace |
+| **Level** (sustained) | Does the output sustain until a clear condition (W1C, next-packet-start, FSM exit)? Can the testbench safely poll it at any time? | Add a registered flag or FSM state that holds the level until the documented clear condition |
+| **Registered** (delayed 1 cycle) | Is the output driven from a flip-flop (not combinational `assign` or `always @(*) state_q`)? Does the timing contract document the +1 cycle latency? | Either reclassify the signal in the contract, or add a pipeline register |
+
+**Example (from split-merge pipeline validation):** The contract classified `pkt_done_o` as a level flag. The RTL implemented it as `assign pkt_done_o = (state_q == S_DONE)` — a 1-cycle pulse. This mismatch caused test T3 (back-to-back packets) to fail because the testbench sampled `pkt_done_o` too late. The fix was to convert `pkt_done_o` to a sticky registered flag that persists until cleared by the next packet start.
+
+Do NOT skip this check for signals that appear in the interface contract but are generated deep in the RTL. Each output must be cross-checked individually.
+
 **Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8b and Step 9.
 
 ### 8b. Functional verification (mandatory)
