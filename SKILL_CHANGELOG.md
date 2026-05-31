@@ -4,6 +4,48 @@
 
 ---
 
+## 2026-05-31 — 系统架构 Phase 3：Split-Merge Pipeline 验证项目 + 3 条模式修正
+
+### 验证项目
+
+Split-merge pipeline with feedback completion（AXI-Stream 2 级管道 + 分离器 + joiner + beat counter）。5/5 ALL_TESTS_PASS。
+
+| 测试 | 验证内容 |
+|------|---------|
+| T1 单 beat | pkt_done sticky flag + 数据完整性 |
+| T2 多 beat | 3 beats Golden Reference 数据比对 |
+| T3 背靠背 | pkt_done 在包间正确取消断言 |
+| T4 反压 | stall/release — 数据在反压下存活 |
+| T5 Split-Merge 时序 | pkt_done 在管道延迟后才断言 |
+
+### 验证中发现的 3 条可沉淀模式
+
+1. **管道数据移动的 `valid_q <= valid_i` 盲区：** 标准单级模板直接串联为多级时，反压下会静默丢弃数据。修正为 `sN_to_next \|\| !sN_valid_q` 门控。已写入 `pipeline-design-patterns.md` §1 Common Errors + Corrected Multi-Stage Pattern。
+
+2. **固定长度对齐延迟线反模式：** 移位寄存器用于跨路径时序对齐时，不受管道 stall 信号约束，反压下有效位丢失。直接观察管道输出 TLAST 更健壮。已写入 `pipeline-design-patterns.md` §4 Common Errors + Anti-pattern explained。
+
+3. **合约-RTL 信号分类断裂：** Contract 约定 `pkt_done_o` 为 level flag，RTL 实现为 `assign pkt_done_o = (state_q == S_DONE)` 单周期脉冲。Step 5a P1 审查与 Step 8 RTL 验证之间无回验环节。新增 **Signal Type Cross-Check**（pulse/level/registered 逐类验证），写入 `SKILL.md` Step 8 + `self-review-checklist.md`。
+
+### 术语修正
+
+"Fork-Join" 更名为 "Split-Merge"——避免与 Verilog `fork...join` 行为语句混淆。6 个文件 11 处修改。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `references/architecture/pipeline-design-patterns.md` | §1: 新增 Corrected Multi-Stage Pattern + Common Error；§4: Fork-Join→Split-Merge + 新增 Common Errors（对齐延迟反模式 + pulse 完成反模式） |
+| `SKILL.md` Step 8 | 新增 Signal Type Cross-Check（mandatory for L1/L2） |
+| `references/verification/self-review-checklist.md` | 新增 Signal Type Cross-Check section |
+| `projects/pipeline-fork-join/` | 验证项目（RTL + TB + contract），5/5 PASS |
+| `SKILL_CHANGELOG.md` | 本条 changelog |
+
+### SKILL.md 行数
+
+~345 / 500 行（+7 行）
+
+---
+
 ## 2026-05-31 — 系统架构 Phase 1：权威引用升级（精确章节号 + 来源诚实标注）
 
 ### 背景
