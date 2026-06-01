@@ -71,12 +71,17 @@ Read `references/reference-index.md` for a task-to-reference mapping. Key direct
 
 ## Coding rules (mandatory)
 
-All detailed rules are in `references/rtl/coding-guidelines.md`. Key mandatory rules:
+**首要编码规范：** 所有 RTL 代码必须遵守 `references/rtl/rtl-coding-standards.md`。该文档整合了项目编码规范（M/S/R 三级）与 skill 最佳实践，包含命名规则、代码结构、状态机模板、复位策略、时序优化等全部约束。任何 RTL 编写前必须阅读。
 
-- **Naming**: Read `references/timing/naming-guidelines.md` before writing any port list. Use `*_i`/`*_o` suffixes, `*_q`/`*_d` for registered state, `wr_do`/`rd_do` for FIFO operations.
-- **FSM style**: Use two-process style for >3 states. See `references/rtl/fsm-examples.md`.
-- **FSM single-bit control**: All FSM I/O must be single-bit enables. Multi-bit register assignments happen outside the FSM. See `references/rtl/fsm-examples.md` pattern 5.
-- **AXI channel separation**: AW/W/B must have independent valid/ready control. Read/write command paths must be independent. See `references/axi-dma/axi-dma-channel-guidelines.md`.
+关键硬规则速查（完整列表见 `rtl-coding-standards.md`）：
+
+- **命名**：全部小写（信号/模块），全部大写（参数）。端口后缀 `_i`/`_o`。低有效加 `_n`。打拍用 `_r`/`_r0`/`_r1`。实例名 `inst_` 前缀。
+- **状态机**：两段式，`cstate`/`nstate`，状态名 `S_` 前缀大写。状态机只输出单比特使能（M），多比特运算在数据通路。（C5/C6/C9/C10）
+- **数据流 vs 状态机分离**：不允许在状态机中写数据流，不允许在数据流中嵌入 `case(state)`。（C5/C6/C7）
+- **禁止数组编码**：不允许 `reg [W] arr[N]`。深存储用 BRAM 原语。（C17）
+- **控制条件对等**：同一 `always` 块中若复位控制部分寄存器，同链上所有寄存器必须同等受控。（C14）
+- **代码质量**：`` `default_nettype none ``（C3）、位宽写全（C16）、检查 latch（C15）、FSM 默认值在前（C10）。
+- **AXI 通道分离**：AW/W/B 独立 valid/ready 控制。读写命令路径独立。参见 `references/axi-dma/axi-dma-channel-guidelines.md`。
 
 ## Timing and protocol discipline
 
@@ -139,6 +144,12 @@ Read `references/design/design-principles.md` P4 and P6. Before asking questions
 
 **P6 (Boundaries):** Does every module boundary have matching port widths? Are error signals propagated from sub-modules to top-level outputs? Is the completion signal style (pulse vs level) consistent across the integration chain?
 
+**P4 — Intra-Module Independence (L1/L2 mandatory):** Beyond inter-module channel separation, check independence WITHIN each module:
+
+- [ ] Does the protocol control path (AW/AR issue conditions) depend on data-path state (FIFO count, buffer occupancy)? If yes → **coupling.** Control should check only protocol legality (page boundaries, burst length). Data pacing belongs on the data channel (WVALID gated by `!fifo_empty`).
+- [ ] Does WVALID/RVALID gating include `data_available` / `fifo_count > N`? If yes → **P12 violation + coupling.** WVALID should depend only on `w_active_q`. Data pacing is `!fifo_empty`.
+- [ ] Does the control FSM read multi-bit data-path registers directly? If yes → move to single-bit enable signals from FSM to datapath (SM1).
+
 Fix contract-level issues now. Document any architectural decisions changed.
 
 ### 3. Freeze the contract
@@ -173,6 +184,8 @@ Pick the safest known template from `references/rtl/` or `references/patterns/`.
 
 ### 7. Generate RTL
 
+**Before writing ANY code, read `references/rtl/rtl-coding-standards.md`.** This is a hard requirement (not optional). Pay particular attention to M-graded rules: C3 (`default_nettype none`), C5/C6/C7 (FSM/datapath separation), C9/C10 (two-process FSM), C14 (control symmetry), C16 (explicit bit widths), C19 (explicit else in sequential blocks), C20 (group registers by function).
+
 Before writing code, read the relevant pattern reference:
 - FSM → `references/rtl/fsm-examples.md`
 - FIFO → `references/rtl/fifo-examples.md` (use FWFT pattern for data-path FIFOs)
@@ -185,11 +198,35 @@ Do not rely on memory or training data for style decisions. Read the reference, 
 
 Before writing RTL, scan against `references/debug/bug-pattern-library.md`: match the module type and pattern category, state the risk and prevention before coding.
 
-Write synthesizable code following `references/rtl/coding-guidelines.md`: clear signal names, explicit reset, one driver per signal, no latches, Verilog-first style, two-process FSM, `*_q`/`*_d` suffixes.
+Write synthesizable code following `references/rtl/rtl-coding-standards.md` and `references/rtl/fsm-examples.md`: clear signal names, explicit reset, one driver per signal, no latches, Verilog-first style, two-process FSM, `cstate`/`nstate` naming.
 
 Apply power/timing/area rules from `references/design/power-timing-area.md`: clock-enable over gating (P1), memory access qualification (P5), bit-width discipline (A3), balanced operator trees (A1). For FPGA targets: DSP/BRAM/SRL inference patterns (A4, A5, P6).
 
 **Module boundary discipline (PH1):** Prefer registered outputs when signals cross module hierarchy boundaries. Combinational outputs from sub-modules (via `assign` or combinational `always @(*)`) create timing closure difficulties, complicate testbench sampling, and risk glitches during state transitions. If a module drives AXI-Stream tvalid/tdata/tlast or APB prdata through purely combinational paths from its sub-modules, the testbench must account for combinational propagation delay, and any state change in the driving FSM creates a window where outputs may glitch before settling. Registered outputs avoid all of these issues at the cost of one cycle of latency. See `references/advanced/physical-awareness-guidelines.md` PH1 and the A/B experiment results in SKILL_CHANGELOG.md.
+
+### 7b. Pre-synthesis check (mandatory for L1/L2)
+
+**Before self-review, run Yosys synthesis.** This catches issues that Step 8's manual review often misses, in under 60 seconds:
+
+```tcl
+read_verilog <all_rtl_files>.v
+hierarchy -check -top <top_module>
+proc; flatten; opt
+select -count t:$_DLATCH_* -list latch_cells
+stat
+```
+
+**Reject-on-sight:**
+- Any latch cell (`$_DLATCH_*`) → fix before proceeding
+- Combinational loop → fix before proceeding  
+- Blocking assignments (`=`) inside `always @(posedge clk)` → some tools warn, Yosys errors on local `reg` declarations in unnamed blocks
+
+**Check and fix:**
+- Implicit wire warnings
+- Width mismatch warnings
+- Unused signal warnings (dead code)
+
+All warnings must be reviewed. Any warning related to your own code must be fixed. Only after synthesis is clean, proceed to Step 8.
 
 ### 8. RTL self-review against skill constraints
 
@@ -221,13 +258,29 @@ For every output port classified in the timing contract as **pulse / level / reg
 
 | Contract classification | RTL check | If mismatch found |
 |-------------------------|-----------|-------------------|
-| **Pulse** (1-cycle) | Does the output deassert after exactly 1 cycle? Uses transition detection (`prev != state_q`), not state comparison (`state_q == TARGET`)? | Revisit Step 5a P1 — the cycle trace was wrong, or the RTL diverged from the trace |
+| **Pulse** (1-cycle) | Does the output deassert after exactly 1 cycle? Uses transition detection (`prev != cstate`), not state comparison (`cstate == TARGET`)? | Revisit Step 5a P1 — the cycle trace was wrong, or the RTL diverged from the trace |
 | **Level** (sustained) | Does the output sustain until a clear condition (W1C, next-packet-start, FSM exit)? Can the testbench safely poll it at any time? | Add a registered flag or FSM state that holds the level until the documented clear condition |
-| **Registered** (delayed 1 cycle) | Is the output driven from a flip-flop (not combinational `assign` or `always @(*) state_q`)? Does the timing contract document the +1 cycle latency? | Either reclassify the signal in the contract, or add a pipeline register |
+| **Registered** (delayed 1 cycle) | Is the output driven from a flip-flop (not combinational `assign` or `always @(*) cstate`)? Does the timing contract document the +1 cycle latency? | Either reclassify the signal in the contract, or add a pipeline register |
 
-**Example (from split-merge pipeline validation):** The contract classified `pkt_done_o` as a level flag. The RTL implemented it as `assign pkt_done_o = (state_q == S_DONE)` — a 1-cycle pulse. This mismatch caused test T3 (back-to-back packets) to fail because the testbench sampled `pkt_done_o` too late. The fix was to convert `pkt_done_o` to a sticky registered flag that persists until cleared by the next packet start.
+**Example (from split-merge pipeline validation):** The contract classified `pkt_done_o` as a level flag. The RTL implemented it as `assign pkt_done_o = (cstate == S_DONE)` — a 1-cycle pulse. This mismatch caused test T3 (back-to-back packets) to fail because the testbench sampled `pkt_done_o` too late. The fix was to convert `pkt_done_o` to a sticky registered flag that persists until cleared by the next packet start.
 
 Do NOT skip this check for signals that appear in the interface contract but are generated deep in the RTL. Each output must be cross-checked individually.
+
+**NBA ordering hazard check (mandatory for L1/L2):** Before leaving Step 8, read `references/timing/nba-ordering-guide.md`. NVMe Phase 3 found that 6 of 13 bugs were NBA ordering hazards — and all 6 passed the structural self-review checklist. The structural checklist checks THAT `<=` is used; it does not check whether the NBA ordering is correct.
+
+For every `always @(posedge clk_i)` block in your RTL, answer:
+
+1. **Same-block dependency:** List all `<= ` assignment targets. For each target whose RHS references ANOTHER register updated in the same block: flag it. The RHS uses the OLD value of that register (NBA Trap 1, 2).
+
+2. **Cross-block dependency:** Are there two different `always @(posedge clk_i)` blocks where block B's condition depends on block A's output? If yes: the execution order is non-deterministic (IEEE 1364 §5.5). Merge into one block or use a combinational intermediate signal (NBA Trap 6).
+
+3. **Registered output from counter:** For any output that depends on a counter (`beat_cnt_q`, `burst_cnt_q`, `offset_q`) — is the output combinational (`assign` or `always @(*)`) or registered (`<=`)? Registered outputs lag by 1 cycle (NBA Trap 1). Use combinational.
+
+4. **Data from pointer-indexed memory:** For any data read from `fifo_mem[rd_ptr_q]` (or similar) — is the data output combinational or pre-fetched? If registered in the same block as the pointer advance, data shifts by 1 beat (NBA Trap 2).
+
+5. **Counter gating:** For every counter advance condition — is it gated by BOTH the advance signal AND the valid signal? `if (valid && ready)` not `if (ready)` (NBA Trap 4).
+
+If any hazard is found: apply the fix pattern from `references/timing/nba-ordering-guide.md` layer 3. Then re-run Step 8 on the changed code.
 
 **Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8b and Step 9.
 
@@ -276,7 +329,7 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 **P3 (Known Values):** Generate design-specific questions about register initialization. Scan your `always @(posedge clk)` blocks. Does every register have an explicit reset? Any unreset arrays or memories? Can any register reach an unexpected state (seed=0, counter wrap, shift register all-zeros)? Are all combinational signals driven by exactly one source?
 
 **P5a (Output Discipline — always applicable for L1/L2):** Generate design-specific questions about output quality:
-1. Are all module boundary outputs driven from registers (not combinational `case(state_q)`)? Combinational outputs cause glitches during FSM transitions and complicate testbench sampling. See PH1.
+1. Are all module boundary outputs driven from registers (not combinational `case(cstate)`)? Combinational outputs cause glitches during FSM transitions and complicate testbench sampling. See PH1.
 2. Are internal counters gated by state (not free-running when idle)? Free-running counters burn power and can wrap unexpectedly.
 3. Are bit widths derived from `$clog2` (not hardcoded)? Hardcoded widths create silent bugs when parameters change.
 4. Is the baud/divider counter's terminal count correct (counts DIVIDER cycles, not DIVIDER+1)?

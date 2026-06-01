@@ -12,32 +12,32 @@ When glitch-free outputs or clean timing boundaries matter, prefer registered ou
 ```verilog
 always @(posedge clk_i) begin
   if (rst_i) begin
-    state_q <= IDLE;
+    cstate <= IDLE;
   end else begin
-    state_q <= state_d;
+    cstate <= nstate;
   end
 end
 
 always @(*) begin
-  state_d = state_q;
+  nstate = cstate;
   done_o  = 1'b0;
 
-  case (state_q)
+  case (cstate)
     IDLE: begin
       if (start_i)
-        state_d = RUN;
+        nstate = RUN;
     end
     RUN: begin
       if (finish_i) begin
-        state_d = DONE;
+        nstate = DONE;
         done_o  = 1'b1;
       end
     end
     DONE: begin
-      state_d = IDLE;
+      nstate = IDLE;
     end
     default: begin
-      state_d = IDLE;
+      nstate = IDLE;
     end
   endcase
 end
@@ -55,9 +55,9 @@ Pattern rule:
 ```verilog
 always @(posedge clk_i) begin
   if (rst_i) begin
-    state_q <= 3'b001;
+    cstate <= 3'b001;
   end else begin
-    state_q <= state_d;
+    cstate <= nstate;
   end
 end
 ```
@@ -72,22 +72,22 @@ Pattern rule:
 
 ```verilog
 always @(*) begin
-  state_d     = state_q;
+  nstate     = cstate;
   req_ready_o = 1'b0;
   rsp_valid_o = 1'b0;
 
-  case (state_q)
+  case (cstate)
     IDLE: begin
       req_ready_o = 1'b1;
       if (req_valid_i)
-        state_d = BUSY;
+        nstate = BUSY;
     end
     BUSY: begin
       if (rsp_done_i)
-        state_d = IDLE;
+        nstate = IDLE;
     end
     default: begin
-      state_d = IDLE;
+      nstate = IDLE;
     end
   endcase
 end
@@ -103,12 +103,12 @@ Pattern rule:
 
 ```verilog
 always @(*) begin
-  state_d = IDLE;
-  case (state_q)
-    IDLE:  state_d = start_i ? RUN : IDLE;
-    RUN:   state_d = finish_i ? DONE : RUN;
-    DONE:  state_d = IDLE;
-    default: state_d = IDLE;
+  nstate = IDLE;
+  case (cstate)
+    IDLE:  nstate = start_i ? RUN : IDLE;
+    RUN:   nstate = finish_i ? DONE : RUN;
+    DONE:  nstate = IDLE;
+    default: nstate = IDLE;
   endcase
 end
 ```
@@ -128,7 +128,7 @@ parent_module (datapath)
 ├── counter logic
 ├── FIFO or memory
 └── control_fsm (submodule)
-    ├── state register (state_q, state_d)
+    ├── state register (cstate, nstate)
     ├── next-state logic
     └── output enables (load, send, incr, done)
 ```
@@ -153,47 +153,47 @@ module control_fsm(
     localparam S_LOAD = 2'b01;
     localparam S_SEND = 2'b10;
     localparam S_DONE = 2'b11;
-    reg [1:0] state_q, state_d;
+    reg [1:0] cstate, nstate;
 
     // Process 1: state register only
     always @(posedge clk_i) begin
-        if (rst_i) state_q <= S_IDLE;
-        else       state_q <= state_d;
+        if (rst_i) cstate <= S_IDLE;
+        else       cstate <= nstate;
     end
 
     // Process 2: next-state + outputs with defaults
     always @(*) begin
-        state_d     = state_q;
+        nstate     = cstate;
         load_cmd_o  = 1'b0;
         incr_addr_o = 1'b0;
         send_o      = 1'b0;
         done_o      = 1'b0;
-        case (state_q)
+        case (cstate)
             S_IDLE: begin
                 if (cmd_ready_i) begin
                     load_cmd_o = 1'b1;
-                    state_d    = S_LOAD;
+                    nstate    = S_LOAD;
                 end
             end
             S_LOAD: begin
-                state_d = S_SEND;
+                nstate = S_SEND;
             end
             S_SEND: begin
                 send_o = 1'b1;
                 if (boundary_hit_i) begin
-                    state_d = S_DONE;
+                    nstate = S_DONE;
                 end else if (count_nonzero_i) begin
                     incr_addr_o = 1'b1;
-                    state_d     = S_SEND;
+                    nstate     = S_SEND;
                 end else begin
-                    state_d = S_DONE;
+                    nstate = S_DONE;
                 end
             end
             S_DONE: begin
                 done_o  = 1'b1;
-                state_d = S_IDLE;
+                nstate = S_IDLE;
             end
-            default: state_d = S_IDLE;
+            default: nstate = S_IDLE;
         endcase
     end
 endmodule
@@ -259,7 +259,7 @@ endmodule
 - Only one instance — no reuse benefit
 
 **Key rules:**
-- FSM submodule has NO datapath registers (only state_q/state_d)
+- FSM submodule has NO datapath registers (only cstate/nstate)
 - **All FSM inputs and outputs are single-bit control signals** — no multi-bit data passes through the FSM
 - Multi-bit register assignments (addr_q, count_q, data_q) happen in the parent module, outside the FSM, controlled by the FSM's single-bit enables
 - All FSM outputs default to 0 at the top of the combinational block
@@ -270,7 +270,7 @@ endmodule
 ```verilog
 // BAD: FSM assigns multi-bit data directly
 always @(*) begin
-    case (state_q)
+    case (cstate)
         S_LOAD: addr_d = cmd_addr_i;  // multi-bit assignment inside FSM
         S_SEND: addr_d = addr_q + 1;  // multi-bit arithmetic inside FSM
     endcase
@@ -283,7 +283,7 @@ end
 always @(*) begin
     load_addr_o  = 1'b0;  // single-bit
     incr_addr_o  = 1'b0;  // single-bit
-    case (state_q)
+    case (cstate)
         S_LOAD: load_addr_o = 1'b1;
         S_SEND: incr_addr_o = 1'b1;
     endcase
@@ -315,18 +315,18 @@ For any FSM with more than 3 states or multiple control paths, use two-process s
 ```verilog
 // Process 1: state register only
 always @(posedge clk_i) begin
-  if (rst_i) state_q <= IDLE;
-  else        state_q <= state_d;
+  if (rst_i) cstate <= IDLE;
+  else        cstate <= nstate;
 end
 
 // Process 2: next-state + outputs with defaults
 always @(*) begin
-  state_d = state_q; done_o = 1'b0;
-  case (state_q)
-    IDLE: if (start_i)  state_d = RUN;
-    RUN:  if (finish_i) begin state_d = DONE; done_o = 1'b1; end
-    DONE: state_d = IDLE;
-    default: state_d = IDLE;
+  nstate = cstate; done_o = 1'b0;
+  case (cstate)
+    IDLE: if (start_i)  nstate = RUN;
+    RUN:  if (finish_i) begin nstate = DONE; done_o = 1'b1; end
+    DONE: nstate = IDLE;
+    default: nstate = IDLE;
   endcase
 end
 ```
@@ -352,14 +352,14 @@ The `_d` suffix is conventionally used for next-state signals, which makes multi
 ```verilog
 // WRONG: multi-bit _d in FSM block
 always @(*) begin
-    state_d = state_q;
+    nstate = cstate;
     block_cnt_d = block_cnt_q;  // 24-bit — this is datapath, not FSM
     rd_addr_d = rd_addr_q;      // 32-bit — this is datapath, not FSM
-    case (state_q)
+    case (cstate)
         S_LOAD: begin
             block_cnt_d = total_beats[31:8];  // WRONG: multi-bit in FSM
             rd_addr_d = cmd_src_addr_i;        // WRONG: multi-bit in FSM
-            state_d = S_SEND;
+            nstate = S_SEND;
         end
     endcase
 end
@@ -367,13 +367,13 @@ end
 
 **Violation 2: Second `always @(*)` block for multi-bit `_d` signals (the "shadow datapath").**
 
-When the FSM block correctly uses only single-bit outputs, the LLM sometimes creates a second `always @(*)` block to compute multi-bit `_d` values. This block is gated on `state_q` or handshake fire signals — it's combinational logic controlled by FSM state, just in a different block. The multi-bit computation must be synchronous.
+When the FSM block correctly uses only single-bit outputs, the LLM sometimes creates a second `always @(*)` block to compute multi-bit `_d` values. This block is gated on `cstate` or handshake fire signals — it's combinational logic controlled by FSM state, just in a different block. The multi-bit computation must be synchronous.
 
 ```verilog
 // WRONG: second combinational block for multi-bit _d
 always @(*) begin
     w_beat_cnt_d = w_beat_cnt_q;  // 8-bit
-    if (state_q == ST_LOAD)
+    if (cstate == ST_LOAD)
         w_beat_cnt_d = cmd_len_q;  // WRONG: state-gated combinational multi-bit
 end
 
@@ -385,4 +385,4 @@ always @(posedge clk_i) begin
 end
 ```
 
-**How to tell if you're violating:** Open every `always @(*)` block in the module. For each assignment, ask: "Is the target wider than 1 bit?" If yes, and the assignment is inside a `case (state_q)` or gated on `state_q == S_*`, it belongs in a synchronous block with a single-bit enable.
+**How to tell if you're violating:** Open every `always @(*)` block in the module. For each assignment, ask: "Is the target wider than 1 bit?" If yes, and the assignment is inside a `case (cstate)` or gated on `cstate == S_*`, it belongs in a synchronous block with a single-bit enable.

@@ -1,95 +1,112 @@
-# Naming guidelines
+# Naming Guidelines
 
 ## Purpose
 
-Use these names so timing roles are visible before reading the logic.
-Project-local naming wins when the user provides an existing style guide.
+This is the sole naming authority for the skill, incorporating project coding standards. All RTL must follow these rules.
 
-## Port suffixes
+## Rule Grades
 
-- Use `*_i` for module inputs.
-- Use `*_o` for module outputs.
-- Use `clk_i` for the main clock.
-- Use `rst_i` for synchronous active-high reset examples.
-- Use `rst_ni` only when the contract requires active-low reset.
+| Grade | Meaning |
+| --- | --- |
+| **M** | Mandatory |
+| **S** | Strongly recommended |
+| **R** | Recommended |
 
-## Ready/valid ports
+## Basic Rules
 
-Use these names for a single ready/valid channel:
+| # | Grade | Rule |
+|---|:---:|------|
+| N1 | M | Signal and module names **all lowercase**; parameter names **ALL UPPERCASE**. |
+| N2 | M | Port suffixes: `_i` for inputs, `_o` for outputs. Active-low signals insert `_n` before direction: `rst_ni`, `irq_no`. |
+| N3 | M | Instance names prefixed with `inst_`. E.g., `inst_fifo`, `inst_fsm`. |
+| N4 | M | Testbench filenames prefixed with `tb_`. |
 
-- `valid_i`, `data_i`, `ready_o`: upstream channel into this block.
-- `valid_o`, `data_o`, `ready_i`: downstream channel out of this block.
+## Port Naming
 
-For multiple channels, prefix the channel role:
+- `clk_i` — main clock (single-clock modules)
+- `rst_i` — synchronous active-high reset (default)
+- `rst_ni` — asynchronous active-low reset (only when the contract explicitly requires it)
+- Port direction suffixes `_i`/`_o` must not be omitted
+
+## Ready/Valid Handshakes
+
+Single channel:
+
+- `valid_i`, `data_i`, `ready_o` — upstream channel (received by this module)
+- `valid_o`, `data_o`, `ready_i` — downstream channel (driven by this module)
+
+Multi-channel — prefix with role:
 
 - `req_valid_i`, `req_ready_o`, `req_data_i`
 - `rsp_valid_o`, `rsp_ready_i`, `rsp_data_o`
 
-For AXI-adjacent command/status interfaces (e.g., DMA command input, completion output), prefer `valid_i`/`ready_o` over `req_i`/`ack_o` or `req_i`/`ready_o` to maintain semantic consistency with AXI's own valid/ready protocol. Use `req`/`ack` only for non-AXI request/acknowledge handshakes where the semantics differ from valid/ready (e.g., a single-cycle pulse ack).
+## Pipeline Delays and Registers
 
-## Movement conditions
+| Context | Naming | Notes |
+|---------|--------|-------|
+| Single-cycle delay | `xxx_r` | Pure delay register |
+| Multi-cycle delay chain | `xxx_r0`, `xxx_r1`, `xxx_r2` | Max three stages (M) |
+| Current/next distinction needed | `xxx_q` (current), `xxx_d` (next-cycle value) | Non-mandatory; use only when timing clarity requires it |
+| FSM state | `cstate` (current state), `nstate` (next state) | R |
+| FSM state names | `S_` prefix + UPPERCASE, e.g., `S_IDLE`, `S_PAGE_TX` | M |
 
-Name protocol movement conditions once and reuse them:
+`_r` for pure delay chains; `_q`/`_d` for registers where the distinction between current-cycle value and next-cycle assignment matters (e.g., FSM auxiliary registers). Both conventions can coexist.
+
+## FIFO Naming
+
+External interface:
+
+- Controls: `wr_en_i`, `rd_en_i`
+- Data: `wdata_i`, `rdata_o`
+- Status: `full_o`, `empty_o`, `count_o` (optional)
+
+Internal signals:
+
+- Accepted operations: `wr_do = wr_en_i && !full_o`, `rd_do = rd_en_i && !empty_o`
+- Pointers: `wr_ptr_q`, `rd_ptr_q`
+- Occupancy: `count_q`
+
+FIFO module naming format (R): `[dist_][dc_]fifo_<width>bx<depth>[_fwft]`
+
+- `fifo_32bx512` — standard synchronous FIFO
+- `fifo_32bx1k_fwft` — FWFT mode
+- `dist_fifo_8bx16` — LUT-based (distributed RAM)
+- `dc_fifo_8bx256` — async clock domains (different clock)
+
+## CDC Synchronizer Naming
+
+Cross-domain synchronizer chain naming (skill CDC expertise):
+
+- `*_q` — first synchronizer stage (destination clock domain)
+- `*_2q` — second stage (output of double-flop synchronizer)
+- `*_3q` — third stage (if edge detection is needed)
+
+Prefix with the source domain for clarity:
+
+- `rd_ptr_gray_wrclk_q` — read-pointer gray code sampled into write clock domain (stage 1)
+- `rd_ptr_gray_wrclk_2q` — stage 2 sync output
+- `wr_ptr_gray_rdclk_q` — write-pointer gray code sampled into read clock domain (stage 1)
+- `wr_ptr_gray_rdclk_2q` — stage 2 sync output
+
+Synthesis attributes (see `references/synthesis/cdc-guidelines.md`):
+
+- `(* ASYNC_REG = "TRUE" *)` — Vivado/Quartus
+- `// synopsys async_set_reset "wr_rst_ni"` — Synopsys
+
+## Movement Conditions
+
+Name protocol conditions once, reuse everywhere:
 
 - `accept_input = valid_i && ready_o`
 - `accept_output = valid_o && ready_i`
 - `wr_do = wr_en_i && !full_o`
 - `rd_do = rd_en_i && !empty_o`
 - `advance = !stall_i`
-- `load`, `clear`, `flush`, or `hold` only when the condition means exactly that.
+- `load`, `clear`, `flush`, `hold` — only when the semantics match exactly
 
-Do not use a clever abbreviation when the condition is part of the timing contract.
+## Parameter Validation
 
-## FIFO names
-
-- External controls: `wr_en_i`, `rd_en_i`.
-- External data: `wdata_i`, `rdata_o`.
-- Status: `full_o`, `empty_o`, optionally `count_o`.
-- Internal accepted operations: `wr_do`, `rd_do`.
-- Internal pointers: `wr_ptr_q`, `rd_ptr_q`.
-- Internal occupancy: `count_q`.
-
-State whether `wr_en_i` while full and `rd_en_i` while empty are ignored, flagged, or illegal.
-
-## State and next-state names
-
-Use `*_q` for registered state and `*_d` for the next value when that distinction clarifies timing:
-
-- `state_q`, `state_d`
-- `count_q`, `count_d`
-- `valid_q`, `valid_d`
-
-Do not add `*_q/*_d` mechanically to every signal. Use it where the agent must reason about current state versus next visible state.
-
-## CDC synchronizer names
-
-For signals crossing clock domains, use a naming chain that makes the synchronizer depth visible:
-
-- `*_q` — first synchronizer stage (destination clock domain)
-- `*_2q` — second synchronizer stage (output of double-flop synchronizer)
-- `*_3q` — third stage if needed (e.g., for edge detection after synchronization)
-
-Prefix with the source domain for clarity when multiple domains exist:
-
-- `rd_ptr_gray_wrclk_q` — first sync of read-pointer gray code into write clock domain
-- `rd_ptr_gray_wrclk_2q` — second sync stage (output)
-- `wr_ptr_gray_rdclk_q` — first sync of write-pointer gray code into read clock domain
-- `wr_ptr_gray_rdclk_2q` — second sync stage (output)
-
-Mark synchronizer flip-flops with synthesis attributes (see `references/synthesis/cdc-guidelines.md`):
-- `(* ASYNC_REG = "TRUE" *)` for Vivado/Quartus
-- `// synopsys async_set_reset "wr_rst_ni"` for Synopsys tools
-
-## Reset names
-
-- `rst_i` — synchronous active-high reset (default)
-- `rst_ni` — synchronous or asynchronous active-low reset
-- `wr_rst_ni` / `rd_rst_ni` — domain-specific active-low reset for CDC designs
-- Asynchronous reset with synchronized deassertion is the standard CDC reset pattern (see `references/synthesis/cdc-guidelines.md`)
-
-## Parameter validation
-
-Use `initial` block with `$error` for parameter validation. Guard with synthesis translate directives:
+Use `initial` block with `$error`, guarded by synthesis translate directives:
 
 ```verilog
 // synthesis translate_off
@@ -100,11 +117,10 @@ end
 // synthesis translate_on
 ```
 
-Use `// synthesis translate_off` for Synopsys/Cadence, or `// synopsys translate_off` for legacy tools. Prefer `synthesis translate_off` as it is more widely recognized.
+## Forbidden
 
-## Avoid
-
-- Mixing `in_*`/`out_*` with `*_i/*_o` in the same example.
-- Using `ready_i` or `ready_o` without saying which side owns the ready signal.
-- Using FIFO terms that hide whether the operation is a write or read.
-- Reusing one movement condition for two different timing meanings.
+- Mixing `_i`/`_o` with `in_*`/`out_*` in the same module
+- Uppercase letters in signal or module names (except parameters)
+- FIFO terms that obscure read/write semantics
+- One movement condition reused for two different timing meanings
+- Wire forward references — declare before first use

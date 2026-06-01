@@ -5,9 +5,11 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 ## Timing and protocol
 
 - Timing semantics, assignment ordering, or cycle explanation: `references/timing/timing-semantics.md`, `references/timing/timing-contract-template.md`, `references/timing/cycle-trace-guidelines.md`
+- **NBA ordering hazards:** `references/timing/nba-ordering-guide.md` — IEEE 1364 §5.3 event queue, 8 consolidated rules, 6 failure mode traps with broken/fix code (mandatory reading before RTL generation)
 - Source-to-rule conversion or methodology grounding: `references/timing/authority-synthesis.md`
 - Protocol-specific AXI, AXI-Lite, AXI-Stream, APB, AHB, ACE, or CHI rules: `references/timing/protocol-authority-map.md` before adding or changing rules
-- Naming or interface style: `references/timing/naming-guidelines.md`
+- **RTL 编码规范（首要）**: `references/rtl/rtl-coding-standards.md` — 整合项目 M/S/R 三级规范与 skill 最佳实践，覆盖命名、代码结构、FSM 模板、复位策略、时序优化
+- Naming or interface style: `references/timing/naming-guidelines.md`（补充 `rtl-coding-standards.md` 未覆盖的 CDC 同步链命名、FIFO 内部命名等）
 - Ready/valid, req/ack, FIFO, pipeline handoff: `references/timing/protocol-semantics.md`, then `references/timing/cycle-trace-guidelines.md`
 - Protocol completeness: `references/timing/protocol-edge-case-checklist.md`
 - Clock/reset: `references/timing/clock-reset-guidelines.md`; CDC crossing and async FIFO: `references/synthesis/cdc-guidelines.md` (includes complete async FIFO template with gray-coded pointers, dual 2FF synchronizers, SDC constraint syntax, and MTBF guidance)

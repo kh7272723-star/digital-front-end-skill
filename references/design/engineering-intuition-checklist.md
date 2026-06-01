@@ -18,8 +18,10 @@ These are heuristics, not hard limits. Use judgment — a 55-line combinational 
 | C2 | if-else nesting depth | > 3 levels | RMM §7.4 | Use `case`/`casez`; use early-return pattern (`if (!en) begin out=0; end else begin ...`) |
 | C3 | Single module line count | > 300 lines | RMM §7.2 | Decompose into submodules with clear interfaces; each submodule < 200 lines |
 | C4 | Signal fanout (reference count) | > 50 references | Synopsys DC, Xilinx UG949 §Fanout | Insert register stages or `MAX_FANOUT` attribute; use buffer tree |
+| C5 | Registers in single `always @(posedge clk)` block | > 8 registers | NVMe Phase 3 Retrospective (2026-06-01) | Split by function: each block owns one concern (FIFO wr_ptr, FIFO rd_ptr, AW controller, W controller, etc.). Each block < 50 lines. See C20 in `rtl-coding-standards.md`. |
+| C6 | Single `always @(posedge clk)` block line count | > 50 lines | NVMe Phase 3 Retrospective (2026-06-01) | Split by function. Monolithic blocks hide NBA ordering hazards and resist synthesis optimization. |
 
-**Why these matter:** Long combinational blocks are hard to review, hard to debug, and produce deep logic that fails timing. High fanout signals create routing congestion and slow down the design.
+**Why these matter:** Long combinational blocks are hard to review, hard to debug, and produce deep logic that fails timing. High fanout signals create routing congestion and slow down the design. Monolithic sequential blocks mix unrelated registers, creating false synthesis dependencies and making NBA hazards nearly invisible in review.
 
 ---
 

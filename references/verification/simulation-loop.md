@@ -269,6 +269,32 @@ Check the failure against `references/debug/bug-pattern-library.md`:
    See `references/verification/vcd-analysis-guide.md` for full VCD analysis methodology.
 4. Trace the signal path backward from the divergent output to find the root cause
 
+### Step 3.5: Structured NBA/dependency diagnosis (for hangs and data corruption)
+
+When the failure is a hang (stuck FSM state) or data corruption (shifted/skipped beats), follow this structured trace before adding `$display`:
+
+1. **Identify the stuck module and state.** Read `*_q` or `cstate` of each FSM from the VCD or add a single `$display` of all FSM states once per cycle.
+
+2. **Find the transition condition that isn't firing.** For the stuck state, list every signal in its transition condition. Check each signal's value at the posedge.
+
+3. **Trace the stuck signal to its driver.** Which `always @(posedge clk)` block drives it? Is it assigned via `<=`?
+
+4. **NBA ordering check:** In that always block, does the stuck signal depend on ANOTHER signal that is ALSO updated via `<=` in the SAME block? If yes → the value the stuck signal "sees" is the OLD value from the previous cycle. This is an NBA ordering hazard.
+
+5. **Fix pattern:** Move the dependent signal to combinational logic (`assign` or separate `always @(*)`), or pre-fetch the value one cycle earlier (`mem[ptr + 1]`), or gate the advance on the valid signal (`w_valid && w_ready`, not just `w_ready`).
+
+**Common NBA symptoms and their fixes:**
+
+| Symptom | Likely NBA Cause | Fix |
+|---------|-----------------|-----|
+| Last beat never has WLAST=1 | `axi_w_last_o <= (beat == len)` uses old `beat` before increment | `assign` combinational |
+| Data shifted by 1 beat | `axi_w_data_o <= fifo_rdata` uses old `rd_ptr` before advance | Pre-fetch `mem[rd_ptr+1]` or combinational output |
+| Beat 0 skipped | Beat advances on `w_ready` but `w_valid` still 0 (NBA pending) | Gate: `w_valid && w_ready` |
+| Duplicate first read | Offset advances on data-arrival, but enable is combinational from offset | Advance on read-issue |
+| Last data beat lost | `fifo_wr_en` gated by `rd_en` which deasserts before last rvalid | `fifo_wr_en = nvm_rvalid_i` |
+
+See `references/verification/self-review-checklist.md` "NBA Ordering Hazards" for the full pre-simulation checklist.
+
 ### Step 4: Apply minimal fix
 
 - Change the smallest number of lines that address the root cause

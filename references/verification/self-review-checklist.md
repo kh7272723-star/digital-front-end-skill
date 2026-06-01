@@ -28,6 +28,26 @@ For every output classified in the timing contract as **pulse / level / register
 - [ ] WSTRB correctly computed for unaligned addresses — `axi-dma-channel-guidelines.md`
 - [ ] Data-path FIFOs use FWFT (combinational) output, NOT registered output — F1, `fifo-examples.md`
 
+## NBA Ordering Hazards (mandatory for L1/L2)
+
+All `<=` assignments in the same `always @(posedge clk)` block are evaluated with OLD values and take effect simultaneously next cycle. If signal B depends on signal A's NEW value, they CANNOT be in the same `<=` block.
+
+- [ ] **AXI beat-dependent outputs (WLAST, RLAST):** Are they driven by `assign` (combinational), not `<=` (registered)?  
+  *Wrong:* `axi_w_last_o <= (w_beat_q == w_burst_len_q);` — beat counter advances via `<=` in same block, so `w_beat_q` used is the old value. Slave sees last=0 on the final beat.  
+  *Right:* `assign axi_w_last_o = w_active_q && (w_beat_q == w_burst_len_q);`
+
+- [ ] **AXI data from FIFO:** Does `axi_w_data_o` come from a combinational path (`assign` or pipe register loaded ONE CYCLE EARLIER), not from `<= fifo_rdata` in the same block that advances `fifo_rd_ptr`?  
+  *Wrong:* `axi_w_data_o <= fifo_rdata; fifo_rd_ptr_q <= fifo_rd_ptr_q + 1;` — data uses old `rd_ptr`, advances next cycle → data always 1 beat stale.  
+  *Right:* Load `w_data_pipe_q <= fifo_mem[rd_ptr_q + 1]` on handshake; `assign axi_w_data_o = w_data_pipe_q;`
+
+- [ ] **FIFO read pointer vs data consumption:** Does `fifo_rd_en` advance `rd_ptr` in the SAME cycle as data is consumed from `fifo_rdata`? If `rd_ptr` advances via `<=` and data is registered via `<=` in the same block, the registered data uses the OLD `rd_ptr`. Fix: either make data combinational, or pre-fetch from `mem[rd_ptr + 1]`.
+
+- [ ] **Address/offset advance timing:** Does the address counter advance on `*_rd_en` (read issue) or on data arrival? If it advances on data arrival but the read enable is combinational from the counter, the same address is read twice. Advance on read-issue, not data-arrival.
+
+- [ ] **WVALID gate:** Is `w_beat_q` advancing gated by `axi_w_valid_o && axi_w_ready_i` (not just `axi_w_ready_i`)? On the first W cycle, `w_valid_o` is still 0 (NBA not yet taken effect). If beat advances on `w_ready_i` alone, beat 0 is skipped.
+
+- [ ] **Last data beat arrival:** Does `fifo_wr_en` depend on `nvm_rd_en_o` (or equivalent read-enable)? If the read-enable deasserts when byte-count reaches 0, the last beat's data arriving 1 cycle later is gated off. Use `fifo_wr_en = nvm_rvalid_i` (unconditional on data-valid).
+
 ## Naming
 
 - [ ] All ports use `*_i`/`*_o` suffixes
