@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-06-01 — NVMe Phase 3 + 编码规范整合 + 流程缺陷修复 + NBA 预防策略
+
+### NVMe Phase 3
+
+7 模块 ~1900 行 RTL，ALL_TESTS_PASS。13 bugs 修复，其中 6 个是 NBA 时序问题。关键架构纠正：AW 与 FIFO count 解耦，FIFO 深度从 8192 降到 64。
+
+### 编码规范整合
+
+用户编码标准落实为 skill 首要规范（`rtl-coding-standards.md` 新建，C1-C20）：
+- `naming-guidelines.md` 重写：`cstate`/`nstate`（两段式 FSM），`_r` 打拍后缀，`inst_` 前缀
+- `fsm-examples.md` 51 处命名更新
+- C19 (M): explicit else in sequential blocks
+- C20 (S): group registers by function
+
+### 流程缺陷修复 (G1-G6)
+
+| Gap | 修复 | 文件 |
+|-----|------|------|
+| G1: 无 NBA 检查 | NBA Ordering Hazards (6 项) | self-review-checklist.md |
+| G2: 无模块内耦合检查 | P4 Intra-Module Independence | SKILL.md Step 2a |
+| G3: 无 always 块规模告警 | C5/C6: >8 regs or >50 lines → split | engineering-intuition-checklist.md |
+| G4: 无前置综合 | Step 7b: yosys before self-review | SKILL.md |
+| G5: 无诊断方法论 | Step 3.5: structured NBA diagnosis | simulation-loop.md |
+| G6: 规范未强制执行 | Step 7: mandatory read of standards | SKILL.md |
+
+### NBA 问题诊断
+
+NVMe Phase 3 的 13 bugs 中 6 个（46%）是 NBA 时序问题——在 G1/G5 已经入库后仍然高发。根因分析：
+
+1. **碎片化：** NBA 知识分散在 6 个文件（correctness-rules E4, icarus-pitfalls B1/B3/B6, self-review-checklist G1, simulation-loop G5, citation-verification IEEE 1364 §5.3），没有统一的入口
+2. **检查点错位：** G1 在 Step 8（仿真前检查），G5 在 Step 9（仿真失败后诊断）——但 NBA 错误发生在 Step 7（写 RTL 的那一刻）。下游检查不如上游预防
+
+**待实施：** Step 7 新增 NBA 预防规则——在写 `always @(posedge clk)` 时强制 agent 评估"同一周期内另一个 always 块是否会读到这个信号的旧值"。
+
+### SKILL.md 行数
+
+~338 / 500 行
+
+---
+
 ## 2026-06-01 — NVMe Phase 2 规范学习 + nvme-guidelines.md 扩展（NVM I/O 命令集 + PRP 遍历）
 
 ### 背景
