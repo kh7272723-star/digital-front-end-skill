@@ -14,7 +14,7 @@
 
 module nvme_read_engine #(
     parameter AXI_DATA_W      = 64,
-    parameter AXI_MAX_BURST   = 256,
+    parameter AXI_MAX_BURST   = 64,    // ≤ DATA_FIFO_DEPTH for burst-ready gate
     parameter LBA_SIZE        = 512,
     parameter DATA_FIFO_DEPTH = 64
 ) (
@@ -125,6 +125,7 @@ module nvme_read_engine #(
                 page_host_addr_q  <= page_addr_i;
                 page_remain_q     <= page_bytes_i;
                 page_done_q       <= 0;
+                all_pages_q       <= 0;  // more pages coming
             end
 
             if (nvm_issue) begin
@@ -149,7 +150,7 @@ module nvme_read_engine #(
     reg [7:0]   aw_len_q;
     reg [15:0]  aw_left_q;          // beats remaining for page
 
-    assign axi_aw_valid_o = aw_vld_q && (fifo_cnt_q > aw_len_q);  // gate on FIFO pre-fill
+    assign axi_aw_valid_o = aw_vld_q && (fifo_cnt_q > aw_len_q) && !w_act_q;
     assign axi_aw_addr_o  = aw_addr_q;
     assign axi_aw_len_o   = aw_len_q;
 
@@ -165,7 +166,7 @@ module nvme_read_engine #(
                            ? (AXI_MAX_BURST - 1) : (page_bytes_i[16:3] - 1);
             end
 
-            if (aw_vld_q && axi_aw_ready_i) begin
+            if (axi_aw_valid_o && axi_aw_ready_i) begin
                 aw_addr_q <= aw_addr_q + ({56'd0, aw_len_q} + 1) * 8;
                 if (aw_left_q > ({8'd0, aw_len_q} + 1)) begin
                     aw_left_q <= aw_left_q - ({8'd0, aw_len_q} + 1);
