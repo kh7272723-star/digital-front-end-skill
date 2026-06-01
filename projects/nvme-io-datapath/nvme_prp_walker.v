@@ -20,6 +20,7 @@ module nvme_prp_walker #(
     output wire [63:0]  page_addr_o,
     output wire [16:0]  page_bytes_o,
     output wire         page_valid_o,
+    output wire         page_last_o,    // asserted during LAST page_valid pulse
     input  wire         page_ready_i,
     // AXI AR (list fetch)
     output wire         list_ar_valid_o,
@@ -71,11 +72,12 @@ module nvme_prp_walker #(
     // Combinational outputs from datapath (no NBA trap)
     // ==================================================================
     wire [12:0]  first_cap = PAGE_SIZE[12:0] - prp1_i[11:0];  // 13-bit: 4096 needs >12 bits
+    assign page_last_o = (cstate == S_PAGE_TX) && (bytes_left_q <= {12'd0, page_bytes_o, 3'd0});  // bytes vs beats
     wire [31:0]  first_bytes = (transfer_bytes_i <= {20'd0, first_cap})
                               ? transfer_bytes_i : {20'd0, first_cap};
 
     assign page_addr_o    = current_addr_q;
-    assign page_bytes_o   = (first_done_q) ? {5'd0, PAGE_SIZE[11:3]}
+    assign page_bytes_o   = (first_done_q) ? {5'd0, PAGE_SIZE[12:0]}
                           : first_bytes[16:0];
     assign page_valid_o   = (cstate == S_PAGE_TX);
     assign list_ar_valid_o = (cstate == S_LIST_FETCH);

@@ -72,7 +72,7 @@ module nvme_io_top (
     // ==================================================================
     wire [63:0] page_addr;
     wire [16:0] page_bytes;
-    wire        page_valid, page_ready, page_done;
+    wire        page_valid, page_last, page_ready, page_done;
 
     nvme_prp_walker inst_prp (
         .clk_i, .rst_ni,
@@ -81,7 +81,8 @@ module nvme_io_top (
         .prp1_i(prp_prp1),         .prp2_i(prp_prp2),
         .transfer_bytes_i(prp_transfer_bytes),
         .page_addr_o(page_addr),   .page_bytes_o(page_bytes),
-        .page_valid_o(page_valid), .page_ready_i(page_ready),
+        .page_valid_o(page_valid), .page_last_o(page_last),
+        .page_ready_i(page_ready),
         .list_ar_valid_o(),        .list_ar_ready_i(1'b0),
         .list_ar_addr_o(),         .list_ar_len_o(),
         .list_r_valid_i(1'b0),     .list_r_ready_o(),
@@ -97,7 +98,8 @@ module nvme_io_top (
         .start_i(rd_start),        .done_o(rd_done),
         .slba_i(rd_slba),          .total_bytes_i(rd_total_bytes),
         .page_addr_i(page_addr),   .page_bytes_i(page_bytes),
-        .page_valid_i(page_valid), .page_ready_o(page_ready),
+        .page_valid_i(page_valid), .page_last_i(page_last),
+        .page_ready_o(page_ready),
         .page_done_o(page_done),
         .nvm_addr_o,               .nvm_rd_en_o,
         .nvm_rdata_i,              .nvm_rvalid_i,

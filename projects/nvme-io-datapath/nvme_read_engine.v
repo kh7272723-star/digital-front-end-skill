@@ -1,187 +1,135 @@
 `default_nettype none
-// nvme_read_engine — NVM Read → AXI Write Engine
-// Pages processed immediately on arrival. Done = all accepted pages drained.
-module nvme_read_engine #(
-    parameter AXI_MAX_BURST   = 64,
-    parameter LBA_SIZE        = 512,
-    parameter DATA_FIFO_DEPTH = 64
-) (
-    input  wire         clk_i, input  wire         rst_ni,
-    input  wire         start_i, output wire         done_o,
-    input  wire [63:0]  slba_i,  input  wire [31:0]  total_bytes_i,
-    input  wire [63:0]  page_addr_i,  input  wire [16:0]  page_bytes_i,
-    input  wire         page_valid_i, output wire         page_ready_o,
-    output wire         page_done_o,
-    output wire [63:0]  nvm_addr_o,   output wire         nvm_rd_en_o,
-    input  wire [63:0]  nvm_rdata_i,  input  wire         nvm_rvalid_i,
-    output wire         nvm_rready_o,
-    output wire         axi_aw_valid_o, input  wire         axi_aw_ready_i,
-    output wire [63:0]  axi_aw_addr_o,  output wire [7:0]   axi_aw_len_o,
-    output wire         axi_w_valid_o,  input  wire         axi_w_ready_i,
-    output wire [63:0]  axi_w_data_o,   output wire [7:0]   axi_w_strb_o,
-    output wire         axi_w_last_o,
-    input  wire         axi_b_valid_i,  output wire         axi_b_ready_o,
-    input  wire [1:0]   axi_b_resp_i
+module nvme_read_engine #(parameter AXI_MAX_BURST=64, LBA_SIZE=512, DATA_FIFO_DEPTH=64) (
+    input  wire clk_i, rst_ni, start_i, output wire done_o,
+    input  wire [63:0] slba_i, input  wire [31:0] total_bytes_i,
+    input  wire [63:0] page_addr_i, input  wire [16:0] page_bytes_i,
+    input  wire page_valid_i, page_last_i, output wire page_ready_o, page_done_o,
+    output wire [63:0] nvm_addr_o, output wire nvm_rd_en_o,
+    input  wire [63:0] nvm_rdata_i, input wire nvm_rvalid_i, output wire nvm_rready_o,
+    output wire axi_aw_valid_o, input wire axi_aw_ready_i,
+    output wire [63:0] axi_aw_addr_o, output wire [7:0] axi_aw_len_o,
+    output wire axi_w_valid_o, input wire axi_w_ready_i,
+    output wire [63:0] axi_w_data_o, output wire [7:0] axi_w_strb_o, output wire axi_w_last_o,
+    input wire axi_b_valid_i, output wire axi_b_ready_o, input wire [1:0] axi_b_resp_i
 );
-    localparam F_AW = $clog2(DATA_FIFO_DEPTH);
+    localparam FA=$clog2(DATA_FIFO_DEPTH);
 
-    // Page accounting (race-free: separate in/out counters)
-    reg [7:0]  page_in_q, page_out_q;
-    assign page_ready_o = 1'b1;  // always accept, no backpressure
-
-    always @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin page_in_q <= 0; page_out_q <= 0; end
+    // Page tracking
+    reg [7:0] pg_in_q, pg_out_q;
+    reg       last_seen_q;
+    assign page_ready_o = 1'b1;
+    always @(posedge clk_i or negedge rst_ni)
+        if(!rst_ni) begin pg_in_q<=0; pg_out_q<=0; last_seen_q<=0; end
         else begin
-            if (page_valid_i && page_ready_o) page_in_q <= page_in_q + 1'b1;
-            if (page_done_o)      page_out_q <= page_out_q + 1'b1;
+            if(page_valid_i)       pg_in_q<=pg_in_q+1'b1;
+            if(page_done_o)        pg_out_q<=pg_out_q+1'b1;
+            if(page_valid_i&&page_last_i) last_seen_q<=1'b1;
         end
-    end
 
-    // ==================================================================
-    // FWFT FIFO
-    // ==================================================================
-    reg [63:0]     fifo_mem [0:DATA_FIFO_DEPTH-1];
-    reg [F_AW-1:0] fifo_wptr_q, fifo_rptr_q;
-    reg [F_AW:0]   fifo_cnt_q;
-    wire fifo_wr = nvm_rvalid_i;
-    wire fifo_rd = axi_w_valid_o && axi_w_ready_i;
-
-    always @(posedge clk_i) begin
-        if (fifo_wr && (fifo_cnt_q < DATA_FIFO_DEPTH))
-            fifo_mem[fifo_wptr_q] <= nvm_rdata_i;
-    end
-    always @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin fifo_wptr_q <= 0; fifo_rptr_q <= 0; fifo_cnt_q <= 0; end
-        else begin
-            if (fifo_wr && (fifo_cnt_q < DATA_FIFO_DEPTH)) fifo_wptr_q <= fifo_wptr_q + 1'b1;
-            if (fifo_rd)                                     fifo_rptr_q <= fifo_rptr_q + 1'b1;
-            case ({fifo_wr && (fifo_cnt_q < DATA_FIFO_DEPTH), fifo_rd})
-                2'b10: fifo_cnt_q <= fifo_cnt_q + 1'b1;
-                2'b01: fifo_cnt_q <= fifo_cnt_q - 1'b1;
-                default: ;
-            endcase
+    // FIFO
+    reg [63:0] fm[0:DATA_FIFO_DEPTH-1];
+    reg [FA-1:0] fwp_q,frp_q; reg [FA:0] fcnt_q;
+    wire fw=nvm_rvalid_i, fr=axi_w_valid_o&&axi_w_ready_i;
+    always@(posedge clk_i) if(fw&&fcnt_q<DATA_FIFO_DEPTH) fm[fwp_q]<=nvm_rdata_i;
+    always@(posedge clk_i or negedge rst_ni)
+        if(!rst_ni) begin fwp_q<=0;frp_q<=0;fcnt_q<=0; end else begin
+            if(fw&&fcnt_q<DATA_FIFO_DEPTH) fwp_q<=fwp_q+1'b1;
+            if(fr) frp_q<=frp_q+1'b1;
+            case({fw&&fcnt_q<DATA_FIFO_DEPTH,fr})
+                2'b10:fcnt_q<=fcnt_q+1'b1; 2'b01:fcnt_q<=fcnt_q-1'b1; default:; endcase
         end
-    end
-    wire [63:0] fifo_rdata = fifo_mem[fifo_rptr_q];
+    wire [63:0] frd=fm[frp_q];
 
-    // ==================================================================
-    // NVM Read — processes current page, no page buffer needed
-    // ==================================================================
-    reg [31:0]  nvm_offset_q;
-    reg [16:0]  page_remain_q;
-    reg [63:0]  page_host_q;
-    reg         page_live_q;
-    reg         page_nvm_done_q;
-    reg         page_draining_q;
+    // NVM + page control
+    reg [31:0] nvm_off_q; reg [16:0] pg_rem_q; reg [63:0] pg_host_q;
+    reg pg_live_q, pg_nvm_done_q, pg_drain_q;
+    reg pg_pend_q; reg [63:0] pend_a_q; reg [16:0] pend_b_q; reg pend_last_q;
+    wire nvm_go=pg_live_q&&(pg_rem_q>0)&&(fcnt_q<DATA_FIFO_DEPTH);
+    assign nvm_rd_en_o=nvm_go; assign nvm_addr_o=slba_i*LBA_SIZE+nvm_off_q;
+    assign nvm_rready_o=1'b1;
 
-    wire nvm_issue = page_live_q && (page_remain_q > 0) && (fifo_cnt_q < DATA_FIFO_DEPTH);
-    assign nvm_rd_en_o  = nvm_issue;
-    assign nvm_addr_o   = slba_i * LBA_SIZE + nvm_offset_q;
-    assign nvm_rready_o = 1'b1;
-
-    always @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin
-            nvm_offset_q <= 0; page_remain_q <= 0; page_host_q <= 0;
-            page_live_q <= 0; page_nvm_done_q <= 0; page_draining_q <= 0;
+    always@(posedge clk_i or negedge rst_ni) begin
+        if(!rst_ni) begin
+            nvm_off_q<=0;pg_rem_q<=0;pg_host_q<=0;pg_live_q<=0;pg_nvm_done_q<=0;
+            pg_drain_q<=0;pg_pend_q<=0;pend_a_q<=0;pend_b_q<=0;pend_last_q<=0;
         end else begin
-            if (start_i) nvm_offset_q <= 0;
+            if(start_i) nvm_off_q<=0;
 
-            // Page acceptance: start processing immediately
-            if (page_valid_i && !page_live_q) begin
-                page_live_q     <= 1;
-                page_host_q     <= page_addr_i;
-                page_remain_q   <= page_bytes_i;
-                page_nvm_done_q <= 0;
-                page_draining_q <= 0;
+            // Accept page: either direct or to pending slot
+            if(page_valid_i) begin
+                if(!pg_live_q) begin
+                    pg_live_q<=1; pg_host_q<=page_addr_i; pg_rem_q<=page_bytes_i;
+                    pg_nvm_done_q<=0; pg_drain_q<=0;
+                end else begin
+                    pg_pend_q<=1; pend_a_q<=page_addr_i; pend_b_q<=page_bytes_i;
+                    pend_last_q<=page_last_i;
+                end
             end
 
-            if (nvm_issue) begin
-                nvm_offset_q  <= nvm_offset_q + 32'd8;
-                page_remain_q <= page_remain_q - 17'd8;
-                if (page_remain_q <= 17'd8) page_nvm_done_q <= 1;
+            // Start pending page when current done
+            if(pg_pend_q && page_drain_done) begin
+                pg_live_q<=1; pg_host_q<=pend_a_q; pg_rem_q<=pend_b_q;
+                pg_nvm_done_q<=0; pg_drain_q<=0; pg_pend_q<=0;
             end
 
-            if (page_nvm_done_q && !page_draining_q) page_draining_q <= 1;
+            if(nvm_go) begin
+                nvm_off_q<=nvm_off_q+32'd8; pg_rem_q<=pg_rem_q-17'd8;
+                if(pg_rem_q<=17'd8) pg_nvm_done_q<=1;
+            end
+            if(pg_nvm_done_q&&!pg_drain_q) pg_drain_q<=1;
+            if(page_drain_done) begin pg_live_q<=0; pg_drain_q<=0; end
+        end
+    end
 
-            // Page W/B drain complete
-            if (page_draining_q && !w_act_q && (b_cnt_q == 0)) begin
-                page_live_q     <= 0;
-                page_draining_q <= 0;
+    wire page_drain_done=pg_drain_q&&!w_act_q&&b_cnt_q==0;
+    assign page_done_o=page_drain_done;
+    assign done_o=page_drain_done&&(pg_in_q==pg_out_q)&&(pg_in_q>0)&&last_seen_q;
+
+    // AW
+    reg aw_vld_q; reg [63:0] aw_a_q; reg [7:0] aw_l_q; reg [15:0] aw_left_q;
+    assign axi_aw_valid_o=aw_vld_q&&(fcnt_q>aw_l_q)&&!w_act_q;
+    assign axi_aw_addr_o=aw_a_q; assign axi_aw_len_o=aw_l_q;
+    always@(posedge clk_i or negedge rst_ni) begin
+        if(!rst_ni) begin aw_vld_q<=0;aw_a_q<=0;aw_l_q<=0;aw_left_q<=0; end else begin
+            if(page_valid_i&&!pg_live_q&&!pg_pend_q) begin
+                aw_a_q<=page_addr_i; aw_left_q<=page_bytes_i[16:3]; aw_vld_q<=1;
+                aw_l_q<=(page_bytes_i[16:3]>AXI_MAX_BURST)?(AXI_MAX_BURST-1):(page_bytes_i[16:3]-1);
+            end
+            // Use pending params if direct accept missed
+            if(pg_pend_q&&page_drain_done) begin
+                aw_a_q<=pend_a_q; aw_left_q<=pend_b_q[16:3]; aw_vld_q<=1;
+                aw_l_q<=(pend_b_q[16:3]>AXI_MAX_BURST)?(AXI_MAX_BURST-1):(pend_b_q[16:3]-1);
+            end
+            if(axi_aw_valid_o&&axi_aw_ready_i) begin
+                aw_a_q<=aw_a_q+({56'd0,aw_l_q}+1)*8;
+                if(aw_left_q>({8'd0,aw_l_q}+1)) begin
+                    aw_left_q<=aw_left_q-({8'd0,aw_l_q}+1);
+                    aw_l_q<=(aw_left_q-({8'd0,aw_l_q}+1)>AXI_MAX_BURST)?(AXI_MAX_BURST-1):(aw_left_q-({8'd0,aw_l_q}+1)-1);
+                end else begin aw_left_q<=0;aw_vld_q<=0; end
             end
         end
     end
 
-    wire page_drain_done = page_draining_q && !w_act_q && (b_cnt_q == 0);
-    assign page_done_o = page_drain_done;
-    // Done: last page fully drained AND all pages accounted
-    wire all_pages_match = (page_in_q == page_out_q) && (page_in_q > 0);
-    assign done_o = page_drain_done && all_pages_match;
-
-    // ==================================================================
-    // AW Controller
-    // ==================================================================
-    reg aw_vld_q, w_act_q;
-    reg [63:0] aw_addr_q;
-    reg [7:0]  aw_len_q, w_beat_q, w_blen_q;
-    reg [15:0] aw_left_q;
-
-    assign axi_aw_valid_o = aw_vld_q && (fifo_cnt_q > aw_len_q) && !w_act_q;
-    assign axi_aw_addr_o  = aw_addr_q;
-    assign axi_aw_len_o   = aw_len_q;
-
-    always @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin
-            aw_vld_q <= 0; aw_addr_q <= 0; aw_len_q <= 0; aw_left_q <= 0;
-        end else begin
-            if (page_valid_i && !page_live_q) begin
-                aw_addr_q <= page_addr_i;
-                aw_left_q <= page_bytes_i[16:3];
-                aw_vld_q  <= 1;
-                aw_len_q  <= (page_bytes_i[16:3] > AXI_MAX_BURST) ? (AXI_MAX_BURST - 1)
-                           : (page_bytes_i[16:3] - 1);
-            end
-            if (axi_aw_valid_o && axi_aw_ready_i) begin
-                aw_addr_q <= aw_addr_q + ({56'd0, aw_len_q} + 1) * 8;
-                if (aw_left_q > ({8'd0, aw_len_q} + 1)) begin
-                    aw_left_q <= aw_left_q - ({8'd0, aw_len_q} + 1);
-                    aw_len_q  <= (aw_left_q - ({8'd0, aw_len_q} + 1) > AXI_MAX_BURST)
-                               ? (AXI_MAX_BURST - 1) : (aw_left_q - ({8'd0, aw_len_q} + 1) - 1);
-                end else begin aw_left_q <= 0; aw_vld_q <= 0; end
-            end
+    // W
+    reg w_act_q; reg [7:0] w_b_q,w_blen_q;
+    assign axi_w_valid_o=w_act_q; assign axi_w_data_o=frd; assign axi_w_strb_o=8'hFF;
+    assign axi_w_last_o=w_act_q&&(w_b_q==w_blen_q);
+    always@(posedge clk_i or negedge rst_ni) begin
+        if(!rst_ni) begin w_act_q<=0;w_b_q<=0;w_blen_q<=0; end else begin
+            if(axi_aw_valid_o&&axi_aw_ready_i&&!w_act_q) begin
+                w_act_q<=1;w_b_q<=0;w_blen_q<=aw_l_q; end
+            if(w_act_q&&axi_w_valid_o&&axi_w_ready_i) begin
+                if(w_b_q==w_blen_q) w_act_q<=0; else w_b_q<=w_b_q+1'b1; end
         end
     end
 
-    // ==================================================================
-    // W Controller
-    // ==================================================================
-    assign axi_w_valid_o = w_act_q;
-    assign axi_w_data_o  = fifo_rdata;
-    assign axi_w_strb_o  = 8'hFF;
-    assign axi_w_last_o  = w_act_q && (w_beat_q == w_blen_q);
-
-    always @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin w_act_q <= 0; w_beat_q <= 0; w_blen_q <= 0; end
-        else begin
-            if (axi_aw_valid_o && axi_aw_ready_i && !w_act_q) begin
-                w_act_q <= 1; w_beat_q <= 0; w_blen_q <= aw_len_q;
-            end
-            if (w_act_q && axi_w_valid_o && axi_w_ready_i) begin
-                if (w_beat_q == w_blen_q) w_act_q <= 0;
-                else                       w_beat_q <= w_beat_q + 1'b1;
-            end
-        end
-    end
-
-    // ==================================================================
-    // B Controller
-    // ==================================================================
+    // B
     reg [7:0] b_cnt_q;
-    assign axi_b_ready_o = 1'b1;
-    always @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) b_cnt_q <= 0;
-        else begin
-            if (axi_aw_valid_o && axi_aw_ready_i) b_cnt_q <= b_cnt_q + 1'b1;
-            if (axi_b_valid_i)                     b_cnt_q <= b_cnt_q - 1'b1;
+    assign axi_b_ready_o=1'b1;
+    always@(posedge clk_i or negedge rst_ni) begin
+        if(!rst_ni) b_cnt_q<=0; else begin
+            if(axi_aw_valid_o&&axi_aw_ready_i) b_cnt_q<=b_cnt_q+1'b1;
+            if(axi_b_valid_i) b_cnt_q<=b_cnt_q-1'b1;
         end
     end
 endmodule

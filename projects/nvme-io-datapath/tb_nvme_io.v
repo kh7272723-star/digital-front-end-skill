@@ -171,16 +171,7 @@ module tb_nvme_io;
         // PRP1 points to host addr 0x1000 (offset 0, 4KB page)
         send_cmd(1, 0, 0, 64'h0000_0000_0000_1000, 64'h0000_0000_0000_0000);
 
-        while (!cpl_valid_o) begin
-            @(posedge clk_i);
-            #1;
-            if ($time > 100000) begin
-                $display("  TIMEOUT@%0t: prp=%0d pg=%0b aw=%0b w=%0b fifo=%0d nvm_en=%0b nvm_v=%0b",
-                         $time, dut.inst_prp.cstate, dut.inst_read.page_live_q,
-                         dut.inst_read.aw_vld_q, dut.inst_read.w_act_q,
-                         dut.inst_read.fifo_cnt_q, dut.nvm_rd_en_o, dut.nvm_rvalid_i);
-            end
-        end
+        while (!cpl_valid_o) @(posedge clk_i);
         $display("  CPL: CID=%0d SQID=%0d STATUS=%0d", cpl_cid_o, cpl_sqid_o, cpl_status_o);
 
         // Verify: host_buf at 0x1000 should match nvm_mem[0..63]
