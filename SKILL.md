@@ -204,6 +204,20 @@ Apply power/timing/area rules from `references/design/power-timing-area.md`: clo
 
 **Module boundary discipline (PH1):** Prefer registered outputs when signals cross module hierarchy boundaries. Combinational outputs from sub-modules (via `assign` or combinational `always @(*)`) create timing closure difficulties, complicate testbench sampling, and risk glitches during state transitions. If a module drives AXI-Stream tvalid/tdata/tlast or APB prdata through purely combinational paths from its sub-modules, the testbench must account for combinational propagation delay, and any state change in the driving FSM creates a window where outputs may glitch before settling. Registered outputs avoid all of these issues at the cost of one cycle of latency. See `references/advanced/physical-awareness-guidelines.md` PH1 and the A/B experiment results in SKILL_CHANGELOG.md.
 
+**NBA ordering pre-check (mandatory for ALL levels — read before writing each `always @(posedge clk_i)` block):**
+
+Read `references/timing/nba-ordering-guide.md` before writing RTL — not just before simulation. NVMe Phase 3 found that 6 of 13 bugs were NBA ordering hazards, and all 6 passed Step 8 structural review. The structural checklist checks THAT `<=` is used; it does not check whether NBA ordering BETWEEN blocks is correct.
+
+Before writing each `always @(posedge clk_i)` block, mentally answer these 3 questions:
+
+1. **"Who reads my output?"** — Every `<=` assignment target. Is it read by another `always @(posedge clk)` block? If yes: that block sees the **pre-NBA** value on this clock edge (IEEE 1364 §5.5 — cross-block order is non-deterministic). Merge both blocks or use a combinational intermediate signal (see Trap 6).
+
+2. **"What am I reading?"** — Every RHS that references a register. Was it just `<=` assigned in the same block? If yes: you are reading the **old** value. Is that correct? (For `cnt_q <= cnt_q + 1` → yes. For reading `fifo_mem[rd_ptr_q]` while also advancing `rd_ptr_q` → data shifts by 1 beat — see Trap 1, 2.)
+
+3. **"Who consumes this combinationally?"** — Does an `assign` or `always @(*)` block read a signal I'm updating via `<=`? Consumer sees **pre-NBA** value (IEEE 1364 §5.3 active region evaluates before NBA). Counters driving registered outputs → 1 cycle lag (Trap 1). Counters driving combinational outputs → current cycle correct.
+
+If any answer reveals a hazard: apply the fix from `references/timing/nba-ordering-guide.md` Layer 3 before writing another line.
+
 ### 7b. Pre-synthesis check (mandatory for L1/L2)
 
 **Before self-review, run Yosys synthesis.** This catches issues that Step 8's manual review often misses, in under 60 seconds:
