@@ -44,7 +44,7 @@ module nvme_read_engine #(parameter AXI_MAX_BURST=64, LBA_SIZE=512, DATA_FIFO_DE
     reg [31:0] nvm_off_q; reg [16:0] pg_rem_q; reg [63:0] pg_host_q;
     reg pg_live_q, pg_nvm_done_q, pg_drain_q;
     reg pg_pend_q; reg [63:0] pend_a_q; reg [16:0] pend_b_q; reg pend_last_q;
-    wire nvm_go=pg_live_q&&(pg_rem_q>0)&&(fcnt_q<DATA_FIFO_DEPTH);
+    wire nvm_go=pg_live_q&&(pg_rem_q>=17'd8)&&(fcnt_q<DATA_FIFO_DEPTH);
     assign nvm_rd_en_o=nvm_go; assign nvm_addr_o=slba_i*LBA_SIZE+nvm_off_q;
     assign nvm_rready_o=1'b1;
 
@@ -75,9 +75,11 @@ module nvme_read_engine #(parameter AXI_MAX_BURST=64, LBA_SIZE=512, DATA_FIFO_DE
             if(nvm_go) begin
                 nvm_off_q<=nvm_off_q+32'd8; pg_rem_q<=pg_rem_q-17'd8;
                 if(pg_rem_q<=17'd8) pg_nvm_done_q<=1;
+            end else if(pg_nvm_done_q&&!pg_drain_q) begin
+                pg_drain_q<=1;
+            end else if(page_drain_done) begin
+                pg_live_q<=0; pg_drain_q<=0;
             end
-            if(pg_nvm_done_q&&!pg_drain_q) pg_drain_q<=1;
-            if(page_drain_done) begin pg_live_q<=0; pg_drain_q<=0; end
         end
     end
 
