@@ -4,6 +4,75 @@
 
 ---
 
+## 2026-06-01 — NVMe Phase 2 规范学习 + nvme-guidelines.md 扩展（NVM I/O 命令集 + PRP 遍历）
+
+### 背景
+
+NVMe Phase 2 需要 NVM Read/Write I/O 命令和 PRP 数据搬运能力。Phase 1 的 nvme-guidelines.md（298 行）仅覆盖 Admin 控制路径。规范也从 1.4c 升级到 2.3。
+
+### 学习的规范
+
+| 规范 | 版本 | 规模 |
+|------|------|:---:|
+| NVM Express Base Specification | 2.3 (2025-08-01) | ~700 页 |
+| NVM Express NVM Command Set Specification | 1.2 (2025-08-01) | ~200 页 |
+
+### 改动文件
+
+| 文件 | 改动 | 行数变化 |
+|------|------|:---:|
+| `references/bus/nvme-guidelines.md` | 新增 §10-§14：NVM I/O 命令集、PRP 遍历算法、数据搬运流程、I/O 命令生命周期、扩展设计约束。更新 Authority 引用到 2.3/1.2。 | 298→683 (+385) |
+| `references/reference-index.md` | 新增 NVMe 索引条目 | +1 |
+
+### 新增 Section 详情
+
+**§10 — NVM I/O Command Set (Read/Write/Flush):**
+- Read (02h), Write (01h), Flush (00h) opcodes
+- SQE DW10-DW15 精确字段映射：SLBA[63:0], NLB[15:0] (0-based), FUA, LR, PRINFO, CETYPE, STC, DTYPE/DSPEC
+- 关键设计约束：NLB=0 意味着 1 个逻辑块（常见 off-by-one 陷阱）
+
+**§11 — PRP Traversal Algorithm:**
+- 64-bit PRP Entry 格式：Page Base Address + Offset
+- PRP2 三种角色判定：Reserved / Second Page / PRP List Pointer
+- PRP List 链式遍历算法（含硬件 Verilog 伪代码）
+- 边界判定公式：`transfer_bytes <= first_page_capacity` vs `<= first_page_capacity + page_size`
+- PRP 错误处理：Offset Invalid, Data Transfer Error
+
+**§12 — I/O Data Transfer Flow:**
+- Read flow (5 阶段)：Command Fetch → PRP Walk → NVM Read → AXI W to Host → CQE Post
+- Write flow (4 阶段)：Command Fetch → PRP Walk → AXI R from Host → NVM Write → CQE Post
+- Flush flow (3 阶段)：Command Fetch → NVM Commit → CQE Post
+- AXI 事务映射表
+
+**§13 — I/O Command Lifecycle:**
+- 完整 Doorbell→CQE 流程（8 步）
+- 多命令并发模型：控制器可乱序执行，CID+SQID 唯一标识
+- Outstanding Command Tracker 设计模板（14 个状态字段）
+
+**§14 — Updated Design Constraints:**
+- P1-P6 原则的 I/O 数据通路扩展：PRP FSM 安全规则、读写通道独立、Outstanding tracker 复位、CQE 发布时序
+
+### 沉淀的设计规则
+
+| # | 规则 | 来源 |
+|---|------|------|
+| 1 | NLB 是 0-based（NLB=0 → 1 block） | NVM Cmd Set §3.3.1 |
+| 2 | PRP1.offset 仅第一页有效，后续页 offset=0 | Base Spec §4.3 |
+| 3 | PRP List 条目必须页对齐（offset=0），末条可指向下一个 List 页 | Base Spec §4.3 |
+| 4 | PRP2 角色由 transfer_bytes 和 page_size 判定 | Base Spec §4.3 (derived algorithm) |
+| 5 | I/O 命令可乱序执行，CQE 发布顺序无保证 | Base Spec §2.1 |
+| 6 | Read 和 Write 到同一 LBA 无排序保证 | Base Spec §3.3.2.1.1 |
+| 7 | FUA=1 要求非易失提交完成后才能发 CQE | NVM Cmd Set §3.3.1/§3.3.4 |
+| 8 | CDW0.PSDT 选择 PRP(00b) 或 SGL(01b/10b)，单命令不可混用 | Base Spec Figure 91 |
+| 9 | PRP List 页内条目必须紧凑排列（packed from entry 0） | Base Spec §4.3 |
+| 10 | Flush 命令无数据搬运，仅 NSID + FB field | Base Spec §7.2 |
+
+### SKILL.md 行数
+
+~345 / 500 行（无变化——改动在 reference 文件）
+
+---
+
 ## 2026-05-31 — 系统架构 Phase 3：Split-Merge Pipeline 验证项目 + 3 条模式修正
 
 ### 验证项目

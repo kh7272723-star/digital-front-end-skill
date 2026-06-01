@@ -45,3 +45,5 @@ projects/test-workflow-round*/
 *.swp
 *.swo
 *~
+nvme-spec-2.3.md
+nvme-nvm-cmd-set-1.2.md

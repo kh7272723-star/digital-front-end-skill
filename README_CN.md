@@ -37,15 +37,15 @@
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # Skill 定义（340 行，三档闸门）
-├── SKILL_CHANGELOG.md                # 完整迭代历史（R5-R8 A/B 实验）
+├── SKILL.md                          # Skill 定义（~345 行，三档闸门）
+├── SKILL_CHANGELOG.md                # 完整迭代历史（R5-R10 A/B 实验 + NVMe Phase 1）
 ├── README.md / README_CN.md          # 本文件
-├── references/                       # 88 个知识文档
+├── references/                       # 90+ 个知识文档
 │   ├── reference-index.md            # 任务到参考文件的映射
 │   ├── timing/                       # 时序语义、合同、命名、协议
 │   ├── architecture/                 # 层次结构、系统合同、集成不变量
 │   ├── axi-dma/                      # AXI full/Lite/Stream、DMA 通道指南
-│   ├── bus/                          # APB、AHB-Lite 协议规则
+│   ├── bus/                          # APB、AHB-Lite、NVMe 协议规则
 │   ├── rtl/                          # 编码指南、FSM/FIFO/流水线/握手示例
 │   ├── patterns/                     # 仲裁器、信用流控、CRC、ECC、宽度转换等
 │   ├── synthesis/                    # CDC、约束、综合指导
@@ -56,7 +56,7 @@ digital-front-end-skill/
 │   └── advanced/                     # 低功耗、DFT、UVM、物理感知
 ├── evals/                            # 63 个评估 prompt、23 个试用、4 个 bug fixture
 ├── scripts/                          # 10 个 Python 脚本
-└── projects/                         # 14 个已验证项目 + A/B 实验
+└── projects/                         # 16 个已验证项目 + A/B 实验（含 NVMe Phase 1、Split-Merge Pipeline）
 ```
 
 ## 核心能力
@@ -112,7 +112,7 @@ R5-R8 实验发现 16 个反复出现的 Icarus 特定 testbench bug。每个陷
 
 ### A/B 实验方法论（4 轮已验证）
 
-R5-R8 实验为工作流决策建立了证据基础。分布式检查点将子系统仿真迭代减少 3×。原则疲劳已确认——6 原则堆在一起会漏 bug。复杂度闸门从数据中校准。
+R5-R10 实验为工作流决策建立了证据基础。分布式检查点将子系统仿真迭代减少 3×。原则疲劳已确认——6 原则堆在一起会漏 bug。R9-R10 验证了 Step 8d 原则驱动 debug（P2/P3 bug 类型）。复杂度闸门从数据中校准。
 
 ## 协议覆盖
 
@@ -123,6 +123,7 @@ R5-R8 实验为工作流决策建立了证据基础。分布式检查点将子�
 | APB | Arm IHI 0024 | apb-guidelines |
 | AHB-Lite | Arm IHI 0033 | ahb-lite-guidelines |
 | AXI4-Stream | Arm IHI 0051 | axi-stream-guidelines |
+| NVMe | NVM Express 2.3 + NVM Cmd Set 1.2 | nvme-guidelines（Admin + NVM I/O + PRP 遍历） |
 
 ## 设计模式目录（18 个）
 
@@ -146,6 +147,8 @@ Ready/valid 寄存器切片、Skid buffer、FIFO、流水线阶段、FSM（双�
 | SPI Master | 复杂 FSM | 5/5 | 6 状态 FSM、首次 Yosys 综合 |
 | **Low-Power SoC** | **子系统** | **28/28** | **LP1-LP7 + PH1-PH4 全验证** |
 | **AXI-S→APB Bridge** | **双协议** | **36/36** | **E2E 工作流验证，发现 B6 pitfall** |
+| **Split-Merge Pipeline** | **流水线** | **5/5** | **3 条模式：反压丢数据、对齐延迟反模式、信号类型不匹配** |
+| **NVMe Admin Engine** | **存储** | **2/2** | **首个领域扩展，5 模块 L2 子系统，AXI 适配器** |
 
 ### A/B 实验轮次
 
@@ -155,6 +158,8 @@ Ready/valid 寄存器切片、Skid buffer、FIFO、流水线阶段、FSM（双�
 | **R6** | **AXI-S 2×2 Switch** | **新：0 RTL bug，旧：2 bug** | **3× 更少迭代，bug 在 Step 5a 被发现** |
 | R7 | Width Converter | 无效（合同不匹配） | 实验设计教训 |
 | R8 | UART TX + I2C | 双方 6/6（UART） | Leaf module 天花板确认 |
+| **R9** | **UART TX（P2 bug）** | **32K tokens, 44s** | **Step 8d Keeper Test 通过** |
+| **R10** | **UART TX（P3 bug）** | **30K tokens, 55s** | **跨原则验证：P2+P3 均有效** |
 
 ## 使用方法
 

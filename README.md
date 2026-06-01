@@ -41,15 +41,15 @@ For large systems (DMA engines, bus bridges, multi-channel controllers), the ski
 
 ```
 digital-front-end-skill/
-├── SKILL.md                          # Skill definition (340 lines, three-tier gate)
-├── SKILL_CHANGELOG.md                # Full iteration history (R5-R8 experiments)
+├── SKILL.md                          # Skill definition (~345 lines, three-tier gate)
+├── SKILL_CHANGELOG.md                # Full iteration history (R5-R10 experiments, NVMe Phase 1)
 ├── README.md / README_CN.md          # This file
-├── references/                       # 88 curated knowledge documents
+├── references/                       # 90+ curated knowledge documents
 │   ├── reference-index.md            # Task-to-reference mapping
 │   ├── timing/                       # Timing semantics, contracts, naming, protocols
 │   ├── architecture/                 # Hierarchy, system contracts, integration invariants
 │   ├── axi-dma/                      # AXI full/Lite/Stream, DMA channel guidelines
-│   ├── bus/                          # APB, AHB-Lite protocol rules
+│   ├── bus/                          # APB, AHB-Lite, NVMe protocol rules
 │   ├── rtl/                          # Coding guidelines, FSM/FIFO/pipeline/handshake examples
 │   ├── patterns/                     # Arbiter, credit-based, CRC, ECC, width converter, etc.
 │   ├── synthesis/                    # CDC, constraints, synthesis guidance
@@ -65,11 +65,15 @@ digital-front-end-skill/
 │   ├── fixtures/                     # 4 bug fixtures for debug evaluation
 │   └── trials/                       # 23 executable RTL + testbench trials
 ├── scripts/                          # 10 Python automation scripts
-├── projects/                         # 14 validated RTL projects + A/B experiments
+├── projects/                         # 16 validated RTL projects + A/B experiments
 │   ├── test-workflow-round5/         # R5: AXI-S FIFO A/B experiment
 │   ├── test-workflow-round6/         # R6: AXI-S 2x2 Switch A/B experiment
-│   ├── test-workflow-round8/         # R8: UART TX + I2C A/B experiment + improvement analysis
-│   ├── test-e2e-validation/          # E2E: AXI-Stream→APB Bridge (36/36, workflow validated)
+│   ├── test-workflow-round8/         # R8: UART TX + I2C A/B experiment
+│   ├── test-workflow-round9/         # R9: Step 8d stress test (P2 FSM bug)
+│   ├── test-workflow-round10/        # R10: Step 8d cross-principle test (P3 bug)
+│   ├── test-e2e-validation/          # E2E: AXI-Stream→APB Bridge (36/36)
+│   ├── pipeline-fork-join/           # Split-Merge Pipeline (5/5, 3 patterns)
+│   ├── nvme-admin-engine/            # NVMe Phase 1: Admin Engine (2/2)
 │   └── ...                           # (13 original validated projects)
 ```
 
@@ -138,9 +142,9 @@ Post-simulation synthesis check: latch detection, combinational loop detection, 
 
 Sub-agent delegation with interface contracts ensuring port width consistency. Step 12 prompt template with mandatory skill loading directive. L2 decomposition recommendation for modules >400 lines. Validated on UART (4 sub-agents), DMA subsystem (4 sub-agents), Low-Power SoC (5 sub-agents), and E2E validation.
 
-### A/B experiment methodology (4 rounds validated)
+### A/B experiment methodology (6 rounds validated)
 
-R5-R8 experiments established the evidence base for workflow decisions. Distributed checkpoints reduce simulation iterations 3× for subsystems. Principle fatigue confirmed — 6-at-once review misses bugs. Complexity gate calibrated from data. See `SKILL_CHANGELOG.md` for full experiment reports.
+R5-R10 experiments established the evidence base for workflow decisions. Distributed checkpoints reduce simulation iterations 3× for subsystems. Principle fatigue confirmed — 6-at-once review misses bugs. R9-R10 validated Step 8d principle-driven debug (P2 and P3 bug types). Complexity gate calibrated from data. See `SKILL_CHANGELOG.md` for full experiment reports.
 
 ## Design philosophy
 
@@ -169,6 +173,7 @@ Default output is plain Verilog. SystemVerilog features are used only when expli
 | APB | Arm IHI 0024 | apb-guidelines |
 | AHB-Lite | Arm IHI 0033 | ahb-lite-guidelines |
 | AXI4-Stream | Arm IHI 0051 | axi-stream-guidelines |
+| NVMe | NVM Express 2.3 + NVM Cmd Set 1.2 | nvme-guidelines (Admin + NVM I/O + PRP traversal) |
 
 ## Design pattern catalog (18)
 
@@ -192,6 +197,8 @@ Ready/valid register slice, skid buffer, FIFO, pipeline stage, FSM (two-process)
 | SPI Master | Complex FSM | 5/5 | 6-state FSM, first Yosys synthesis pass |
 | **Low-Power SoC** | **Subsystem** | **28/28** | **LP1-LP7 + PH1-PH4 validated** |
 | **AXI-S→APB Bridge** | **Dual-protocol** | **36/36** | **E2E workflow validation, B6 pitfall discovered** |
+| **Split-Merge Pipeline** | **Pipeline** | **5/5** | **3 patterns: data-loss under backpressure, alignment delay anti-pattern, signal type mismatch** |
+| **NVMe Admin Engine** | **Storage** | **2/2** | **First domain extension, 5-module L2 subsystem, AXI adapter** |
 
 ### A/B Experiment Rounds
 
@@ -201,6 +208,8 @@ Ready/valid register slice, skid buffer, FIFO, pipeline stage, FSM (two-process)
 | **R6** | **AXI-S 2×2 Switch** | **New: 0 RTL bug, Old: 2 bugs** | **3× fewer iterations, bug at Step 5a** |
 | R7 | Width Converter | Invalid (contract mismatch) | Experimental design lesson |
 | R8 | UART TX + I2C | Both 6/6 (UART) | Leaf module ceiling confirmed |
+| **R9** | **UART TX (P2 bug)** | **32K tokens, 44s** | **Step 8d Keeper Test passed** |
+| **R10** | **UART TX (P3 bug)** | **30K tokens, 55s** | **Cross-principle validation: P2+P3 both verified** |
 
 ## Usage
 

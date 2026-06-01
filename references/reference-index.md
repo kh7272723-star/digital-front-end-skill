@@ -20,6 +20,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - DMA descriptor parsing or burst command generation: also `references/axi-dma/dma-descriptor-burst-guidelines.md`
 - AXI-Lite register blocks or small slaves: `references/axi-dma/axi-lite-guidelines.md`
 - APB, AHB-Lite, or AXI-Stream blocks: `references/bus/apb-guidelines.md`, `references/bus/ahb-lite-guidelines.md`, `references/axi-dma/axi-stream-guidelines.md`
+- NVMe controller design (Admin + NVM I/O commands, PRP traversal, doorbell, queue model, data transfer): `references/bus/nvme-guidelines.md`
 - Architecture tradeoffs: `references/architecture/tradeoff-guidance.md` and `references/architecture/micro-arch-decisions.md`
 - Staged implementation: `references/architecture/staged-bringup-guidelines.md`
 - Arbiters: `references/patterns/advanced-patterns.md` and `references/patterns/arbiter-examples.md`
