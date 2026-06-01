@@ -45,7 +45,26 @@ NVMe Phase 3 的 13 bugs 中 6 个（46%）是 NBA 时序问题——在 G1/G5 �
 
 ### SKILL.md 行数
 
-~338 / 500 行
+~355 / 500 行（+17：NBA pre-check + dev log 引用）
+
+---
+
+## 2026-06-01 — 开发日志标准化 + NBA 预防链
+
+### 开发日志模板
+
+新建 `references/project/development-log-template.md` — L1/L2 项目强制使用。标准化结构：
+- **Bug Tracking Table：** 症状、发现检查点、违反原则、根因、修复、迭代编号——"Found at" 列是 skill 改进最重要的数据
+- **Simulation Iteration Log：** 每次迭代的命令 + 输出 + 修复动作
+- **Principle Review Findings：** 每个检查点（2a/5a/8c）的发现
+- **Design Decision Log：** 每个非显然架构选择 + 替代方案 + 选择理由
+- **Residual Risk Register：** 未修复的已知风险 + 不修复的理由
+
+集成到 SKILL.md Step 7（强制要求）和 reference-index.md。
+
+### NBA 预防链
+
+Step 7 新增 NBA ordering pre-check — 写每个 `always @(posedge clk)` 之前回答 3 问。形成 Step 7（预防）→ Step 8（检测）→ Step 9 Phase 4（诊断）的完整防护链。
 
 ---
 
