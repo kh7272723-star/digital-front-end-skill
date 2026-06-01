@@ -46,6 +46,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - Bug pattern matching: `references/debug/bug-pattern-library.md` and match the module type to known patterns
 - Final review: `references/verification/engineering-review-checklist.md`
 - Existing project: `references/project/project-adaptation-guidelines.md`, `references/project/brownfield-guidance.md`. Large modules: `references/project/large-module-guidance.md`
+- Development log template: `references/project/development-log-template.md` — mandatory for L1/L2. Bug tracking + simulation iteration log + principle review findings + design decision log + residual risk register
 
 ## Verification
 

@@ -204,6 +204,17 @@ Apply power/timing/area rules from `references/design/power-timing-area.md`: clo
 
 **Module boundary discipline (PH1):** Prefer registered outputs when signals cross module hierarchy boundaries. Combinational outputs from sub-modules (via `assign` or combinational `always @(*)`) create timing closure difficulties, complicate testbench sampling, and risk glitches during state transitions. If a module drives AXI-Stream tvalid/tdata/tlast or APB prdata through purely combinational paths from its sub-modules, the testbench must account for combinational propagation delay, and any state change in the driving FSM creates a window where outputs may glitch before settling. Registered outputs avoid all of these issues at the cost of one cycle of latency. See `references/advanced/physical-awareness-guidelines.md` PH1 and the A/B experiment results in SKILL_CHANGELOG.md.
 
+**Development log (mandatory for L1/L2 — maintain throughout the project):**
+
+Use `references/project/development-log-template.md` as your log structure. Start the log at Step 1 and fill it as you go — do NOT reconstruct it from memory at the end. The Bug Tracking Table is the single most valuable artifact for 复盘. Key rules:
+
+- Record every bug in the Bug Tracking Table with: symptom (verbatim FAIL message), found-at checkpoint, violated principle, root cause, fix
+- Log each simulation iteration with the exact iverilog command and output
+- Fill the Design Decision Log whenever you make a non-obvious architectural choice
+- Complete the Residual Risk Register at project completion
+
+The "Found at" column in the Bug Tracking Table is the most important data for skill improvement — it tells us which checkpoints are catching bugs and which are missing them.
+
 **NBA ordering pre-check (mandatory for ALL levels — read before writing each `always @(posedge clk_i)` block):**
 
 Read `references/timing/nba-ordering-guide.md` before writing RTL — not just before simulation. NVMe Phase 3 found that 6 of 13 bugs were NBA ordering hazards, and all 6 passed Step 8 structural review. The structural checklist checks THAT `<=` is used; it does not check whether NBA ordering BETWEEN blocks is correct.
