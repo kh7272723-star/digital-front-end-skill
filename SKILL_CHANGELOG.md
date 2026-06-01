@@ -29,14 +29,19 @@
 | G5: 无诊断方法论 | Step 3.5: structured NBA diagnosis | simulation-loop.md |
 | G6: 规范未强制执行 | Step 7: mandatory read of standards | SKILL.md |
 
-### NBA 问题诊断
+### NBA 问题诊断与修复
 
 NVMe Phase 3 的 13 bugs 中 6 个（46%）是 NBA 时序问题——在 G1/G5 已经入库后仍然高发。根因分析：
 
-1. **碎片化：** NBA 知识分散在 6 个文件（correctness-rules E4, icarus-pitfalls B1/B3/B6, self-review-checklist G1, simulation-loop G5, citation-verification IEEE 1364 §5.3），没有统一的入口
-2. **检查点错位：** G1 在 Step 8（仿真前检查），G5 在 Step 9（仿真失败后诊断）——但 NBA 错误发生在 Step 7（写 RTL 的那一刻）。下游检查不如上游预防
+1. **碎片化：** NBA 知识分散在 6 个文件，没有统一的入口
+2. **检查点错位：** G1 在 Step 8（仿真前检查），G5 在 Step 9（仿真失败后诊断）——但 NBA 错误发生在 Step 7（写 RTL 的那一刻）
 
-**待实施：** Step 7 新增 NBA 预防规则——在写 `always @(posedge clk)` 时强制 agent 评估"同一周期内另一个 always 块是否会读到这个信号的旧值"。
+**修复：** Step 7 新增 **NBA ordering pre-check**（所有 level 强制，不是可选项）。在写每个 `always @(posedge clk)` 块之前，agent 必须回答 3 个问题：
+1. 谁读我的输出？（跨块 NBA → 不确定顺序）
+2. 我读的寄存器刚被赋过值吗？（同块依赖 → 旧值）
+3. 有组合逻辑消费我的输出吗？（active 区域先评估 → pre-NBA 值）
+
+配合已有的 `nba-ordering-guide.md`（266 行，3 层 6 陷阱），形成从 Step 7（预防）→ Step 8（检测）→ Step 9 Phase 4（诊断）的完整 NBA 防护链。
 
 ### SKILL.md 行数
 
