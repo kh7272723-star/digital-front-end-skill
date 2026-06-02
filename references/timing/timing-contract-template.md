@@ -18,6 +18,21 @@ It forces the agent to describe cycle behavior explicitly.
 - boundary behavior
 - illegal or unsupported cases
 
+### Signal units (mandatory for all multi-bit ports)
+
+Every `[N:0]` port must document its physical unit. This prevents the NVMe Phase 3 B18 bug (`bytes_left_q` in bytes compared against `page_bytes_o * 8` → off-by-factor-8).
+
+| Signal | Width | Unit | Example |
+|--------|-------|------|---------|
+| `*_bytes_*` | [N:0] | bytes | `total_bytes_i`: total transfer size in bytes |
+| `*_beats_*` | [N:0] | beats (= bytes / bus_width) | `aw_left_q`: remaining AXI beats for this page |
+| `*_addr_*` | [63:0] | byte address | `page_addr_i`: host physical page address |
+| `*_offset_*` | [N:0] | bytes | `nvm_offset_q`: byte offset within NVM address space |
+| `*_count_*` | [N:0] | items | `b_cnt_q`: number of outstanding B responses |
+| `*_len_*` | [7:0] | beats-1 (AXI convention) | `aw_l_q`: AXI AWLEN = burst beats - 1 |
+
+**Rule:** Any RTL comparison between two signals with different units (e.g., `bytes_left_q` vs `page_bytes_o * (bus_width/8)`) must explicitly show the conversion factor. If the conversion looks like `{zeros, signal, more_zeros}`, it's probably a bug — verify.
+
 ## Cycle contract questions
 
 1. What is visible in the current cycle?

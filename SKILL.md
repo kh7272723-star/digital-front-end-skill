@@ -117,7 +117,29 @@ Summarize the requested block and list open questions. If working in an existing
 
 **L0 note:** Four rounds of A/B experiments (R5-R8) showed that for modules ≤200 lines with linear FSMs, the distributed principle checkpoints (2a/5a) found ZERO bugs. The overhead of writing separate review documents is wasted effort. However, the P3 register audit at 8c consistently catches naming mismatches and initialization gaps even in simple modules — keep that.
 
-**L2 decomposition note:** R8b experiment showed that projects >500 lines / >10 FSM states exceed a single sub-agent's reliable completion window (~600s). The distributed workflow's documentation overhead (~30%) pushes near-limit projects over the edge. When classifying as L2, produce a submodule decomposition plan with interface contracts BEFORE any RTL.
+**L2 decomposition note:** R8b experiment showed that projects >500 lines / >10 FSM states exceed a single sub-agent's reliable completion window (~600s). The distributed workflow's documentation overhead (~30%) pushes near-limit projects over the edge.
+
+### 1.5 L2 fork — subsystem decomposition (mandatory for L2, skip for L0/L1)
+
+**L0/L1 modules proceed directly to Step 2.** L2 subsystems MUST fork here before writing any RTL:
+
+1. **Produce submodule decomposition.** List every module, its purpose, estimated lines, and dependencies. For modules estimated >400 lines, consider further decomposition or assign to dedicated sub-agents.
+
+2. **Write a per-module interface contract for each submodule.** Use `references/architecture/interface-contract-template.md`. Minimum: port list, signal widths, handshake protocol, completion signal type (pulse vs level). Cross-check that producer and consumer port widths match.
+
+3. **For multiple sub-agents:** Use the delegation rules below. The prompt must include the per-module interface contract. Multi-agent coordination follows Step 12.
+
+```
+L0/L1: Step 1 → Step 2 → ... → Step 12
+L2:    Step 1 → Step 1.5 (decompose + per-module contracts)
+              → Step 2-8 per module (in dependency order)
+              → Step 2a-8c applied at subsystem level for integration points
+              → Step 9 → 10 → 12
+```
+
+4. **Per-module contract freeze before RTL.** Every submodule's interface contract must be written and frozen before ANY module's RTL is generated. This prevents the NVMe Phase 1 bug where module interfaces matched but data-path routing was undefined.
+
+**Sub-agent delegation for L2 (formerly Step 12, now invoked here):** Sub-agents do not automatically load this skill and will fall back to training-data anti-patterns. The prompt must include either: (1) a skill loading directive, or (2) inlined critical rules. After delivery, run Step 8 review before accepting. Full prompt template: see `references/architecture/sub-agent-delegation.md`.
 
 If the specification is underspecified or vague (missing protocol details, data widths, error handling, throughput targets, CRC parameters, etc.), run the requirement extraction framework from `references/architecture/requirement-extraction-template.md` before proceeding to Step 2. Classify every design dimension as Required/Implied/Assumed/Unknown. Attach the filled checklist + design decision log to the timing contract. If more than 3 Required dimensions are unanswered, pause and ask the user before writing any RTL.
 
@@ -180,7 +202,11 @@ Fix any issue found in the cycle trace. Only then freeze the trace and proceed t
 
 ### 6. Choose a pattern
 
+**Before choosing a pattern, read the relevant reference.** This is a hard requirement (not optional), same as Step 7's coding standards read. Do not rely on memory or training data.
+
 Pick the safest known template from `references/rtl/` or `references/patterns/`. Explain why it fits. If multiple patterns are plausible, state the tradeoff using `references/architecture/tradeoff-guidance.md`.
+
+For L2 subsystems: each submodule selects its own pattern. Document which pattern each module uses, and verify that the patterns are compatible at integration boundaries (e.g., one module's FWFT FIFO output feeding another's registered input — the latency contract must match).
 
 ### 7. Generate RTL
 
@@ -201,6 +227,16 @@ Before writing RTL, scan against `references/debug/bug-pattern-library.md`: matc
 Write synthesizable code following `references/rtl/rtl-coding-standards.md` and `references/rtl/fsm-examples.md`: clear signal names, explicit reset, one driver per signal, no latches, Verilog-first style, two-process FSM, `cstate`/`nstate` naming.
 
 Apply power/timing/area rules from `references/design/power-timing-area.md`: clock-enable over gating (P1), memory access qualification (P5), bit-width discipline (A3), balanced operator trees (A1). For FPGA targets: DSP/BRAM/SRL inference patterns (A4, A5, P6).
+
+**Per-module standalone compile check (mandatory for L2):** Before integrating modules, each .v file must compile standalone as a top-level module:
+
+```bash
+for f in <module1>.v <module2>.v ...; do
+    iverilog -g2012 -o /dev/null $f || echo "FAIL: $f"
+done
+```
+
+A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to integration.
 
 **Module boundary discipline (PH1):** Prefer registered outputs when signals cross module hierarchy boundaries. Combinational outputs from sub-modules (via `assign` or combinational `always @(*)`) create timing closure difficulties, complicate testbench sampling, and risk glitches during state transitions. If a module drives AXI-Stream tvalid/tdata/tlast or APB prdata through purely combinational paths from its sub-modules, the testbench must account for combinational propagation delay, and any state change in the driving FSM creates a window where outputs may glitch before settling. Registered outputs avoid all of these issues at the cost of one cycle of latency. See `references/advanced/physical-awareness-guidelines.md` PH1 and the A/B experiment results in SKILL_CHANGELOG.md.
 
@@ -231,37 +267,31 @@ If any answer reveals a hazard: apply the fix from `references/timing/nba-orderi
 
 ### 7b. Pre-synthesis check (mandatory for L1/L2)
 
-**Before self-review, run Yosys synthesis.** This catches issues that Step 8's manual review often misses, in under 60 seconds:
-
-```tcl
-read_verilog <all_rtl_files>.v
-hierarchy -check -top <top_module>
-proc; flatten; opt
-select -count t:$_DLATCH_* -list latch_cells
-stat
-```
-
-**Reject-on-sight:**
-- Any latch cell (`$_DLATCH_*`) → fix before proceeding
-- Combinational loop → fix before proceeding  
-- Blocking assignments (`=`) inside `always @(posedge clk)` → some tools warn, Yosys errors on local `reg` declarations in unnamed blocks
-
-**Check and fix:**
-- Implicit wire warnings
-- Width mismatch warnings
-- Unused signal warnings (dead code)
-
-All warnings must be reviewed. Any warning related to your own code must be fixed. Only after synthesis is clean, proceed to Step 8.
-
-**Style and constraint check (mandatory — run alongside yosys):**
+**Before self-review, run the unified pre-simulation gate:**
 
 ```bash
-python scripts/rtl_style_check.py <all_rtl_files>.v
+bash scripts/pre_sim_check.sh --all --top <top_module> <all_rtl_files>.v
 ```
 
-This catches violations that consistently pass Step 8 manual review (agent confirmation bias). Exit code 1 = violations found. Checks: C3 (`default_nettype none`), C19 (if-if chains without else), C21 (one statement per line), NBA Trap 1 (registered counter + registered dependent output in same always block), NBA Trap 2 (registered FIFO data + advancing read pointer), N1 (port `_i`/`_o` suffix).
+This single command runs three checks. All must pass before proceeding to Step 8:
 
-All E-level (error) findings must be fixed before simulation. W-level (warning) findings must be reviewed — fix or document as intentional.
+| Check | Tool | What it catches |
+|-------|------|----------------|
+| Synthesis | `yosys` | Latch inference (`$_DLATCH_*`), combinational loops, blocking `=` in sequential blocks, width mismatch, implicit wires, dead code |
+| Style + NBA traps | `scripts/rtl_style_check.py` | C3 (`default_nettype none`), C19 (if-if chains without else), C21 (one statement per line), NBA Trap 1 (registered counter + registered dependent output), NBA Trap 2 (FIFO pointer + registered data), N1 (port `_i`/`_o` suffix) |
+| Standalone compile | `iverilog -g2012 -o /dev/null <each_file>.v` | Missing FSM logic, undeclared dependencies, incomplete module definitions (NVMe Phase 3 B14) |
+
+**Reject-on-sight (fix before proceeding):**
+- Any latch cell (`$_DLATCH_*`) — always a bug in synchronous design
+- Combinational loop
+- rtl_style_check E-level findings
+- Module failing standalone compilation (L2 only)
+
+**Review-and-fix:**
+- Yosys warnings (width mismatch, implicit wire, unused signal)
+- rtl_style_check W-level findings — fix or document as intentional
+
+Exit code 0 = all gates pass. Exit code 1 = fix the reported issues and re-run. Only after `pre_sim_check.sh --all` exits clean, proceed to Step 8.
 
 ### 8. RTL self-review against skill constraints
 
@@ -384,6 +414,24 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 
 ### 9. Generate verification and run simulation loop
 
+The simulation loop is NOT linear — it involves explicit iteration back to earlier steps. This state machine models the real development path observed across R5-R9 and NVMe Phase 3:
+
+```
+                    ┌──────────────────────────────────┐
+                    │                                  │
+  Step 9 ──> compile ──> simulate ──> ALL_TESTS_PASS ──┤
+               │            │                          │
+               │ FAIL       │ FAIL                     │
+               ▼            ▼                          │
+          Step 7       Step 8d ──> Step 8 ──> Step 7 ──┘
+        (fix RTL)   (principle     (re-review)  (fix)
+                      diagnosis)
+```
+
+- **Compile failure → Step 7:** Fix the Verilog syntax/connectivity issue directly (not a principle violation, just a typo or missing wire). Re-run Step 7b (pre_sim_check) after fix.
+- **Simulation failure → Step 8d → Step 8 → Step 7:** Use principle-driven debug (Phase 4 below) to locate the root cause. After any RTL change, re-run Step 8 self-review on the changed code (debug fixes are the #1 source of constraint violations). Then re-run Step 7b. Only then return to Step 9.
+- **Max 3 fix-and-rerun iterations per Step 9 cycle.** If the 4th iteration still fails, stop and request human review — don't guess.
+
 Provide at least one of: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI designs, use `references/verification/axi-verification.md`.
 
 **Before writing the testbench, read `references/verification/icarus-common-pitfalls.md`.** It documents 15 Icarus-specific pitfalls discovered across R5-R8 experiments — `return`/`break` syntax, APB delta-cycle races, combinational output timing, address aliasing, and more. Most are 2-line fixes that save 1-2 simulation iterations. Also use `references/verification/tb-examples.md` section 0 (standard skeleton) as your starting template.
@@ -419,9 +467,11 @@ If the user provides errors or waveforms, identify the likely cause, propose the
 
 ### 11. Verify timing against the contract and trace
 
-Before finalizing, check RTL against the timing contract and cycle trace: current/next cycle behavior, stall/hold behavior, reset release, boundary behavior, trace invariants. If mismatch, fix before answering. State design maturity level and top residual risks from `references/verification/engineering-review-checklist.md`.
+This check is executed within Step 8 (Signal Type Cross-Check) — not as a separate step. The cross-check verifies that every output's actual RTL behavior (pulse/level/registered) matches its timing contract classification. Cycle trace invariants, stall/hold behavior, and reset release are covered by Step 5a P1+P2 review, re-verified during Step 9 Phase 4 failure analysis.
 
-### 12. Sub-agent delegation
+After simulation passes, state the design maturity level and top residual risks using `references/verification/engineering-review-checklist.md`.
+
+### 12. Sub-agent delegation (reference — invoked at Step 1.5 for L2)
 
 Sub-agents do not automatically load this skill and will fall back to training-data anti-patterns. The prompt must include either: (1) a skill loading directive, or (2) inlined critical rules. After delivery, run Step 8 review before accepting. Full prompt template and multi-module rules: see `references/architecture/sub-agent-delegation.md`.
 

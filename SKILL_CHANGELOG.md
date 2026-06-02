@@ -34,7 +34,48 @@
 
 ### SKILL.md 行数
 
-~347 / 500 行
+~370 / 500 行
+
+---
+
+## 2026-06-01 — 工作流结构优化 + S1-S6 工具链落地（W1-W6 + 4 tooling items）
+
+### 改动
+
+**工作流结构（W1-W6）：**
+
+| # | 改动 | 说明 |
+|:---:|------|------|
+| W1+W2 | Step 1 新增 L2 分叉（Step 1.5） | L2 子系统强制先做分解 + 每模块接口合约，然后逐模块走 Step 2-8。子代理委托从 Step 12 移到这里 |
+| W3+S6 | Step 7 新增每模块独立编译门 | 每个 .v 文件需通过 `iverilog -g2012 -o /dev/null` standalone 编译。防止 NVMe B14（FSM 缺失）类问题 |
+| W4 | Step 6 加强制 pattern 阅读 | 和 Step 7 的 coding standards 阅读同级——"不依赖记忆选模板" |
+| W5 | Step 11 合并到 Step 8 | Signal type cross-check 已覆盖合同时序验证。删除独立 Step 11 避免幽灵步骤 |
+| W6 | Step 9 新增迭代状态机 | 编译失败→Step 7, 仿真失败→8d→8→7, PASS→done。显式建模真实开发循环 |
+
+**工具链（S1-S6 剩余 4 项）：**
+
+| # | 改动 | 文件 |
+|:---:|------|------|
+| S1+S5 | `scripts/pre_sim_check.sh` 新建 | 统一预仿真门：yosys + rtl_style_check + standalone compile。单一命令，exit 0 才能进 Step 8 |
+| S2 | rtl_style_check 集成 | Step 7b 强制运行（上次 commit 已添加） |
+| S3 | NBA 预检示例 | nba-ordering-guide.md L3 已有具体 NVMe 示例 |
+| S4 | timing-contract-template 新增单位列 | 每个多比特端口记录物理单位（bytes/beats/addr/offset/count/len）。防 B18 byte*8 混淆 |
+| S6 | 独立编译检查 | 含在 Step 7（W3）和 pre_sim_check.sh 中 |
+
+### S1-S6 全部落地
+
+```
+S1  ✅  pre_sim_check.sh (yosys 输出解析 + latch 计数)
+S2  ✅  rtl_style_check.py 已集成到 Step 7b
+S3  ✅  nba-ordering-guide.md L3 已添加 NVMe 示例
+S4  ✅  timing-contract-template.md 新增 Signal units
+S5  ✅  pre_sim_check.sh 统一入口
+S6  ✅  Step 7 standalone compile + pre_sim_check.sh --compile
+```
+
+### SKILL.md 行数
+
+~370 / 500 行（+23：L2 fork + 迭代状态机 + pre_sim_check 引用）
 
 ---
 
