@@ -227,8 +227,10 @@ module nvme_read_engine #(
 
         case (aw_cstate)
             AW_IDLE: begin
-                if (aw_page_accepted)
+                if (aw_page_accepted) begin
+                    aw_load_o = 1'b1;
                     aw_nstate = AW_ISSUE;
+                end
             end
 
             AW_ISSUE: begin
@@ -265,8 +267,8 @@ module nvme_read_engine #(
             aw_l_q    <= 0;
             aw_left_q <= 0;
         end else begin
-            // Load new page params (entering AW_ISSUE from AW_IDLE)
-            if (aw_cstate == AW_IDLE && aw_page_accepted) begin
+            // Load new page params (FSM enable)
+            if (aw_load_o) begin
                 aw_a_q    <= aw_next_addr;
                 aw_left_q <= aw_next_beats;
                 aw_l_q    <= (aw_next_beats > AXI_MAX_BURST)
