@@ -185,18 +185,26 @@ module nvme_read_engine #(
                       && last_seen_q;
 
     // ======================================================================
-    // AW Controller (two-process FSM)
+    // AW Controller (two-process FSM + separate datapath, C5/C6/C7)
     // ======================================================================
     localparam AW_IDLE  = 1'b0;
     localparam AW_ISSUE = 1'b1;
 
-    reg        aw_cstate;
-    reg        aw_nstate;
-    reg [63:0] aw_a_q;
-    reg [7:0]  aw_l_q;
-    reg [15:0] aw_left_q;
+    reg aw_cstate;
+    reg aw_nstate;
 
-    // FSM state register
+    // New page accepted (either direct or from pending slot)
+    wire aw_page_accepted = (page_valid_i && !pg_live_q && !pg_pend_q)
+                         || (pg_pend_q && page_drain_done);
+
+    // Select page parameters: pending slot takes priority
+    wire [63:0] aw_next_addr  = pg_pend_q ? pend_a_q    : page_addr_i;
+    wire [15:0] aw_next_beats = pg_pend_q ? pend_b_q[16:3]
+                                          : page_bytes_i[16:3];
+
+    // ==================================================================
+    // Process 1: FSM state register
+    // ==================================================================
     always @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni)
             aw_cstate <= AW_IDLE;
@@ -204,30 +212,35 @@ module nvme_read_engine #(
             aw_cstate <= aw_nstate;
     end
 
-    // New page accepted (either direct or from pending slot)
-    wire aw_page_accepted = (page_valid_i && !pg_live_q && !pg_pend_q)
-                         || (pg_pend_q && page_drain_done);
+    // ==================================================================
+    // Process 2: FSM next-state + single-bit control outputs (C7)
+    // ==================================================================
+    reg aw_load_o;     // load new page params into AW datapath
+    reg aw_advance_o;  // advance address and recalculate after AW handshake
+    reg aw_done_o;     // last burst of page accepted — return to IDLE
 
-    // Select page parameters: pending slot takes priority
-    wire [63:0] aw_next_addr   = pg_pend_q ? pend_a_q    : page_addr_i;
-    wire [15:0] aw_next_beats  = pg_pend_q ? pend_b_q[16:3]
-                                           : page_bytes_i[16:3];
-
-    // FSM next-state
     always @(*) begin
-        aw_nstate = aw_cstate;
+        aw_nstate   = aw_cstate;
+        aw_load_o   = 1'b0;
+        aw_advance_o = 1'b0;
+        aw_done_o   = 1'b0;
+
         case (aw_cstate)
             AW_IDLE: begin
                 if (aw_page_accepted)
                     aw_nstate = AW_ISSUE;
             end
+
             AW_ISSUE: begin
                 if (axi_aw_valid_o && axi_aw_ready_i) begin
-                    if (aw_left_q <= ({8'd0, aw_l_q} + 1))
+                    aw_advance_o = 1'b1;
+                    if (aw_left_q <= ({8'd0, aw_l_q} + 1)) begin
+                        aw_done_o = 1'b1;
                         aw_nstate = AW_IDLE;
-                    // else: stay in AW_ISSUE for next burst
+                    end
                 end
             end
+
             default: aw_nstate = AW_IDLE;
         endcase
     end
@@ -239,38 +252,38 @@ module nvme_read_engine #(
     assign axi_aw_addr_o  = aw_a_q;
     assign axi_aw_len_o   = aw_l_q;
 
-    // AW datapath (sequential, updated on FSM transitions)
+    // ==================================================================
+    // AW datapath registers (sequential, gated by FSM single-bit enables)
+    // ==================================================================
+    reg [63:0] aw_a_q;
+    reg [7:0]  aw_l_q;
+    reg [15:0] aw_left_q;
+
     always @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) begin
             aw_a_q    <= 0;
             aw_l_q    <= 0;
             aw_left_q <= 0;
         end else begin
-            case (aw_cstate)
-                AW_IDLE: begin
-                    if (aw_page_accepted) begin
-                        aw_a_q    <= aw_next_addr;
-                        aw_left_q <= aw_next_beats;
-                        aw_l_q    <= (aw_next_beats > AXI_MAX_BURST)
-                                   ? (AXI_MAX_BURST - 1)
-                                   : (aw_next_beats - 1);
-                    end
-                end
+            // Load new page params (entering AW_ISSUE from AW_IDLE)
+            if (aw_cstate == AW_IDLE && aw_page_accepted) begin
+                aw_a_q    <= aw_next_addr;
+                aw_left_q <= aw_next_beats;
+                aw_l_q    <= (aw_next_beats > AXI_MAX_BURST)
+                           ? (AXI_MAX_BURST - 1)
+                           : (aw_next_beats - 1);
+            end
 
-                AW_ISSUE: begin
-                    if (axi_aw_valid_o && axi_aw_ready_i) begin
-                        aw_a_q <= aw_a_q + ({56'd0, aw_l_q} + 1) * 8;
-                        if (aw_left_q > ({8'd0, aw_l_q} + 1)) begin
-                            aw_left_q <= aw_left_q - ({8'd0, aw_l_q} + 1);
-                            aw_l_q    <= (aw_left_q - ({8'd0, aw_l_q} + 1) > AXI_MAX_BURST)
-                                       ? (AXI_MAX_BURST - 1)
-                                       : (aw_left_q - ({8'd0, aw_l_q} + 1) - 1);
-                        end
-                    end
+            // Advance after AW handshake
+            if (aw_advance_o) begin
+                aw_a_q <= aw_a_q + ({56'd0, aw_l_q} + 1) * 8;
+                if (!aw_done_o) begin
+                    aw_left_q <= aw_left_q - ({8'd0, aw_l_q} + 1);
+                    aw_l_q    <= (aw_left_q - ({8'd0, aw_l_q} + 1) > AXI_MAX_BURST)
+                               ? (AXI_MAX_BURST - 1)
+                               : (aw_left_q - ({8'd0, aw_l_q} + 1) - 1);
                 end
-
-                default: ;
-            endcase
+            end
         end
     end
 
