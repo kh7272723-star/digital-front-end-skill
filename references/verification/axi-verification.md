@@ -387,10 +387,20 @@ covergroup axi_write_cg @(posedge clk_i);
         bins depth5_16  = {[5:16]};
     }
 
-    // WVALID hold behavior (P12: must hold until WLAST)
-    cp_wvalid_gap: coverpoint wvalid_deasserted_before_wlast {
-        bins no_gap  = {0};  // correct
-        bins gap     = {1};  // bug
+    // WVALID behavior (P12): normative per-beat hold plus local mode coverage.
+    cp_wvalid_wait_violation: coverpoint wvalid_or_payload_changed_while_waiting {
+        bins none = {0};  // required
+        bins seen = {1};  // AXI violation
+    }
+
+    cp_wdata_mode: coverpoint wdata_mode {
+        bins continuous = {0};  // local policy: no WVALID gaps before WLAST
+        bins elastic    = {1};  // local policy: legal bubbles between accepted beats
+    }
+
+    cp_elastic_gap: coverpoint wvalid_gap_between_accepted_beats {
+        bins no_gap = {0};
+        bins gap    = {1};  // legal only in elastic mode
     }
 
     // Key crosses
@@ -441,7 +451,8 @@ endgroup
 | T07 | Maximum outstanding | cp_outstanding.depth5_16 |
 | T08 | Zero-length transfer | completion without AXI traffic |
 | T09 | Narrow transfer (size < bus) | cp_size.byte1 with full bus |
-| T10 | WVALID mid-burst stability | cp_wvalid_gap.no_gap |
+| T10 | W beat stability while stalled | cp_wvalid_wait_violation.none |
+| T11 | W data mode coverage | cp_wdata_mode.continuous + cp_wdata_mode.elastic; cp_elastic_gap.gap only in elastic mode |
 
 ---
 
@@ -449,7 +460,7 @@ endgroup
 
 1. **For any AXI module testbench:** Use the BFM tasks (section 1) to drive/monitor transactions. Start with `axi_master_write_burst` and `axi_master_read_burst` for basic functionality.
 
-2. **For DMA designs:** Add the scoreboard (section 2) to verify data integrity. The `golden_mem` approach works for any DMA where source and destination share the same address space in simulation.
+2. **For DMA designs:** Add the scoreboard (section 2) to verify data integrity, but do not stop there. Also check expected AW/AR transaction count, address sequence, burst lengths, WSTRB masks, WLAST/RLAST positions, B/R response error propagation, completion-after-response ordering, and independent backpressure on all AXI channels. Captured data matching by itself can false-pass a broken DMA.
 
 3. **For coverage closure:** Instantiate the covergroups (section 3), run directed tests, then fill uncovered bins with targeted tests. Use the coverage-driven test plan template.
 

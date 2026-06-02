@@ -52,6 +52,8 @@ The core method is:
 
 Treat standards and methodology documents as source material, not as answer text. Hierarchy: (1) user-provided spec, (2) Verilog/SystemVerilog standards, (3) vendor/methodology guidance, (4) established synchronous design practice, (5) this skill's local examples. See `references/timing/authority-synthesis.md`.
 
+For protocol-specific rules, also read `references/timing/protocol-authority-map.md` before making or applying a hard claim. Mark each protocol constraint as **Normative**, **Project policy**, **Conservative pattern**, **Heuristic**, or **Unverified**. Do not say a design "violates AXI/APB/AHB/NVMe" unless the violated behavior is traced to a normative rule in the selected protocol version or to the user's project spec.
+
 ## Reference materials
 
 Read `references/reference-index.md` for a task-to-reference mapping. Key directories:
@@ -166,8 +168,9 @@ Read `references/design/design-principles.md` P4 and P6. Before asking questions
 
 **P4 — Intra-Module Independence (L1/L2 mandatory):** Beyond inter-module channel separation, check independence WITHIN each module:
 
-- [ ] Does the protocol control path (AW/AR issue conditions) depend on data-path state (FIFO count, buffer occupancy)? If yes → **coupling.** Control should check only protocol legality (page boundaries, burst length). Data pacing belongs on the data channel (WVALID gated by `!fifo_empty`).
-- [ ] Does WVALID/RVALID gating include `data_available` / `fifo_count > N`? If yes → **P12 violation + coupling.** WVALID should depend only on `w_active_q`. Data pacing is `!fifo_empty`.
+- [ ] Does the protocol control path (AW/AR issue conditions) depend on unrelated data-path state (FIFO count, buffer occupancy)? If yes, classify the dependency. It is valid only when the timing contract states it as a local resource policy; otherwise it is channel coupling.
+- [ ] For AXI W data, did the contract choose one explicit mode: **continuous/full-burst-buffered** or **elastic/per-beat buffered**? Continuous mode requires enough data before the first W beat. Elastic mode may insert bubbles between accepted W beats, but every asserted beat must hold `WVALID`, `WDATA`, `WSTRB`, and `WLAST` stable until `WREADY`.
+- [ ] Does the design advance beat counters, read FIFOs, or change sideband fields only on `valid && ready`? If not, fix the acceptance condition before RTL.
 - [ ] Does the control FSM read multi-bit data-path registers directly? If yes → move to single-bit enable signals from FSM to datapath (SM1).
 
 Fix contract-level issues now. Document any architectural decisions changed.
@@ -200,7 +203,7 @@ Fix any issue found in the cycle trace. Only then freeze the trace and proceed t
 
 ### 6. Choose a pattern
 
-**Before choosing a pattern, read the relevant reference.** This is a hard requirement (not optional), same as Step 7's coding standards read. Do not rely on memory or training data.
+**Before choosing a pattern, read the relevant reference.** This is a hard requirement (not optional), same as Step 7's coding standards read. Do not rely on memory or training data. For protocol patterns, read `references/timing/protocol-authority-map.md` first and distinguish normative protocol semantics from local conservative implementation policy.
 
 Pick the safest known template from `references/rtl/` or `references/patterns/`. Explain why it fits. If multiple patterns are plausible, state the tradeoff using `references/architecture/tradeoff-guidance.md`.
 
@@ -218,7 +221,7 @@ Before writing code, read the relevant pattern reference:
 - AXI → `references/axi-dma/axi-dma-channel-guidelines.md` or `references/axi-dma/axi-full-guidelines.md`
 - DMA → `references/axi-dma/dma-cdma-examples.md`
 
-Do not rely on memory or training data for style decisions. Read the reference, extract the rule, then write code that follows it.
+Do not rely on memory or training data for style decisions. Read the reference, extract the rule, then write code that follows it. If a protocol reference uses a hard word such as "must", "shall", or "violation", verify whether it is **Normative** or only a **Conservative pattern** before turning it into RTL or an assertion.
 
 Before writing RTL, scan against `references/debug/bug-pattern-library.md`: match the module type and pattern category, state the risk and prevention before coding.
 
@@ -315,6 +318,8 @@ The checklist covers the following categories. Read the reference for the full i
 
 State the review result: PASS (all items checked) or FAIL (list items fixed).
 
+**Protocol authority hygiene (mandatory for AXI/APB/AHB/AXI-Stream/NVMe work):** Before marking protocol review PASS, scan the contract, RTL comments, assertions, and final explanation for unsupported protocol claims. Every "must/shall/violation" must be backed by the selected protocol source or by the user's project spec. Implementation preferences such as "full-burst-buffered WVALID" must be labeled as local policy or conservative pattern, not as a universal protocol rule.
+
 **Signal type cross-check (mandatory for L1/L2):** Before leaving Step 8, cross-check the timing contract's signal classification (from Step 2 and Step 5a) against the actual RTL implementation. This bridges the gap between contract-level P1 review and RTL-level review — and prevents the most common contract-implementation mismatch: a signal classified as "level" in the contract but implemented as a 1-cycle pulse in the RTL.
 
 For every output port classified in the timing contract as **pulse / level / registered**, trace the RTL and verify the implementation produces that behavior:
@@ -367,6 +372,8 @@ If any hazard is found: apply the fix pattern from `references/timing/nba-orderi
 2. **Protocol compliance**: for bus interfaces, verify at least one complete transaction (write + read-back)
 3. **Boundary conditions**: test at least one edge case (empty, full, zero, max)
 4. **Determinism**: same input must produce same output across multiple runs
+
+**DMA/AXI scoreboard minimum:** For DMA or memory-mover testbenches, data comparison alone is not enough. Also check expected AXI transaction count, address sequence, `AWLEN/ARLEN`, `WLAST/RLAST`, `WSTRB` on first/last beats, response error propagation, completion-after-response ordering, and independent backpressure on each channel.
 
 **If functional tests fail after structural PASS:**
 - Do NOT claim the design is correct
@@ -455,7 +462,7 @@ The principle review documents let you locate root causes faster than adding `$d
 After simulation passes, state the design maturity level and top residual risks using `references/verification/engineering-review-checklist.md`. If the user provides errors or waveforms, identify the likely cause, propose the minimal correction, and restate what must be rechecked.
 
 **After any RTL modification (simulation fix, user-requested change, optimization):** re-run the Step 8 self-review checklist on the changed files. Debug-driven fixes are the most common source of constraint violations. Common debug anti-patterns:
-- Adding `data_available` to WVALID to "fix" a hang (P12 violation)
+- Adding `data_available` to WVALID without defining the AXI W data mode. In continuous mode this can break the local no-gap policy; in elastic mode it must still hold each asserted beat stable until `WREADY`.
 - Switching to registered FIFO output to "fix" data timing (F1 violation)
 - Adding a combinational `_d` block to "fix" counter logic (SM2 violation)
 - Coupling read/write burst-ready to "fix" ordering (anti-pattern)

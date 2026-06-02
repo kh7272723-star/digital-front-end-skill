@@ -5,6 +5,8 @@
 Use this file before adding or changing protocol-specific rules.
 Protocol guidance in this skill should be distilled from official standards or project-owned specifications, not from random code examples.
 
+Protocol reference files must separate specification facts from local engineering policy. A rule can be written as a hard requirement only when it is marked **Normative** and tied to an official source or user-provided spec.
+
 ## Source priority
 
 1. User-provided project protocol specification.
@@ -59,6 +61,32 @@ For each protocol rule, record:
 - response or error timing,
 - RTL state needed to implement it,
 - verification check that would catch a violation.
+
+## Authority labels
+
+Use one of these labels for every protocol-specific `must`, `shall`, `required`, or `violation` statement:
+
+| Label | Meaning | Allowed wording |
+| --- | --- | --- |
+| **Normative** | Direct protocol requirement from the selected official spec or user spec. | `must`, `shall`, `protocol violation` |
+| **Project policy** | Local contract chosen for this design, stricter than or narrower than the protocol. | `local requirement`, `project requires` |
+| **Conservative pattern** | Recommended RTL pattern that avoids common bugs but is not the only legal protocol implementation. | `recommended`, `safe default`, `prefer` |
+| **Heuristic** | Experience-based design guidance or performance advice. | `usually`, `often`, `watch for` |
+| **Unverified** | Claim not yet checked against a primary source. | never use `must`; mark as a question or remove |
+
+Do not convert a **Conservative pattern** into a **Normative** rule. This was the root cause of the P12 WVALID error: a fully-buffered, continuous-WVALID implementation policy was incorrectly described as an AXI protocol requirement for every burst.
+
+## Known correction: AXI WVALID within a burst
+
+Arm AMBA AXI defines VALID/READY stability per transfer item: once a source asserts VALID for an address, data, or control item, VALID and its associated information remain stable until the handshake occurs. The AXI rule does **not** by itself require WVALID to remain continuously asserted from the first accepted W beat through WLAST.
+
+Therefore:
+
+- **Normative:** if `WVALID=1` and `WREADY=0`, hold `WVALID`, `WDATA`, `WSTRB`, and `WLAST` stable until that beat handshakes.
+- **Normative:** advance the W beat counter only on `WVALID && WREADY`; assert `WLAST` on the final accepted beat.
+- **Conservative pattern:** require a full-burst buffer before asserting the first W beat, then keep WVALID continuous through WLAST.
+- **Project policy:** a DMA design may choose continuous WVALID to simplify timing and verification, but the contract must say so explicitly.
+- **Heuristic:** WVALID bubbles between accepted beats are legal only if the design's selected contract allows elastic W data and the design proves no data is lost, duplicated, or deadlocked.
 
 ## Rule conflicts
 

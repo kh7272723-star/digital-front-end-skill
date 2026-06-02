@@ -80,13 +80,15 @@ All `<=` assignments in the same `always @(posedge clk)` block are evaluated wit
 
 - [ ] Completion on B response, not last W beat — P4
 - [ ] WVALID holds until WREADY — P11
-- [ ] WVALID holds for entire burst (no mid-burst deassertion) — P12, IHI0022E A3.3.1
+- [ ] W channel mode declared: continuous/full-burst-buffered or elastic/per-beat buffered — P12
+- [ ] WVALID/WDATA/WSTRB/WLAST stable while `WVALID && !WREADY` — P12, IHI0022 A3.3
+- [ ] Continuous mode only: WVALID holds through WLAST and full-burst data is available before start — local policy
+- [ ] Elastic mode only: WVALID bubbles are allowed by contract and covered by no-underflow/liveness checks — local policy
 - [ ] ARVALID/AWVALID hold until corresponding READY — P11, IHI0022E A3.3.1
 - [ ] VALID not dependent on READY (no combinational path) — IHI0022E A3.3.2
 - [ ] Write engine does NOT use sequential AW→W→B FSM — P13, use independent AW/W/B controllers
 - [ ] AW/W/B channels have independent valid/ready control — `axi-dma-channel-guidelines.md`
-- [ ] Data FIFO depth >= max burst length, or burst-ready gate on WVALID — P12
-- [ ] WVALID does NOT depend on FIFO empty/full state mid-burst — P12
+- [ ] Data FIFO pop and W beat counter advance only on `WVALID && WREADY` — P12
 - [ ] 4KB boundary: `12'h1000`, not `12'h800`
 - [ ] WSTRB last beat: handle `last_offset == 0` (all bytes valid)
 

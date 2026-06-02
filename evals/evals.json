@@ -839,6 +839,21 @@
         "Testbench verifies that operand isolation reduces switching activity.",
         "Output references low-power guidelines and power-timing-area P1/P3."
       ]
+    },
+    {
+      "id": 64,
+      "prompt": "Review this AXI write-channel claim before writing RTL: 'IHI0022 says once WVALID is asserted for the first beat of a burst, WVALID must stay high continuously until WLAST; therefore WVALID = w_active && !fifo_empty is always a protocol violation.' Correct the claim, state the real AXI rule, and propose assertions and DMA testbench checks. Reference the protocol authority map and AXI DMA channel guidelines.",
+      "expected_output": "A protocol-authority review that distinguishes AXI normative per-beat VALID stability from local continuous/full-burst-buffered policy, then proposes correct assertions and DMA checks.",
+      "files": [],
+      "assertions": [
+        "Output says WVALID must hold for a presented beat while WREADY is low, with WDATA/WSTRB/WLAST stable.",
+        "Output says bubbles between accepted W beats are not automatically an AXI protocol violation.",
+        "Output labels continuous WVALID through WLAST as a local policy or conservative pattern, not a universal AXI rule.",
+        "Output gives separate guidance for continuous/full-burst-buffered mode and elastic/per-beat buffered mode.",
+        "Output proposes a per-beat stability assertion and does not require a no-gap assertion unless continuous mode is selected.",
+        "Output recommends DMA testbench checks beyond data comparison: beat count, address sequence, AWLEN, WLAST, WSTRB, responses, and completion ordering.",
+        "Output references protocol-authority-map.md or protocol-authority-audit.md and axi-dma-channel-guidelines.md."
+      ]
     }
   ]
 }

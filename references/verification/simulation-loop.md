@@ -170,7 +170,7 @@ TEST_PASS test_normal_burst
 TEST_START test_boundary_4kb
 TEST_PASS test_boundary_4kb
 TEST_START test_backpressure
-TEST_FAIL test_backpressure: WVALID deasserted mid-burst at cycle 142
+TEST_FAIL test_backpressure: W beat changed while WREADY=0 at cycle 142
 ALL_TESTS_PASS
 SIMULATION_DONE
 ```
@@ -239,7 +239,8 @@ Check the failure against `references/debug/bug-pattern-library.md`:
 
 | Failure message pattern | Likely bug pattern |
 |------------------------|-------------------|
-| "WVALID deasserted mid-burst" | P12 |
+| "W beat changed while WREADY=0" | P12 |
+| "WVALID gap before WLAST in continuous mode" | P12 |
 | "VALID dropped before READY" | H1, H8 |
 | "Data changed while valid high" | H1 |
 | "FIFO overflow/underflow" | H1 (boundary) |

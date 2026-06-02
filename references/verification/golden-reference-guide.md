@@ -82,6 +82,18 @@ This file defines the golden reference methodology: how to create expected-value
 
 **Pattern selection:** Use known patterns (0x01, 0x02, ..., 0xFF) or pseudo-random with fixed seed for reproducibility.
 
+**DMA and bus-master extension:** A data scoreboard alone can false-pass a broken DMA. For memory movers and bus masters, the golden checker must also track the transaction shape:
+
+1. Expected command count versus observed `AW/AR` handshakes
+2. Expected address sequence, including unaligned first beat and 4KB boundary splits
+3. Expected `AWLEN/ARLEN`, `WLAST/RLAST`, and exact beat count
+4. Expected `WSTRB` masks on first, middle, and last beats
+5. `B`/`R` response capture and error propagation into completion status
+6. Completion only after required write responses or read data beats have been observed
+7. Independent backpressure on every AXI channel, not a permanently-ready happy path
+
+If the testbench only iterates over captured output beats and never checks how many beats should have appeared, it can pass when the DUT silently emits too few transactions.
+
 ---
 
 ## Strategy E: Invariant Checking

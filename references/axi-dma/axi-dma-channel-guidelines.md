@@ -19,9 +19,9 @@ Treat each AXI channel as independently backpressured:
 Do not merge channels into one transaction handshake in RTL or explanation.
 Each channel needs an owner, acceptance condition, held payload rule, outstanding counter, and error path.
 
-## AXI handshake hard rules (IHI0022E Section A3.3)
+## AXI handshake rules and local W-channel policies (Arm IHI 0022 Section A3.3)
 
-These are normative requirements from the AXI specification. Violations cause protocol errors, deadlocks, or slave hangs.
+The first five rules are normative AXI handshake requirements. W-channel buffering mode is a local design policy and must not be described as a universal AXI requirement.
 
 **A3.3.1 — Handshake process:**
 
@@ -37,25 +37,24 @@ These are normative requirements from the AXI specification. Violations cause pr
 
 5. **READY may depend on VALID.** A destination may base its READY assertion on the VALID signal. This is allowed and does not create combinational loop risk.
 
-**Burst-specific rules (W channel):**
+**W-channel burst rules:**
 
-6. **WVALID must hold for entire burst.** Once WVALID is asserted for the first beat of a write burst, it must remain asserted for every beat until WLAST is accepted. There is no provision for pausing or gapping WVALID within a burst. The only safe ways to start a write burst are:
-   - (a) All burst data is already buffered (FIFO depth >= max burst length), or
-   - (b) WVALID is gated by a burst-ready signal that guarantees data availability for the full burst.
+6. **Per-beat WVALID stability is normative.** If `WVALID=1` and `WREADY=0`, the master must keep `WVALID`, `WDATA`, `WSTRB`, and `WLAST` stable until that beat handshakes. Dropping `WVALID` before a presented beat is accepted is a protocol violation.
 
-   **WVALID must NOT depend on FIFO empty/full state mid-burst.** The common anti-pattern `WVALID = w_active_q && data_available` (where `data_available = !fifo_empty`) violates P12: if the FIFO empties mid-burst, WVALID deasserts, creating a protocol violation. The correct pattern is:
-   - Before burst start: check that FIFO has enough data for the full burst (`fifo_count >= burst_length`)
-   - During burst: WVALID depends only on `w_active_q`, NOT on `data_available`
-   - If FIFO depth >= max burst length, the pre-check is always satisfied and can be simplified
+7. **Continuous WVALID across a whole burst is a local policy, not an AXI hard rule.** A design may choose continuous/full-burst-buffered mode to simplify counters and verification. In that mode, check that all burst data is available before the first W beat and keep `WVALID` asserted until the `WLAST` beat handshakes.
 
-   See the burst-ready gate pattern below for the correct implementation.
+8. **Elastic W data mode is legal only with an explicit contract.** In elastic/per-beat buffered mode, `WVALID` may have bubbles between accepted W beats, but the design must prove no FIFO underflow, no data drop, correct `WLAST`, and bounded progress if the project requires a latency bound.
 
-7. **WLAST must coincide with the final WVALID beat.** WLAST must be asserted on the last valid beat of the burst, and must not be asserted before all beats have been issued.
+9. **WLAST must coincide with the final accepted W beat.** `WLAST` is meaningful only with a valid W beat, and the beat counter must advance only on `WVALID && WREADY`.
 
 **RTL enforcement checklist (apply during self-review):**
 - [ ] ARVALID/AWVALID hold until corresponding READY (rule 2) — check `ar_pending_q`/`aw_pending_q` logic
-- [ ] WVALID holds from first beat to WLAST (rule 6) — check `w_active_q` gating
-- [ ] VALID not gated by non-protocol conditions like outstanding count (rule 4) — check that VALID depends only on data availability, not on FIFO count or flow control state
+- [ ] WVALID, WDATA, WSTRB, and WLAST hold stable while `WVALID && !WREADY` (rule 6)
+- [ ] W beat counter, FIFO pop, and WLAST update only on `WVALID && WREADY`
+- [ ] W data mode is declared: continuous/full-burst-buffered or elastic/per-beat buffered
+- [ ] Continuous mode only: WVALID holds from first presented beat to WLAST and full-burst data availability is checked before start
+- [ ] Elastic mode only: WVALID bubbles between accepted beats are covered and bounded by local liveness policy
+- [ ] VALID assertion does not wait for READY; local resource checks occur before VALID is asserted, then VALID holds until handshake
 - [ ] RVALID/BVALID hold until READY (rule 2) — applies to slave-side logic
 - [ ] No combinational path from VALID to READY or READY to VALID (rules 4, 5)
 
@@ -287,9 +286,9 @@ assign all_done = (b_outstanding_q == 8'd0) && all_w_sent;
 ```
 
 Key properties:
-- AW can be accepted before W data is ready (no coupling)
-- W can stall independently of AW (payload holds via `w_pending_q`)
-- WVALID does NOT depend on FIFO state mid-burst (P12 compliant)
+- AW can be accepted before W data is ready when the design has independent W command/data tracking
+- W can stall independently of AW; every presented W beat holds payload stable until `WREADY`
+- This example uses continuous/full-burst-buffered W mode as a conservative local policy
 - B is always accepted (no backpressure from master to slave on B)
 - Completion requires `b_outstanding_q == 0` after all W beats sent
 - Data FIFO must use FWFT output (combinational read) — see `references/rtl/fifo-examples.md`
@@ -315,10 +314,10 @@ Write engine architecture (no single FSM for AW+W+B):
 └──────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────┐
-│  W controller (beat counter + WVALID hold)       │
-│  w_active_q: set when data ready, clear on WLAST │
+│  W controller (beat counter + per-beat hold)     │
+│  w_active_q: set by selected W data mode         │
 │  w_beat_cnt_q: counts beats, WLAST on count==0   │
-│  WVALID = w_active_q (NOT data_available)        │
+│  WVALID holds each presented beat until WREADY   │
 │  Data from FWFT FIFO, popped on W fire           │
 └──────────────────────────────────────────────────┘
 
@@ -347,6 +346,7 @@ module axi_wr_engine #(
     output wire                    cmd_ready_o,
     input  wire [ADDR_WIDTH-1:0]  cmd_addr_i,
     input  wire [7:0]             cmd_len_i,
+    input  wire                   cmd_wdata_ready_i,  // continuous mode: full burst buffered
     // Data FIFO
     input  wire [DATA_WIDTH-1:0]  dfifo_rdata_i,
     input  wire                   dfifo_empty_i,
@@ -372,16 +372,17 @@ module axi_wr_engine #(
     wire b_fire  = m_axi_bvalid_i  & m_axi_bready_o;
 
     // ── AW controller: independent pending register ──
-    wire can_issue_aw = !m_axi_awvalid_o && (b_outstanding_q < MAX_OUTSTANDING);
-    assign cmd_ready_o = can_issue_aw;
+    wire can_issue_aw  = !m_axi_awvalid_o && (b_outstanding_q < MAX_OUTSTANDING);
+    wire can_accept_cmd = can_issue_aw && cmd_wdata_ready_i;
+    assign cmd_ready_o = can_accept_cmd;
 
     always @(posedge clk_i) begin
         if (rst_i) m_axi_awvalid_o <= 1'b0;
         else if (aw_fire) m_axi_awvalid_o <= 1'b0;
-        else if (cmd_valid_i && can_issue_aw) m_axi_awvalid_o <= 1'b1;
+        else if (cmd_valid_i && can_accept_cmd) m_axi_awvalid_o <= 1'b1;
     end
     always @(posedge clk_i) begin
-        if (cmd_valid_i && can_issue_aw) begin
+        if (cmd_valid_i && can_accept_cmd) begin
             m_axi_awaddr_o <= cmd_addr_i;
             m_axi_awlen_o  <= cmd_len_i;
         end
@@ -390,19 +391,18 @@ module axi_wr_engine #(
     // ── W controller: independent beat counter ──
     reg [7:0] w_beat_cnt_q;
 
-    // WVALID: holds for entire burst (P12)
-    // Depends ONLY on w_active_q — NOT on FIFO state mid-burst
-    // Pre-condition: burst_ready guarantees FIFO has enough data before start
+    // Continuous-mode W policy: local conservative pattern, not an AXI hard rule.
+    // Pre-condition: cmd_wdata_ready_i guarantees the full burst is buffered.
     always @(posedge clk_i) begin
         if (rst_i) m_axi_wvalid_o <= 1'b0;
         else if (w_fire && m_axi_wlast_o) m_axi_wvalid_o <= 1'b0;
-        else if (cmd_valid_i && can_issue_aw) m_axi_wvalid_o <= 1'b1;
+        else if (cmd_valid_i && can_accept_cmd) m_axi_wvalid_o <= 1'b1;
     end
 
     // Beat counter: load on burst accept, decrement on W fire
     always @(posedge clk_i) begin
         if (rst_i) w_beat_cnt_q <= 8'd0;
-        else if (cmd_valid_i && can_issue_aw) w_beat_cnt_q <= cmd_len_i;
+        else if (cmd_valid_i && can_accept_cmd) w_beat_cnt_q <= cmd_len_i;
         else if (w_fire) w_beat_cnt_q <= w_beat_cnt_q - 1'b1;
     end
 
@@ -456,34 +456,34 @@ assign burst_ready_o = ~aw_pending_q & ~w_active_q & (b_outstanding_q < MAX_OUTS
 
 This allows the burst planner to feed new bursts while B responses are still in flight, matching the read master's `ar_outstanding_q` pattern.
 
-## Anti-pattern: WVALID depends on FIFO state mid-burst
+## Anti-pattern: W data mode is implicit or under-specified
 
-The pattern `WVALID = w_active_q && data_available` (where `data_available = !fifo_empty`) is a P12 violation. If the FIFO empties mid-burst — because the read engine hasn't caught up, or the DMA command is smaller than expected — WVALID deasserts mid-burst, which is an AXI protocol error.
+The pattern `WVALID = w_active_q && data_available` (where `data_available = !fifo_empty`) is not automatically an AXI violation. It is wrong when the design claims continuous/full-burst-buffered W mode but still allows the FIFO to empty before `WLAST`. In elastic/per-beat mode, the same gating may be legal, but it must hold each presented beat stable while `!WREADY` and must not drop accepted data.
 
-**Wrong pattern:**
+**Bug pattern for continuous mode:**
 ```verilog
-// BUG: WVALID drops if FIFO empties mid-burst
+// BUG in continuous mode: WVALID can gap before WLAST
 wire data_available = !dfifo_empty_i;
 always @(posedge clk_i) begin
     if (rst_i) m_axi_wvalid_o <= 1'b0;
-    else       m_axi_wvalid_o <= w_active_q && data_available;  // P12 violation
+    else       m_axi_wvalid_o <= w_active_q && data_available;
 end
 ```
 
-**Correct pattern: burst-ready gate**
+**Correct pattern for continuous mode: burst-ready gate**
 
-WVALID must depend only on `w_active_q` once a burst starts. The burst-ready check happens BEFORE the burst starts, not during:
+In continuous mode, `WVALID` depends only on the active burst state once the burst starts. The full-burst-ready check happens before the burst is accepted:
 
 ```verilog
 // Pre-burst: check FIFO has enough data for the full burst
 wire burst_ready = (dfifo_count >= burst_length) && !w_active_q;
 
-// WVALID: depends ONLY on w_active_q, not on data_available
+// WVALID: continuous local policy, depends on w_active_q after burst start
 always @(posedge clk_i) begin
     if (rst_i) m_axi_wvalid_o <= 1'b0;
     else if (w_fire && m_axi_wlast_o) m_axi_wvalid_o <= 1'b0;  // burst ends
     else if (burst_start) m_axi_wvalid_o <= 1'b1;               // burst starts
-    // WVALID holds for entire burst — no data_available dependency
+    // Local policy: no WVALID gaps until WLAST
 end
 
 // Data FIFO read: FWFT output, popped on W fire
@@ -493,9 +493,31 @@ assign dfifo_rd_en_o = w_fire;
 
 **Why this works:**
 - `burst_ready` guarantees FIFO has enough data BEFORE WVALID asserts
-- Once WVALID asserts, it holds until WLAST — FIFO state is irrelevant
+- Once WVALID asserts, this local policy holds it until WLAST
 - FWFT FIFO output provides data combinationally, no read latency
 - If FIFO depth >= max burst length, `burst_ready` simplifies to `!w_active_q`
+
+**Correct pattern for elastic mode: per-beat availability with sticky presented beat**
+
+```verilog
+// Elastic mode: bubbles between accepted W beats are allowed by the local contract.
+// Once a beat is presented, it remains presented until WREADY.
+always @(posedge clk_i) begin
+    if (rst_i) begin
+        m_axi_wvalid_o <= 1'b0;
+    end else if (m_axi_wvalid_o && !m_axi_wready_i) begin
+        m_axi_wvalid_o <= 1'b1;        // hold current beat
+    end else if (have_next_wbeat) begin
+        m_axi_wvalid_o <= 1'b1;        // present next beat
+    end else begin
+        m_axi_wvalid_o <= 1'b0;        // legal bubble between beats
+    end
+end
+
+assign dfifo_rd_en_o = have_next_wbeat && (!m_axi_wvalid_o || m_axi_wready_i);
+```
+
+Elastic mode still needs assertions for per-beat stability, FIFO underflow prevention, correct `WLAST`, and local liveness if the system cannot tolerate unbounded gaps.
 
 **When FIFO depth >= max burst length:**
 If the FIFO is always large enough (e.g., depth=1024, max burst=256), the `fifo_count >= burst_length` check is always true. In this case, simplify to:

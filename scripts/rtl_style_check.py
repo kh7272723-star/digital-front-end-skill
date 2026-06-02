@@ -258,6 +258,125 @@ def check_default_nettype(lines):
         return
 
 
+def strip_comments(lines):
+    """Return code text with line comments removed."""
+    return [line.split('//')[0] for line in lines]
+
+
+def check_axi_parameter_traps(lines):
+    """Catch common AXI burst width traps."""
+    for i, raw in enumerate(lines, 1):
+        code = raw.split('//')[0]
+        if re.search(r'parameter\s+\w*MAX_BURST\w*\s*=\s*256\b', code):
+            warn('W', 'AXI1', i,
+                 "MAX_BURST=256 cannot be stored directly in 8 bits; "
+                 "AXI AxLEN encodes beats-1, so 256 beats is AxLEN=8'd255")
+        if re.search(r'\[\s*7\s*:\s*0\s*\]\s+\w*MAX_BURST\w*', code):
+            warn('W', 'AXI1', i,
+                 "8-bit max-burst storage cannot represent value 256; "
+                 "store beats-1 or use a wider internal count")
+
+
+def check_unused_response_inputs(lines):
+    """Warn when protocol response inputs are declared but never consumed."""
+    code_text = '\n'.join(strip_comments(lines))
+    for i, raw in enumerate(lines, 1):
+        code = raw.split('//')[0]
+        m = re.search(r'\binput\b(?:\s+wire|\s+reg)?(?:\s*\[[^\]]+\])?\s+(\w*(?:resp|bresp|rresp)\w*_i)\b', code)
+        if not m:
+            continue
+        name = m.group(1)
+        if len(re.findall(r'\b' + re.escape(name) + r'\b', code_text)) <= 1:
+            warn('W', 'PRESP1', i,
+                 f"response input '{name}' is declared but not used; "
+                 "protocol errors may be dropped instead of reaching completion status")
+
+
+def check_constant_valid_outputs(lines):
+    """Warn on valid-like outputs tied to zero, a common unfinished stub."""
+    for i, raw in enumerate(lines, 1):
+        code = raw.split('//')[0]
+        if re.search(r'\bassign\s+\w*valid\w*_o\s*=\s*1\'b0\s*;', code):
+            warn('W', 'STUB1', i,
+                 "valid-like output is tied to 0; document as intentional stub or implement handshake")
+
+
+def check_ready_high_fifo_drop(lines):
+    """Warn when a source is always ready but data is accepted only if FIFO is not full."""
+    code_text = '\n'.join(strip_comments(lines))
+    ready_names = []
+    for i, raw in enumerate(lines, 1):
+        code = raw.split('//')[0]
+        m = re.search(r'\bassign\s+(\w*ready\w*_o)\s*=\s*1\'b1\s*;', code)
+        if m:
+            ready_names.append((i, m.group(1)))
+
+    if not ready_names:
+        return
+
+    fifo_gated_write = re.search(
+        r'\b\w*(?:wr_en|push|write)\w*\s*=\s*[^;\n]*\b\w*valid\w*_i\b[^;\n]*&&\s*!?\s*\w*full\w*',
+        code_text)
+    if not fifo_gated_write:
+        return
+
+    for line_no, ready_name in ready_names:
+        if re.search(r'b_?ready', ready_name):
+            continue
+        if not re.search(r'(?:rready|wready|tready)', ready_name):
+            continue
+        warn('W', 'FLOW1', line_no,
+             f"'{ready_name}' is tied high while FIFO write is gated by full; "
+             "upstream data can be dropped unless ready reflects storage availability")
+
+
+def check_start_same_cycle_old_q(lines):
+    """Warn when start_i captures a register and reads it again in the same clock block."""
+    in_seq = False
+    in_start = False
+    start_depth = 0
+    captured = set()
+
+    for i, raw in enumerate(lines, 1):
+        code = raw.split('//')[0]
+
+        if re.search(r'always\s*@\s*\(\s*posedge', code):
+            in_seq = True
+            in_start = False
+            start_depth = 0
+            captured = set()
+            continue
+
+        if not in_seq:
+            continue
+
+        if re.match(r'\s*end\b', code) and not in_start:
+            in_seq = False
+            continue
+
+        if re.search(r'\bif\s*\(\s*start_i\s*\)', code):
+            in_start = True
+            start_depth = 0
+            captured = set()
+
+        if in_start:
+            m = re.match(r'\s*(\w+_q)\s*<=\s*[^;]+;', code)
+            if m:
+                lhs = m.group(1)
+                rhs = code.split('<=', 1)[1]
+                for prev in captured:
+                    if prev != lhs and re.search(r'\b' + re.escape(prev) + r'\b', rhs):
+                        warn('W', 'NBA3', i,
+                             f"start_i block reads '{prev}' after assigning it with <= in same block; "
+                             "RHS uses the old value. Use a combinational intermediate.")
+                captured.add(lhs)
+
+            start_depth += len(re.findall(r'\bbegin\b', code))
+            start_depth -= len(re.findall(r'\bend\b', code))
+            if start_depth <= 0 and re.search(r'\bend\b', code):
+                in_start = False
+
+
 def check_file(filepath):
     global FILE, OUT
     FILE = filepath
@@ -274,6 +393,11 @@ def check_file(filepath):
     check_nba_trap1(lines)
     check_nba_trap2(lines)
     check_port_suffix(lines)
+    check_axi_parameter_traps(lines)
+    check_unused_response_inputs(lines)
+    check_constant_valid_outputs(lines)
+    check_ready_high_fifo_drop(lines)
+    check_start_same_cycle_old_q(lines)
 
 
 def main():

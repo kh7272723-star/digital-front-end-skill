@@ -102,15 +102,17 @@ assign done_o = b_done_level && !b_done_prev_q;  // rising-edge pulse
 
 ### WVALID / FIFO relationship
 
-State explicitly whether WVALID depends on FIFO state:
+State explicitly which W data mode the design uses and how WVALID depends on FIFO state:
 
 | Pattern | Correct? | When acceptable |
 |---------|----------|-----------------|
-| `WVALID = w_active_q` | ✅ | Always (FIFO pre-validated before burst start) |
-| `WVALID = w_active_q && data_available` | ❌ | Never — P12 violation if FIFO empties mid-burst |
-| `WVALID = w_active_q && burst_ready` | ✅ | When burst_ready checks FIFO count >= burst length |
+| `WVALID = w_active_q` | ✅ | Continuous mode: full burst buffered before start |
+| `WVALID = w_active_q && data_available` | ⚠️ | Elastic mode only: legal but must hold each presented beat until `WREADY`. In continuous mode this is a local-policy violation (WVALID can gap before `WLAST`). |
+| `WVALID = w_active_q && burst_ready` | ✅ | Continuous mode: `burst_ready` checks `fifo_count >= burst_length` |
 
-See `references/axi-dma/axi-dma-channel-guidelines.md` for the burst-ready gate pattern.
+**Per-beat stability (normative, both modes):** once `WVALID=1`, keep `WVALID`/`WDATA`/`WSTRB`/`WLAST` stable until that beat handshakes (`WREADY=1`).
+
+See `references/axi-dma/axi-dma-channel-guidelines.md` for continuous-mode burst-ready gate and elastic-mode per-beat availability patterns.
 
 ### Registered output sampling in bridges and converters
 

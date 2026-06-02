@@ -1937,55 +1937,42 @@ assert property (@(posedge clk) bvalid && !bready |-> ##1 bvalid);
 
 ---
 
-### P12: WVALID deasserted mid-burst
+### P12: AXI W data mode mismatch or beat dropped under stall
 
 **Category:** protocol
 **Frequency:** high
 **Applies to:** any AXI write master that sources W data from a FIFO or buffer
 
-**Symptom:** WVALID asserts for the first few beats of a write burst, then deasserts mid-burst because the data source (FIFO) empties. Slave receives an incomplete burst. May cause protocol violation, data corruption, or slave hang.
+**Symptom:** A write burst loses data, asserts `WLAST` on the wrong beat, underflows its data FIFO, or hangs when the upstream data source is slower than the AXI W channel. In a design that promised continuous WVALID, the waveform may show WVALID gaps before WLAST.
 
-**Root cause:** WVALID is gated on data availability (`~fifo_empty`), not on burst completion. The design starts issuing W beats as soon as the first data arrives, without guaranteeing that all beats for the burst are available. If the upstream data source is slower than the W channel consumption rate, the FIFO drains mid-burst and WVALID drops.
+**Root cause:** The RTL does not declare whether the W channel uses continuous/full-burst-buffered mode or elastic/per-beat buffered mode. The design then mixes the two: it starts a burst before enough data is available, but its counters or assertions assume no WVALID gaps.
 
-**AXI specification reference:** IHI0022E Section A3.3.1 — "Once VALID is asserted, it must not be deasserted until the handshake occurs." For burst transfers, this means WVALID must remain asserted for every beat of the burst once the first beat is presented. There is no provision for "pause and resume" within a burst.
+**AXI specification reference:** Arm IHI 0022 Section A3.3 defines VALID/READY stability per transfer item: when `WVALID` is asserted for a beat, `WVALID` and the associated W payload remain asserted/stable until the handshake occurs. It does not require WVALID to remain continuously high between accepted beats of a burst. A no-gap WVALID burst is a conservative local implementation policy, not a universal AXI rule.
 
 **Trigger conditions:** data FIFO depth < maximum burst length, or upstream read latency > downstream write throughput.
 
-**Bug code pattern:**
+**Bug code pattern for continuous mode:**
 ```verilog
-// BUG: WVALID gated on FIFO emptiness — can drop mid-burst
+// BUG if the contract says continuous/full-burst-buffered mode:
+// WVALID can gap before WLAST when the FIFO empties.
 assign m_axi_wvalid_o = w_active_q & ~data_fifo_empty_i;
 
-// w_active_q set when first data arrives, not when full burst is ready
+// w_active_q set when first data arrives, not when the full burst is ready.
 always @(posedge clk_i) begin
     if (rst_i)
         w_active_q <= 1'b0;
     else if (w_fire && m_axi_wlast_o)
         w_active_q <= 1'b0;
     else if (!data_fifo_empty_i)
-        w_active_q <= 1'b1;  // BUG: arms on first beat, not on burst readiness
+        w_active_q <= 1'b1;
 end
 ```
 
-**Correct code pattern (option 1 — FIFO depth >= max burst):**
+**Correct code pattern (option 1 — continuous/full-burst-buffered local policy):**
 ```verilog
-// If FIFO depth is guaranteed >= max burst length, the FIFO cannot drain
-// mid-burst because the full burst is buffered before W starts.
-// Add a parameter assertion:
-initial begin
-    if (C_DATA_FIFO_DEPTH < C_AXI_MAX_BURST_LEN)
-        $error("Data FIFO depth must be >= max burst length");
-end
-// Then WVALID = w_active_q & ~fifo_empty is safe (FIFO never drains mid-burst)
-```
-
-**Correct code pattern (option 2 — burst-ready gating):**
-```verilog
-// Gate WVALID on burst readiness, not just data availability
+// Check full-burst readiness before starting W.
 wire burst_ready = (fifo_count >= expected_beats);
-assign m_axi_wvalid_o = w_active_q & burst_ready;
 
-// w_active_q only arms when the full burst is buffered
 always @(posedge clk_i) begin
     if (rst_i)
         w_active_q <= 1'b0;
@@ -1994,37 +1981,61 @@ always @(posedge clk_i) begin
     else if (burst_ready && !w_active_q)
         w_active_q <= 1'b1;
 end
+
+assign m_axi_wvalid_o = w_active_q;
 ```
 
-**First divergent cycle:** the cycle where WVALID was high on the previous edge but is now low, while WLAST has not been asserted. Check waveform: WVALID high → low without WLAST = violation.
+**Correct code pattern (option 2 — elastic/per-beat local policy):**
+```verilog
+// Bubbles between accepted W beats are allowed by this local contract.
+// Once a beat is presented, it remains presented until WREADY.
+always @(posedge clk_i) begin
+    if (rst_i) begin
+        m_axi_wvalid_o <= 1'b0;
+    end else if (m_axi_wvalid_o && !m_axi_wready_i) begin
+        m_axi_wvalid_o <= 1'b1;
+    end else if (have_next_wbeat) begin
+        m_axi_wvalid_o <= 1'b1;
+    end else begin
+        m_axi_wvalid_o <= 1'b0;
+    end
+end
+
+assign dfifo_rd_en_o = have_next_wbeat && (!m_axi_wvalid_o || m_axi_wready_i);
+```
+
+**First divergent cycle:** for a normative AXI violation, find the cycle where `WVALID && !WREADY` was true, then the next cycle drops `WVALID` or changes `WDATA/WSTRB/WLAST` before the handshake. For continuous-mode local-policy violations, find a WVALID gap before WLAST and check whether the contract promised no gaps.
 
 **VCD detection:**
 ```bash
-python scripts/vcd_extract.py dump.vcd --signals wvalid,wlast,wready
-# Find all wvalid transitions: 1->0
-# For each 1->0 transition, check if wlast was 1 at the same timestamp
-# If wlast=0 when wvalid drops, this is a mid-burst violation
+python scripts/vcd_extract.py dump.vcd --signals wvalid,wready,wdata,wstrb,wlast
+# Normative check: if wvalid=1 and wready=0 at cycle N,
+# then wvalid and payload must be unchanged at cycle N+1.
+# Optional local-policy check: in continuous mode, flag wvalid gaps before wlast.
 ```
-Manual check: grep VCD for WVALID signal ID, find `0<wvalid_id>` lines, then check WLAST value at same timestamp.
 
 **Prevention assertion:**
 ```systemverilog
-// WVALID must not deassert mid-burst (before WLAST)
-property p_wvalid_holds_until_wlast;
+// Normative AXI per-beat hold rule.
+property p_wbeat_stable_while_waiting;
     @(posedge clk_i) disable iff (rst_i)
-        (m_axi_wvalid_o && !m_axi_wready_i) |-> ##1 m_axi_wvalid_o;
+        (m_axi_wvalid_o && !m_axi_wready_i)
+        |=> m_axi_wvalid_o
+            && $stable(m_axi_wdata_o)
+            && $stable(m_axi_wstrb_o)
+            && $stable(m_axi_wlast_o);
 endproperty
-assert property (p_wvalid_holds_until_wlast);
+assert property (p_wbeat_stable_while_waiting);
 
-// Once WVALID is asserted, it must stay high until WLAST fires
-property p_wvalid_no_gap_in_burst;
+// Optional continuous-mode project policy, enable only if the contract requires no gaps.
+property p_continuous_mode_no_wvalid_gap;
     @(posedge clk_i) disable iff (rst_i)
         (m_axi_wvalid_o && !m_axi_wlast_o) |-> ##1 m_axi_wvalid_o;
 endproperty
-assert property (p_wvalid_no_gap_in_burst);
+// assert property (p_continuous_mode_no_wvalid_gap);
 ```
 
-**Regression test:** configure FIFO depth = max_burst_len / 2. Issue a write burst. Verify WVALID stays high from first beat to WLAST. If WVALID drops mid-burst, the test fails.
+**Regression test:** run two modes deliberately. Continuous mode: configure `fifo_count >= burst_length` before start and verify no WVALID gaps through WLAST. Elastic mode: starve the FIFO between beats, apply WREADY backpressure, and verify no presented beat changes while waiting, no FIFO underflow occurs, beat count matches `AWLEN+1`, and WLAST lands on the final accepted beat.
 
 ---
 

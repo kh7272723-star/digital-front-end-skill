@@ -18,7 +18,7 @@
       "name": "protocol_axi_full",
       "description": "Full AXI channel, burst, outstanding, response, and error semantics.",
       "min_count": 2,
-      "eval_ids": [24, 29, 31, 32, 33]
+      "eval_ids": [24, 29, 31, 32, 33, 64]
     },
     {
       "name": "protocol_axi_lite",
@@ -30,7 +30,7 @@
       "name": "protocol_axi_dma",
       "description": "AXI DMA ordering, response tracking, completion, and slice planning.",
       "min_count": 5,
-      "eval_ids": [9, 15, 16, 23, 24, 25, 34]
+      "eval_ids": [9, 15, 16, 23, 24, 25, 34, 64]
     },
     {
       "name": "protocol_apb",
@@ -66,7 +66,13 @@
       "name": "debug_review",
       "description": "First-divergent-cycle reasoning and protocol bug review.",
       "min_count": 3,
-      "eval_ids": [2, 12, 24]
+      "eval_ids": [2, 12, 24, 64]
+    },
+    {
+      "name": "protocol_authority_accuracy",
+      "description": "Correctly separates normative protocol rules from local conservative implementation policies.",
+      "min_count": 1,
+      "eval_ids": [64]
     },
     {
       "name": "cdc_safety",
@@ -170,7 +176,7 @@
         "references/axi-dma/axi-lite-guidelines.md",
         "references/axi-dma/axi-dma-channel-guidelines.md"
       ],
-      "eval_ids": [22, 24, 25, 29, 31, 32, 33, 34]
+      "eval_ids": [22, 24, 25, 29, 31, 32, 33, 34, 64]
     },
     {
       "protocol": "APB",

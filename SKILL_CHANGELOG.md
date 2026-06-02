@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-06-02 — 协议权威蒸馏纠偏：P12/WVALID + NVMe 队列/PRP + DMA 验证盲区
+
+### 触发背景
+
+NVMe IO datapath review 发现：P12 把 AXI continuous WVALID 实现策略误写成 IHI0022 协议硬规则，导致 reference 可能出现“声称遵循权威手册，但实际规则不准确”的问题。
+
+### 修复内容
+
+| 改进 | 说明 |
+|------|------|
+| Protocol authority labels | `protocol-authority-map.md` 增加 Normative / Project policy / Conservative pattern / Heuristic / Unverified 分类 |
+| P12 重写 | AXI WVALID 改为 per-beat hold 是规范要求；continuous WVALID through WLAST 是本地策略 |
+| DMA scoreboard 扩展 | 数据比对之外，强制检查 transaction count、address、AWLEN/ARLEN、WLAST/RLAST、WSTRB、response、completion ordering |
+| NVMe reference 修正 | QSIZE=entries-1、queue pointer modulo wrap、CQ Phase Tag 不等于 2*depth 指针、PRP List chain pointer 条件 |
+| 静态检查增强 | 增加 AXI burst 8-bit 截断、未用 resp 输入、ready 恒 1 + FIFO full 丢数、valid 绑 0 stub、start 同拍旧寄存器读取启发式 |
+| Eval 覆盖 | 新增 id 64，专门防止 agent 再把 AXI WVALID 连续 burst 策略误称为规范 |
+
+### 新增/更新文件
+
+- `references/timing/protocol-authority-audit.md`
+- `references/timing/protocol-authority-map.md`
+- `references/axi-dma/axi-dma-channel-guidelines.md`
+- `references/debug/bug-pattern-library.md`
+- `references/verification/self-review-checklist.md`
+- `references/verification/axi-verification.md`
+- `references/verification/golden-reference-guide.md`
+- `references/bus/nvme-guidelines.md`
+- `scripts/rtl_style_check.py`
+- `evals/evals.json`, `evals/benchmark.json`
+
+---
+
 ## 2026-06-01 — 工作流瘦身 + SPEC 重写 + S1-S6 全部闭环
 
 ### 工作流从 14 步精简到 11 步

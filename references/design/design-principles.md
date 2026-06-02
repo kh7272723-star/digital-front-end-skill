@@ -50,7 +50,7 @@ The active-search questions below are **prompts to help you generate your own qu
 3. For each **level** output: can the consumer sample it at any time, or only during a specific phase? If the consumer might miss it, should it be sticky?
 4. For each **registered** output: does the testbench add 1 extra cycle after ACCESS before sampling? See P18, F2, BUG-6.
 5. For each **valid/ready handshake**: does VALID hold until READY? Is the payload stable while VALID=1? See H1, H8, P11.
-6. For each **AXI W channel**: does WVALID hold for the entire burst (no mid-burst deassertion)? See P12, IHI0022E A3.3.1.
+6. For each **AXI W channel**: is the W data mode declared (continuous/full-burst-buffered or elastic/per-beat buffered)? Does each presented beat keep `WVALID`/`WDATA`/`WSTRB`/`WLAST` stable until `WREADY`? See P12, IHI 0022 A3.3.
 
 **Covered patterns:** H1, H2, H8, LP7, P11, P12, P18, F1, F2, BUG-6, completion signal style
 

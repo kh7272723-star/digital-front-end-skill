@@ -9,6 +9,7 @@ This document defines the NVMe (NVM Express) protocol concepts needed for RTL de
 **Authority:**
 - NVM Express Base Specification Revision 2.3 (2025-08-01) — queue model, doorbell, PRP/SGL, Admin commands, controller init, Flush command (§7.2)
 - NVM Express NVM Command Set Specification Revision 1.2 (2025-08-01) — NVM Read (§3.3.1), Write (§3.3.4), I/O command opcodes, SLBA/NLB field definitions
+- Local markdown extracts: `nvme-spec-2.3.md`, `nvme-nvm-cmd-set-1.2.md`. Treat this file as distilled guidance; re-check those extracts before adding new hard NVMe rules.
 
 ---
 
@@ -36,10 +37,10 @@ NVMe uses paired Submission Queues (SQ) and Completion Queues (CQ) in host memor
 
 Both SQ and CQ are circular buffers. The controller maintains Head pointer (next to process); the host maintains Tail pointer (next to write).
 
-**Empty condition:** `head == tail`
-**Full condition (SQ):** `(tail + 1) % depth == head` (one slot unused as guard band)
+**Empty condition:** for an SQ, the controller has no newly submitted command when its local SQ head equals the last SQ tail doorbell value after modulo-depth wrap handling.
+**Full condition:** NVMe memory-based queues use one unused slot; the maximum number of entries that can be queued is one less than the queue size. Queue wrap conditions must be included in comparisons.
 
-Tail is NOT incremented modulo in the usual way. The tail pointer advances linearly and only wraps when reaching `2*depth` for CQ (due to Phase Tag). See Phase Tag section.
+Head and tail entry pointers wrap modulo the queue size. Completion Queue Phase Tag is a CQE bit used by the host to distinguish newly posted completions after CQ wrap; it does not make SQ/CQ pointers count to `2*depth`.
 
 ---
 
@@ -66,12 +67,12 @@ where stride = 4 << CAP.DSTRD (usually 4 or 8 bytes)
 ### Credit Model
 
 When host writes a new tail value to SQyTDBL:
-1. `delta = new_tail - old_tail` (number of new commands submitted)
+1. `delta = (new_tail - old_tail) modulo queue_depth` with queue wrap conditions handled (number of new commands submitted)
 2. Controller adds `delta` credits to internal credit accumulator for queue `y`
 3. SQ Fetch Engine consumes credits when issuing Memory Read TLP for each command slot
 
 When host writes a new head value to CQyHDBL:
-1. Controller releases completed slots up to `new_head - 1`
+1. Controller releases completed slots up to `new_head - 1`, with queue wrap conditions handled
 2. Controller can now reuse those CQ slots for new completions
 
 ---
@@ -240,7 +241,7 @@ Each SQ/CQ pair tracks:
 | State | Width | Description |
 |-------|-------|------|
 | queue_base | 64 | Host physical address of queue memory |
-| queue_depth | 16 | Number of entries (0-based: QSIZE) |
+| queue_depth | 16 | Number of entries (`QSIZE + 1`; NVMe QSIZE fields are zero-based) |
 | head_ptr | 16 | Next entry for controller to process (SQ) or write (CQ) |
 | tail_ptr | 16 | Last known host tail (set by doorbell) |
 | credits | 16 | Pending commands to fetch (tail - head) |
@@ -292,7 +293,7 @@ Internal: detected by monitoring APB/AXI-Lite writes to doorbell address range.
 ### P1 (Timing Contract)
 - Doorbell write takes effect on the cycle after write strobe
 - SQE parsing is combinational from fetched data (after R channel data valid)
-- CQE post is sequential: write DW0 → DW1 → DW2 → DW3 (ordered for Phase/CID visibility)
+- If a CQE is constructed with multiple memory writes, update the Phase Tag bit in the last write so the host does not observe a partially written completion as new.
 
 ### P6 (Boundaries)
 - NVMe-specific module outputs: fetched commands (structured, not raw 64-byte)
@@ -409,14 +410,14 @@ A PRP List occupies ONE physical memory page (4 KiB for MPS=0).
 ```
 Entries per List page = page_size / 8 = 512 (for 4 KiB pages)
 
-Entry 0..509:  Page Base Address (Offset MUST be 0h, page-aligned)
-Entry 511:     Next PRP List page base address (chain pointer)
-               OR 0h if this is the last list page
+Entry 0..N:    Page Base Address (Offset MUST be 0h, page-aligned)
+Last entry of a full list page:
+               Next PRP List page base address, only when another list page is required
 ```
 
 **Rules:**
 1. PRP entries within a PRP List must have Offset = 0 (page-aligned)
-2. The last entry of a PRP List that is NOT the final list page points to the NEXT PRP List page
+2. If more PRP List pages are required, the last entry before the end of the current list page points to the NEXT PRP List page
 3. PRP List pages themselves must be page-aligned
 4. Entries are packed starting at entry 0 — no gaps
 5. The total number of PRP entries needed is implied by `(NLB+1) × LBA_size` and page_size
@@ -598,7 +599,7 @@ Phase 3: Completion Post (same)
 ```
 1. Host prepares SQE in I/O SQ memory
 2. Host writes SQyTDBL = new_tail
-3. Controller: credits += (new_tail - old_tail)
+3. Controller: credits += `(new_tail - old_tail) modulo queue_depth`
 4. Controller: while (credits > 0 && SQ not empty):
      a. Fetch 64-byte SQE from SQ[head] via AXI AR/R
      b. Parse CDW0 → identify opcode, CID

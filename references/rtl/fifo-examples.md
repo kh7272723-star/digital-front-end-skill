@@ -99,13 +99,28 @@ This pattern adds one cycle of read latency. When used in AXI W data paths, it c
 
 When a FWFT FIFO feeds an AXI W channel:
 
+**Design must first declare the W data mode** (see P12 in `references/axi-dma/axi-dma-channel-guidelines.md`):
+
+**Continuous/full-burst-buffered mode (conservative local policy):**
 ```
-Cycle 0: WVALID asserts (w_active_q && !fifo_empty)
+Cycle 0: WVALID asserts (w_active_q, full burst pre-buffered in FIFO)
          WDATA = fifo_rdata (combinational, valid this cycle)
          Slave sees: WVALID=1, WDATA=beat_0 ✓
 Cycle 1: w_fire → fifo_rd_en → rd_ptr advances
          WDATA = fifo_rdata (now shows beat_1)
          Slave sees: WVALID=1, WDATA=beat_1 ✓
+```
+
+**Elastic/per-beat buffered mode (legal if contract allows):**
+```
+Cycle 0: WVALID asserts (have_next_wbeat && !fifo_empty)
+         WDATA = fifo_rdata (combinational, valid this cycle)
+         Slave sees: WVALID=1, WDATA=beat_0 ✓
+Cycle 1: FIFO empty → WVALID deasserts (legal bubble)
+         Slave sees: WVALID=0 (no beat presented)
+Cycle 2: data arrives → WVALID asserts with beat_1
+         Slave sees: WVALID=1, WDATA=beat_1 ✓
+Note: every presented beat must hold WVALID/WDATA/WSTRB/WLAST stable until WREADY.
 ```
 
 With registered output (WRONG):
