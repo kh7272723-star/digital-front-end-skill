@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-06-01 — 工作流瘦身 + SPEC 重写 + S1-S6 全部闭环
+
+### 工作流从 14 步精简到 11 步
+
+删除/合并了 3 个冗余步骤 + 修复 7 处残留：
+
+| 改动 | 说明 |
+|------|------|
+| 删除 Step 12 | 子代理委托已在 Step 1.5 触发，Step 12 只剩两行引用 |
+| 合并 Step 11 | "验证时序" 已由 Step 8 signal type cross-check 覆盖 |
+| 合并 Step 10 | "审查与迭代" 与 Step 9 迭代处理重叠，精华合入 Step 10 "Finalize" |
+| 修复 7 处残留 | Step 1 表格引用 Step 12、流程图引用 Step 12、Step 1.5 委托段落重复、迭代图引用 Step 8d、Step 9 冗余 yosys 行 |
+
+**工作流结构（11 步）：**
+```
+1. Parse → 1.5 L2 Fork → 2. Contract → 2a. P4+P6 → 3. Freeze
+→ 4. State → 5. Trace → 5a. P1+P2 → 6. Pattern → 7. RTL
+→ 7b. pre_sim_check → 8. Self-review → 8b. Functional
+→ 8c. P3+P5a → 9. Sim Loop → 10. Finalize
+```
+
+### SPEC.md 重写
+
+NVMe IO datapath 项目 SPEC：从 386 行技能指令型 → 250 行纯功能型。删除所有 NBA 陷阱、编码规范、工具链命令、bug 引用。只描述模块接口 + 时序 + 行为 + 测试用例。确保新 agent 交付物能真实反映 skill 有效性。
+
+### S1-S6 全部闭环
+
+本次会话中 6 项改进全部落地：
+
+| # | 改进 | 最终状态 |
+|:---:|------|:---:|
+| S1 | yosys 可强制 | ✅ `pre_sim_check.sh` 解析 yosys 输出，latch 计数 > 0 → exit 1 |
+| S2 | rtl_style_check 强制运行 | ✅ 集成到 Step 7b 的 `pre_sim_check.sh --all` |
+| S3 | NBA 预检具体示例 | ✅ `nba-ordering-guide.md` L3 含 NVMe Phase 3 的具体 broken/fix 代码 |
+| S4 | 合同-RTL 单位交叉检查 | ✅ `timing-contract-template.md` 新增 Signal units 表 + 转换规则 |
+| S5 | 统一 pre_sim_check.sh | ✅ `scripts/pre_sim_check.sh` — yosys + style + compile 三合一 |
+| S6 | 每模块独立编译检查 | ✅ Step 7 standalone compile gate + `pre_sim_check.sh --compile` |
+
+### SKILL.md 行数
+
+~360 / 500 行（净减 10 行：+W1-W6 增加, -Step 10/11/12 瘦身）
+
+---
+
 ## 2026-06-01 — NVMe Phase 3 完整复盘：18 bugs + 6 个可操作 skill 改进
 
 ### 复盘核心结论
