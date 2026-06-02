@@ -127,7 +127,7 @@ Summarize the requested block and list open questions. If working in an existing
 
 2. **Write a per-module interface contract for each submodule.** Use `references/architecture/interface-contract-template.md`. Minimum: port list, signal widths, handshake protocol, completion signal type (pulse vs level). Cross-check that producer and consumer port widths match.
 
-3. **For multiple sub-agents:** Use the delegation rules below. The prompt must include the per-module interface contract. Multi-agent coordination follows Step 12.
+3. **For multiple sub-agents:** The prompt must include the per-module interface contract and the skill loading directive. After delivery, run Step 8 review before accepting. See `references/architecture/sub-agent-delegation.md` for full prompt template and multi-module coordination rules.
 
 ```
 L0/L1: Step 1 → Step 2 → ... → Step 12
@@ -470,10 +470,6 @@ If the user provides errors or waveforms, identify the likely cause, propose the
 This check is executed within Step 8 (Signal Type Cross-Check) — not as a separate step. The cross-check verifies that every output's actual RTL behavior (pulse/level/registered) matches its timing contract classification. Cycle trace invariants, stall/hold behavior, and reset release are covered by Step 5a P1+P2 review, re-verified during Step 9 Phase 4 failure analysis.
 
 After simulation passes, state the design maturity level and top residual risks using `references/verification/engineering-review-checklist.md`.
-
-### 12. Sub-agent delegation (reference — invoked at Step 1.5 for L2)
-
-Sub-agents do not automatically load this skill and will fall back to training-data anti-patterns. The prompt must include either: (1) a skill loading directive, or (2) inlined critical rules. After delivery, run Step 8 review before accepting. Full prompt template and multi-module rules: see `references/architecture/sub-agent-delegation.md`.
 
 ## Debugging rules
 
