@@ -75,12 +75,19 @@ module nvme_cmd_tracker #(
     integer si;
     always @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) begin
-            slot_vld_q <= 0;  wr_ptr_q <= 0;  rd_ptr_q <= 0;  busy_q <= 0;
+            slot_vld_q <= 0;
+            wr_ptr_q   <= 0;
+            rd_ptr_q   <= 0;
+            busy_q     <= 0;
             for (si = 0; si < NUM_SLOTS; si = si + 1) begin
-                slot_cid[si] <= 0;  slot_nsid[si]  <= 0;
-                slot_prp1[si] <= 0; slot_prp2[si]  <= 0;
-                slot_slba[si] <= 0; slot_nlb[si]   <= 0;
-                slot_sqid[si] <= 0; slot_sqhd[si]  <= 0;
+                slot_cid[si]  <= 0;
+                slot_nsid[si] <= 0;
+                slot_prp1[si] <= 0;
+                slot_prp2[si] <= 0;
+                slot_slba[si] <= 0;
+                slot_nlb[si]  <= 0;
+                slot_sqid[si] <= 0;
+                slot_sqhd[si] <= 0;
             end
         end else begin
             if (cmd_accept) begin

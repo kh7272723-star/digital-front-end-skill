@@ -51,9 +51,10 @@ module nvme_axi_adapter (
     wire ar_sel_s0 = s0_ar_valid_i && !s2_ar_valid_i;
 
     assign m_axi_ar_valid = ar_sel_s2 ? s2_ar_valid_i
-                          : ar_sel_s0 ? s0_ar_valid_i : 1'b0;
-    assign m_axi_ar_addr  = ar_sel_s2 ? s2_ar_addr_i  : s0_ar_addr_i;
-    assign m_axi_ar_len   = ar_sel_s2 ? s2_ar_len_i   : s0_ar_len_i;
+                          : ar_sel_s0 ? s0_ar_valid_i
+                          : 1'b0;
+    assign m_axi_ar_addr  = ar_sel_s2 ? s2_ar_addr_i : s0_ar_addr_i;
+    assign m_axi_ar_len   = ar_sel_s2 ? s2_ar_len_i  : s0_ar_len_i;
 
     assign s2_ar_ready_o = ar_sel_s2 && m_axi_ar_ready;
     assign s0_ar_ready_o = ar_sel_s0 && m_axi_ar_ready;
@@ -83,9 +84,10 @@ module nvme_axi_adapter (
     wire aw_sel_s1 = s1_aw_valid_i && !s3_aw_valid_i;
 
     assign m_axi_aw_valid = aw_sel_s3 ? s3_aw_valid_i
-                          : aw_sel_s1 ? s1_aw_valid_i : 1'b0;
-    assign m_axi_aw_addr  = aw_sel_s3 ? s3_aw_addr_i  : s1_aw_addr_i;
-    assign m_axi_aw_len   = aw_sel_s3 ? s3_aw_len_i   : 8'd0;
+                          : aw_sel_s1 ? s1_aw_valid_i
+                          : 1'b0;
+    assign m_axi_aw_addr  = aw_sel_s3 ? s3_aw_addr_i : s1_aw_addr_i;
+    assign m_axi_aw_len   = aw_sel_s3 ? s3_aw_len_i  : 8'd0;
 
     assign s3_aw_ready_o = aw_sel_s3 && m_axi_aw_ready;
     assign s1_aw_ready_o = aw_sel_s1 && m_axi_aw_ready;

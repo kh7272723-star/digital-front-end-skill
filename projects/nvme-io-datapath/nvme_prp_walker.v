@@ -74,14 +74,16 @@ module nvme_prp_walker #(
     wire [12:0]  first_cap = PAGE_SIZE[12:0] - prp1_i[11:0];  // 13-bit: 4096 needs >12 bits
     assign page_last_o = (cstate == S_PAGE_TX) && (bytes_left_q <= {12'd0, page_bytes_o, 3'd0});  // bytes vs beats
     wire [31:0]  first_bytes = (transfer_bytes_i <= {20'd0, first_cap})
-                              ? transfer_bytes_i : {20'd0, first_cap};
+                              ? transfer_bytes_i
+                              : {20'd0, first_cap};
 
-    assign page_addr_o    = current_addr_q;
-    assign page_bytes_o   = (first_done_q) ? {5'd0, PAGE_SIZE[12:0]}
-                          : first_bytes[16:0];
-    assign page_valid_o   = (cstate == S_PAGE_TX);
-    assign list_ar_valid_o = (cstate == S_LIST_FETCH);
-    assign list_ar_addr_o  = prp2_i;
+    assign page_addr_o      = current_addr_q;
+    assign page_bytes_o     = (first_done_q)
+                            ? {5'd0, PAGE_SIZE[12:0]}
+                            : first_bytes[16:0];
+    assign page_valid_o     = (cstate == S_PAGE_TX);
+    assign list_ar_valid_o  = (cstate == S_LIST_FETCH);
+    assign list_ar_addr_o   = prp2_i;
     assign list_ar_len_o   = 8'd255;  // 512 entries × 8 bytes = 4096 bytes, 64-bit beats → 512 beats, len=511. But AXI max is 256, so split into 2 bursts. Simplified: len=255 (256 beats = 2048 bytes = 256 entries)
     assign list_r_ready_o  = 1'b1;
 
@@ -128,12 +130,18 @@ module nvme_prp_walker #(
     // ==================================================================
     always @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) begin
-            current_addr_q <= 0;  bytes_left_q  <= 0;
-            page_offset_q  <= 0;  prp2_role_q   <= ROLE_RSVD;
-            first_done_q   <= 0;  in_list_q     <= 0;
-            list_page_q    <= 0;  list_idx_q    <= 0;
-            list_buf_rdy_q <= 0;  list_beat_q   <= 0;
-            error_q        <= 0;  error_st_q    <= 0;
+            current_addr_q <= 0;
+            bytes_left_q   <= 0;
+            page_offset_q  <= 0;
+            prp2_role_q    <= ROLE_RSVD;
+            first_done_q   <= 0;
+            in_list_q      <= 0;
+            list_page_q    <= 0;
+            list_idx_q     <= 0;
+            list_buf_rdy_q <= 0;
+            list_beat_q    <= 0;
+            error_q        <= 0;
+            error_st_q     <= 0;
         end else begin
             case (cstate)
                 S_IDLE: begin
