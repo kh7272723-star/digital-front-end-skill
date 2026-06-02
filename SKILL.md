@@ -113,7 +113,7 @@ Summarize the requested block and list open questions. If working in an existing
 |:-----:|----------|:----------------:|----------------|
 | **L0: Trivial** | ≤200 lines, ≤8 FSM states, linear flow (no branches other than counter completion), single protocol | **Skip 2a/5a. Only P3 at 8c** (register audit). Inline in dev log. | Single agent |
 | **L1: Leaf** | 200-500 lines, or nonlinear FSM, or dual protocol (e.g. APB + UART) | **FAST: 1-2 questions/principle** at 2a/5a/8c. Separate .md files. | Single agent |
-| **L2: Subsystem** | >500 lines, or multi-module, or multi-clock, or 3+ protocols | **FULL: 3-5 questions/principle** at 2a/5a/8c. Signal tracing required. | **Consider decomposing into 2-3 sub-agents with interface contracts** if estimated >400 lines. Multi-agent coordination via Step 12. |
+| **L2: Subsystem** | >500 lines, or multi-module, or multi-clock, or 3+ protocols | **FULL: 3-5 questions/principle** at 2a/5a/8c. Signal tracing required. | **Consider decomposing into 2-3 sub-agents with interface contracts** if estimated >400 lines. Multi-agent coordination via Step 1.5 decomposition. |
 
 **L0 note:** Four rounds of A/B experiments (R5-R8) showed that for modules ≤200 lines with linear FSMs, the distributed principle checkpoints (2a/5a) found ZERO bugs. The overhead of writing separate review documents is wasted effort. However, the P3 register audit at 8c consistently catches naming mismatches and initialization gaps even in simple modules — keep that.
 
@@ -130,16 +130,14 @@ Summarize the requested block and list open questions. If working in an existing
 3. **For multiple sub-agents:** The prompt must include the per-module interface contract and the skill loading directive. After delivery, run Step 8 review before accepting. See `references/architecture/sub-agent-delegation.md` for full prompt template and multi-module coordination rules.
 
 ```
-L0/L1: Step 1 → Step 2 → ... → Step 12
+L0/L1: Step 1 → Step 2 → ... → Step 11
 L2:    Step 1 → Step 1.5 (decompose + per-module contracts)
-              → Step 2-8 per module (in dependency order)
+              → Step 2-9 per module (in dependency order)
               → Step 2a-8c applied at subsystem level for integration points
-              → Step 9 → 10 → 12
+              → Step 9 system simulation → Step 10 → 11
 ```
 
 4. **Per-module contract freeze before RTL.** Every submodule's interface contract must be written and frozen before ANY module's RTL is generated. This prevents the NVMe Phase 1 bug where module interfaces matched but data-path routing was undefined.
-
-**Sub-agent delegation for L2 (formerly Step 12, now invoked here):** Sub-agents do not automatically load this skill and will fall back to training-data anti-patterns. The prompt must include either: (1) a skill loading directive, or (2) inlined critical rules. After delivery, run Step 8 review before accepting. Full prompt template: see `references/architecture/sub-agent-delegation.md`.
 
 If the specification is underspecified or vague (missing protocol details, data widths, error handling, throughput targets, CRC parameters, etc.), run the requirement extraction framework from `references/architecture/requirement-extraction-template.md` before proceeding to Step 2. Classify every design dimension as Required/Implied/Assumed/Unknown. Attach the filled checklist + design decision log to the timing contract. If more than 3 Required dimensions are unanswered, pause and ask the user before writing any RTL.
 
@@ -423,7 +421,7 @@ The simulation loop is NOT linear — it involves explicit iteration back to ear
                │            │                          │
                │ FAIL       │ FAIL                     │
                ▼            ▼                          │
-          Step 7       Step 8d ──> Step 8 ──> Step 7 ──┘
+          Step 7       Phase 4 ──> Step 8 ──> Step 7 ──┘
         (fix RTL)   (principle     (re-review)  (fix)
                       diagnosis)
 ```
@@ -452,24 +450,16 @@ Provide at least one of: testbench skeleton, directed test list, assertions, wav
 
 The principle review documents let you locate root causes faster than adding `$display` statements — they already trace every signal's timing contract, every FSM state's exit path, and every register's initialization.
 
-**Synthesis feedback:** After simulation passes, run yosys to check for latches, combinational loops, and critical path. See `references/verification/synthesis-feedback-guide.md` and `scripts/yosys_extract.py`.
+### 10. Finalize
 
-### 10. Review and iterate
+After simulation passes, state the design maturity level and top residual risks using `references/verification/engineering-review-checklist.md`. If the user provides errors or waveforms, identify the likely cause, propose the minimal correction, and restate what must be rechecked.
 
-If the user provides errors or waveforms, identify the likely cause, propose the minimal correction, and restate what must be rechecked.
-
-**After any RTL modification (simulation fix, user-requested change, optimization):** re-run the Step 8 self-review checklist on the changed files. Debug-driven fixes are the most common source of constraint violations — the pressure to "make it work" overrides the discipline to "make it correct." Common debug anti-patterns:
+**After any RTL modification (simulation fix, user-requested change, optimization):** re-run the Step 8 self-review checklist on the changed files. Debug-driven fixes are the most common source of constraint violations. Common debug anti-patterns:
 - Adding `data_available` to WVALID to "fix" a hang (P12 violation)
 - Switching to registered FIFO output to "fix" data timing (F1 violation)
 - Adding a combinational `_d` block to "fix" counter logic (SM2 violation)
 - Coupling read/write burst-ready to "fix" ordering (anti-pattern)
 - Adding dead ports/modules "for future use" (integration violation)
-
-### 11. Verify timing against the contract and trace
-
-This check is executed within Step 8 (Signal Type Cross-Check) — not as a separate step. The cross-check verifies that every output's actual RTL behavior (pulse/level/registered) matches its timing contract classification. Cycle trace invariants, stall/hold behavior, and reset release are covered by Step 5a P1+P2 review, re-verified during Step 9 Phase 4 failure analysis.
-
-After simulation passes, state the design maturity level and top residual risks using `references/verification/engineering-review-checklist.md`.
 
 ## Debugging rules
 
