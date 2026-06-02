@@ -148,6 +148,7 @@ end
 | C18 | S | Cross-clock-domain signals: do not use `set_false` timing constraints without specific justification. |
 | C19 | M | **Every register in a sequential `always` block must be assigned in every code path.** After `if`/`else-if` chains, include a final `else` that explicitly assigns the register its current value. See §2.4.1. |
 | C20 | S | **Group registers by function into separate `always` blocks.** Do not place all sequential logic in one monolithic block. Registers that serve the same function, or share the same trigger/gate conditions, belong together. Benefits: readability, easier debug, better synthesis optimization (no false dependencies between unrelated registers). See §2.4.2. |
+| **C21** | **M** | **One statement per line. Every register declaration on its own line. Every `<=` or `=` assignment on its own line.** Multiple statements on the same line (e.g., `a<=0; b<=0; c<=0;`) harm readability and make code review harder. Commas in port lists and case items are exempt. See §2.4.3. |
 
 #### §2.4.1 Explicit Hold in Sequential Blocks
 
@@ -405,6 +406,33 @@ endmodule
 
 `default_nettype wire
 ```
+
+---
+
+#### §2.4.3 One Statement Per Line (C21)
+
+**Rule:** Every register declaration on its own line. Every `<=` or `=` assignment on its own line. Commas in port lists and `case` items are exempt.
+
+```verilog
+// ❌ BROKEN — multiple declarations and assignments on one line
+reg [FA-1:0] fwp_q,frp_q; reg [FA:0] fcnt_q;
+if (!rst_ni) begin
+    aw_vld_q<=0; aw_a_q<=0; aw_l_q<=0;
+end
+
+// ✅ CORRECT — one declaration per line, one assignment per line
+reg [FA-1:0] fwp_q;
+reg [FA-1:0] frp_q;
+reg [FA:0]   fcnt_q;
+
+if (!rst_ni) begin
+    aw_vld_q <= 0;
+    aw_a_q   <= 0;
+    aw_l_q   <= 0;
+end
+```
+
+**Rationale:** Packed lines make code review harder — a reviewer must parse semicolons to find statement boundaries. Splitting to one-per-line also makes version control diffs cleaner: a one-line change to `aw_l_q` shows exactly which signal changed, not a whole block.
 
 ---
 
