@@ -253,6 +253,16 @@ stat
 
 All warnings must be reviewed. Any warning related to your own code must be fixed. Only after synthesis is clean, proceed to Step 8.
 
+**Style and constraint check (mandatory — run alongside yosys):**
+
+```bash
+python scripts/rtl_style_check.py <all_rtl_files>.v
+```
+
+This catches violations that consistently pass Step 8 manual review (agent confirmation bias). Exit code 1 = violations found. Checks: C3 (`default_nettype none`), C19 (if-if chains without else), C21 (one statement per line), NBA Trap 1 (registered counter + registered dependent output in same always block), NBA Trap 2 (registered FIFO data + advancing read pointer), N1 (port `_i`/`_o` suffix).
+
+All E-level (error) findings must be fixed before simulation. W-level (warning) findings must be reviewed — fix or document as intentional.
+
 ### 8. RTL self-review against skill constraints
 
 Before simulation, review the generated RTL against the full self-review checklist in `references/verification/self-review-checklist.md`. Each item must be explicitly checked and marked pass/fail. For each FAIL item, fix before proceeding and state what was changed. For each ✅ item, cite the specific line numbers or signal names that satisfy the check — do not mark items as passed without evidence.
