@@ -116,13 +116,13 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 ## Standard workflow
 
-**Phase Exit Gates:** the normal Design Mode gate entry is `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json`; later phases require predecessor PASS. Sibling gate scripts are wrapper internals or debug tools; their direct output is not phase evidence. `--force` is human-directed recovery only, not a waiver. L0 skips pre-rtl check; L2 requires per-module evidence before integration.
+**Phase Exit Gates:** the normal Design Mode gate entry is `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json`; later phases require predecessor PASS. Sibling gate scripts are wrapper internals or debug tools; their direct output is not phase evidence. `--force` is human-directed recovery only, not a waiver. L0 skips pre-rtl check; L2 requires per-module evidence before integration. Step 9 is split: 9A per-module verification (L2 mandatory), 9B integration verification.
 
 | Phase | Command | Blocks |
 |-------|---------|--------|
-| Pre-RTL | `python scripts/workflow_gate.py --phase pre-rtl <project_dir>` | RTL generation |
+| Pre-RTL | `python scripts/workflow_gate.py --phase pre-rtl <project_dir>` | RTL generation (contract readiness gate) |
 | Post-RTL | `python scripts/workflow_gate.py --phase post-rtl <project_dir>` | TB/integration |
-| Pre-integration | `python scripts/workflow_gate.py --phase pre-integration <project_dir>` | integration TB/sim |
+| Pre-integration | `python scripts/workflow_gate.py --phase pre-integration <project_dir>` | integration TB/sim (L2 module evidence) |
 | Post-sim | `python scripts/workflow_gate.py --phase post-sim <project_dir>` | finalization |
 | Final | `python scripts/workflow_gate.py --phase final <project_dir>` | PASS claim |
 
@@ -167,16 +167,17 @@ Execution waits on frozen per-module contracts. **L2 Delegate: yes requires exec
 
 ### 1.2 Project Skeleton / Preflight Gate (mandatory for L1/L2 No-SPEC)
 
-Before any RTL, create the canonical project skeleton. Normal path:
-`python scripts/workflow_gate.py --phase pre-rtl <project_dir>`.
-Debug-only: `python scripts/project_preflight_gate.py <project_dir>`.
+Before any RTL, create the canonical project skeleton. Debug-only path:
+`python scripts/project_preflight_gate.py <project_dir>` (does not write
+workflow state).
 
 - `docs/` directory with skeleton files: `dev_log.md`, `SPEC.md`, `interface-contracts.md`, `timing-contract.md`, `protocol_claim_ledger.md`, `verification_matrix.md`, `contract_implementation_matrix.md`
 - `rtl/` directory (L1+L2), `tb/` directory (L2), `sim/` directory
-- Skeleton files may be empty placeholders initially; they are filled progressively
+- Skeleton files may be empty placeholders initially; filled during Steps 2-6
 - `dev_log.md` is the evidence chain -- start it at Step 1 and fill as you go
 
-This gate is fail-closed: missing skeleton -> BLOCKED. Direct preflight output does not write a workflow-state PASS stamp.
+This preflight is fail-closed: missing skeleton -> BLOCKED. The **pre-rtl
+phase gate** (after Steps 2-6) requires contracts to be non-empty.
 
 ### 1.5 L2 fork -- subsystem decomposition (mandatory for L2, skip for L0/L1)
 
@@ -285,6 +286,14 @@ Read `references/rtl/rtl-structural-purity.md` before writing RTL. Hard design-p
   Accepted Limitation with compensating evidence.
 - Waiver required for RSP1-RSP4 exceptions: signal, reason, risk, verification coverage.
 
+**Pre-RTL Phase Gate (mandatory for L1/L2):** Before generating any RTL, run
+`python scripts/workflow_gate.py --phase pre-rtl <project_dir>`. This gate
+verifies contract readiness: required docs exist and are non-empty. For L2:
+`docs/interface-contracts.md`, `docs/timing-contract.md`, `docs/contract_implementation_matrix.md`,
+`docs/protocol_claim_ledger.md`, `docs/verification_matrix.md`. For L1:
+`docs/timing-contract.md`, `docs/verification_matrix.md`. If FAIL: fill the
+missing contracts, re-run. Do not write RTL until this gate passes.
+
 ### 7. Generate RTL
 
 **Before writing ANY code, read `references/rtl/rtl-coding-standards.md` and `references/rtl/rtl-structural-purity.md`.** This is a hard requirement (not optional). Pay particular attention to M-graded rules: C3 (`default_nettype none`), C5/C6/C7 (FSM/datapath separation), C9/C10 (two-process FSM), C14 (control symmetry), C16 (explicit bit widths), C19 (explicit else), C20 (group registers), and RSP1-RSP7 (structural purity).
@@ -305,9 +314,7 @@ for f in <module1>.v <module2>.v ...; do
 done
 ```
 
-A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to integration.
-
-**Per-module simulation (mandatory for L2):** After standalone compile passes, each module must have its own testbench and pass simulation BEFORE top-level integration. Jumping directly to integration simulation hides per-module bugs and makes debug exponentially harder. For each module: write a focused TB covering reset, normal operation, boundary, and backpressure; run `scripts/run_sim_guarded.py`; run `scripts/sim_log_gate.py` on the log; run `scripts/rtl_style_check.py` on both RTL and TB. Only after ALL per-module simulations pass, proceed to integration TB. Document evidence in `docs/module_verification_matrix.md` and `docs/dev_log.md`. See `references/verification/per-module-simulation-gate.md`.
+A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to Step 8.
 
 **Module boundary discipline (PH1):** Prefer registered outputs at module boundaries. Combinational outputs cause glitches during FSM transitions and complicate TB sampling. See `references/advanced/physical-awareness-guidelines.md` PH1.
 
@@ -362,30 +369,11 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 
 **NBA ordering hazard check (L1/L2):** Read `references/timing/nba-ordering-guide.md`. Audit: same-block old-value reads, cross-block sequential dependencies, counter-driven registered outputs, pointer-indexed memory reads, counter advances not gated by valid+ready. Fix hazards -> re-run Step 8.
 
-**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8b and Step 9.
-
-### 8b. Functional verification plan (mandatory)
-
-**Structural review (Step 8) does NOT guarantee functional correctness.** Before generating TB (Step 9), produce the verification PLAN:
-
-**Golden reference strategy** (see `references/verification/golden-reference-guide.md`): Computation -> known I/O pairs. Algorithm -> software reference model. Register block -> write-readback. Data movement -> end-to-end scoreboard. Control -> invariant checking. Pipeline -> latency verification.
-
-**Scoreboard and audit plan:**
-- **Contract-to-test trace**: for L1/L2 and protocol work, read `references/workflow/contract-to-test-trace-gate.md`. Every visible sideband or response field in the contract must map to RTL producer/consumer logic and at least one TB check or documented waiver.
-- **Payload scoreboard** for data movers. **Transaction-shape scoreboard** (AWADDR/AWLEN/WLAST/WSTRB/BRESP/completion ordering) for DMA/NVMe. A completion-only TB that checks status/bytes without asserting AWADDR, AWLEN, W beat count, WLAST exact cycle, WSTRB, and BRESP per burst is not acceptable for PASS -- `rtl_style_check.py` TB_COMPLETION_ONLY1 flags this as E-level.
-- **Global error counter**: `total_error_cnt` gates `ALL_TESTS_PASS`. Per-test local counters that can be zero while others show errors -> false-pass.
-- **False-pass audit plan**: define what evidence in the sim log would reclassify PASS as FAIL (see `references/verification/simulation-loop.md` false-pass detection).
-
-**Minimum test plan:** (1) golden reference per module type, (2) one complete protocol transaction, (3) boundary conditions (empty/full/zero/max), (4) at least one stall test (WREADY=0 >=2 cycles), (5) NVMe/DMA: multi-page transfer with non-uniform data.
-
-**If functional tests fail after structural PASS:**
-- Do NOT claim the design is correct
-- Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
-- Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
+**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8c, 8b, and Step 9.
 
 ### 8c. Principle check -- Known Values and Output Discipline (P3, P5a, P5b)
 
-**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8c covers the principles that require actual RTL code to review.
+**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8c covers the principles that require actual RTL code to review. Run this BEFORE the verification plan (8b) so findings can inform test priorities.
 
 Read `references/design/design-principles.md` P3, P5a, P5b.
 
@@ -420,18 +408,57 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 | **3** | **Constrain** | FSM guard (`!busy`, gating), enable qualification |
 | **4** | **Add** | Hardware as last resort -- document why 1-3 don't work |
 
-### 9. Generate testbench, run simulation, execute audit
+### 8b. Functional verification plan (mandatory)
+
+**Steps 8 and 8c do NOT guarantee functional correctness.** Before generating TB (Step 9), produce the verification PLAN. Step 8c findings should inform test priorities.
+
+**Golden reference strategy** (see `references/verification/golden-reference-guide.md`): Computation -> known I/O pairs. Algorithm -> software reference model. Register block -> write-readback. Data movement -> end-to-end scoreboard. Control -> invariant checking. Pipeline -> latency verification.
+
+**Scoreboard and audit plan:**
+- **Contract-to-test trace**: for L1/L2 and protocol work, read `references/workflow/contract-to-test-trace-gate.md`. Every visible sideband or response field in the contract must map to RTL producer/consumer logic and at least one TB check or documented waiver.
+- **Payload scoreboard** for data movers. **Transaction-shape scoreboard** (AWADDR/AWLEN/WLAST/WSTRB/BRESP/completion ordering) for DMA/NVMe. A completion-only TB that checks status/bytes without asserting AWADDR, AWLEN, W beat count, WLAST exact cycle, WSTRB, and BRESP per burst is not acceptable for PASS -- `rtl_style_check.py` TB_COMPLETION_ONLY1 flags this as E-level.
+- **Global error counter**: `total_error_cnt` gates `ALL_TESTS_PASS`. Per-test local counters that can be zero while others show errors -> false-pass.
+- **False-pass audit plan**: define what evidence in the sim log would reclassify PASS as FAIL (see `references/verification/simulation-loop.md` false-pass detection).
+
+**Minimum test plan:** (1) golden reference per module type, (2) one complete protocol transaction, (3) boundary conditions (empty/full/zero/max), (4) at least one stall test (WREADY=0 >=2 cycles), (5) NVMe/DMA: multi-page transfer with non-uniform data.
+
+**If functional tests fail after structural PASS:**
+- Do NOT claim the design is correct
+- Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
+- Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
+
+### 9A. Per-module verification (mandatory for L2, skip for L0/L1)
+
+L2 subsystems MUST verify each submodule independently before integration.
+Per-module bugs caught here are cheap; the same bugs at integration are expensive.
+
+For each RTL submodule (not top/wrapper):
+1. Write a focused TB covering reset, normal operation, boundary, and backpressure.
+2. Run `scripts/run_sim_guarded.py` on the per-module TB.
+3. Run `scripts/sim_log_gate.py` on the per-module sim log.
+4. Run `scripts/rtl_style_check.py` on both the RTL and TB files.
+5. Record evidence in `docs/module_verification_matrix.md` and `docs/dev_log.md`.
+
+Only after ALL sub-modules pass, proceed to the pre-integration gate.
+
+### 9A-EXIT. Pre-integration Phase Gate (L2 stop-go before integration TB)
+
+Do NOT write or run integration TB until `python scripts/workflow_gate.py --phase pre-integration <project_dir>` exits 0. This gate requires:
+- `docs/module_verification_matrix.md` exists and covers every non-top sub-module
+- Each sub-module has PASS evidence or Accepted Limitation waiver
+- No integration TB/sim artifacts exist before per-module evidence
+
+If FAIL: complete missing per-module verification, re-run this gate.
+
+### 9B. Integration verification
+
+Only after pre-integration gate passes, write and run integration TB.
 
 **1. Generate testbench and assertions.** Provide: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI: use `references/verification/axi-verification.md`. Before writing TB: read `references/verification/icarus-common-pitfalls.md` (15 Icarus-specific pitfalls) and use `references/verification/tb-examples.md` standard skeleton. TB must follow output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`.
 
 **2. Run simulation loop.** Use `scripts/run_sim_guarded.py` as the recommended vvp wrapper (timeout, VCD/log size limits, UTF-8-safe output). Follow `references/verification/simulation-loop.md`: compile -> simulate -> analyze -> fix -> re-sim, max 3 iterations. Do NOT run bare `vvp` -- use the guarded wrapper.
 
-**L2 per-module simulation gate:** Do NOT proceed to integration TB until each submodule has its own TB that passes `scripts/sim_log_gate.py` and `scripts/rtl_style_check.py`. Integration-only simulation is a verification blind spot -- per-module bugs become integration bugs that are harder to triage. Document each module's pass status in `docs/module_verification_matrix.md` and `docs/dev_log.md` before writing the integration TB. `scripts/pre_integration_gate.py` enforces this: integration TB or sim artifact before per-module evidence = FAIL. See `references/verification/per-module-simulation-gate.md`.
-
-Before writing or running integration TB for L2, normal path:
-`python scripts/workflow_gate.py --phase pre-integration <project_dir>`.
-
-- Compile fail -> fix Verilog syntax/connectivity -> re-run Step 7b -> return to Step 9.
+- Compile fail -> fix Verilog syntax/connectivity -> re-run Step 7b -> return to Step 9B.
 - Sim fail -> Phase 4 (principle-driven debug): categorize failure, map symptom to P1-P5a, match bug pattern, minimal fix -> re-run Step 8 on changed code -> re-run 7b -> return.
 - Max 3 iterations. 4th failure -> stop and request human review.
 
@@ -441,7 +468,7 @@ Before writing or running integration TB for L2, normal path:
 
 ### 9-EXIT. Simulation Phase Gate (stop-go before finalization)
 
-Do NOT proceed to Step 10 until `scripts/workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside the wrapper/safety gates: actual sim logs must pass, L2 pre-integration evidence must be complete, contract/test matrices need TB/log evidence or Accepted Limitation rows, DMA/NVMe scoreboards must check payload and transaction shape, and dev-log residual risks must use only Blocking Gap / Accepted Limitation / Residual Risk.
+Do NOT proceed to Step 10 until `scripts/workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside this phase wrapper: actual simulation logs must pass `sim_log_gate.py`, and L2 pre-integration evidence is re-confirmed so integration simulation cannot become the first place where missing per-module verification is discovered. Final-delivery evidence such as contract/test matrix cross-references, scoreboard substance, delegation provenance, and residual-risk classification is checked in Step 10 by the final gate.
 
 If any FAIL: fix, re-run Steps 7b-9, re-check this gate. Only clean exit proceeds to Step 10.
 

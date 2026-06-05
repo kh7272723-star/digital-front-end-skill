@@ -17,6 +17,11 @@ Key updates:
 - `workflow_gate.py` is now the only normal Design Mode gate entry. Sibling
   gate scripts are wrapper internals or debug tools; direct outputs from them
   do not count as phase evidence.
+- **Workflow restructured:** pre-rtl gate now checks contract readiness (not
+  just skeleton). Step 9 split into 9A (per-module verification, L2 mandatory)
+  and 9B (integration verification). Step 8 reordered: self-review (8) ->
+  principle review (8c) -> verification plan (8b). L2 pre-integration gate
+  now requires `module_verification_matrix.md` even without integration TB.
 - Fail-closed project gates for L1/L2 deliverables: `project_preflight_gate.py`, `project_artifact_gate.py`, `pre_integration_gate.py`, and `final_delivery_gate.py`.
 - `final_delivery_gate.py` now checks the workflow state chain too, so direct
   final-gate bypasses of `workflow_gate.py` are rejected.

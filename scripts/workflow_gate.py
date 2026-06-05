@@ -255,10 +255,53 @@ def discover_sim_logs(project: Path) -> list[str]:
 #  Per-phase gate logic
 # ---------------------------------------------------------------------------
 
+def _check_contract_readiness(project: Path, level: str) -> list[str]:
+    """Verify required contracts/plans exist and are non-empty before RTL.
+
+    For L0: only dev_log.md required (handled by preflight).
+    For L1: timing-contract.md, verification_matrix.md.
+    For L2: interface-contracts.md, timing-contract.md, contract_implementation_matrix.md,
+            protocol_claim_ledger.md, verification_matrix.md.
+    """
+    if level == 'L0':
+        return []
+
+    findings: list[str] = []
+    docs_dir = project / "docs"
+
+    required = ["timing-contract.md", "verification_matrix.md"]
+    if level in ('L2', 'L3'):
+        required.extend([
+            "interface-contracts.md",
+            "contract_implementation_matrix.md",
+            "protocol_claim_ledger.md",
+        ])
+
+    for fname in required:
+        fpath = docs_dir / fname
+        if not fpath.exists():
+            findings.append(f"pre-rtl: missing required contract doc: docs/{fname}")
+        elif not fpath.read_text(encoding="utf-8", errors="replace").strip():
+            findings.append(f"pre-rtl: contract doc is empty: docs/{fname}")
+
+    return findings
+
+
 def gate_pre_rtl(project: Path) -> list[str]:
+    findings: list[str] = []
+
+    # 1. Project skeleton / preflight check
     rc, out = run_script("project_preflight_gate.py", [str(project)])
     print_block("project_preflight_gate", rc, out)
-    return [] if rc == 0 else ["project_preflight_gate failed"]
+    if rc != 0:
+        findings.append("project_preflight_gate failed")
+
+    # 2. Contract readiness: required docs exist and are non-empty
+    level = detect_level(project)
+    contract_findings = _check_contract_readiness(project, level)
+    findings.extend(contract_findings)
+
+    return findings
 
 
 def gate_post_rtl(project: Path) -> list[str]:
@@ -300,6 +343,15 @@ def gate_post_sim(project: Path) -> list[str]:
         print_block(f"sim_log_gate {log}", rc, out)
         if rc != 0:
             findings.append(f"sim_log_gate failed: {log}")
+
+    # L2: re-confirm pre-integration evidence is complete
+    level = detect_level(project)
+    if level in ('L2', 'L3'):
+        rc, out = run_script("pre_integration_gate.py", [str(project)])
+        print_block("pre_integration_gate (L2 re-confirm)", rc, out)
+        if rc != 0:
+            findings.append("L2 pre-integration evidence incomplete at post-sim gate")
+
     return findings
 
 

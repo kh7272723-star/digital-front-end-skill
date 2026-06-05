@@ -11,6 +11,7 @@
 - 工作流门禁前移到具体阶段出口：`pre-rtl`、`post-rtl`、`pre-integration`、`post-sim`、`final`。
 - 新增 `scripts/workflow_gate.py`，让 agent 每个阶段只需执行一个 wrapper 命令，降低长上下文 L2 项目漏跑脚本的概率。**状态锁：** 每次 PASS 写入 `docs/workflow_state.json`；后续阶段要求前置阶段 PASS 验签。`--force` 仅用于人工指示的恢复场景，不是 waiver。
 - `workflow_gate.py` 现在是 Design Mode 唯一正常门禁入口；其他 gate 脚本是 wrapper 内部实现或 debug 工具，直接输出不算阶段证据。
+- **工作流重排：** pre-rtl 门禁改为合同就绪检查（非仅骨架）。Step 9 拆分为 9A（逐模块验证，L2 强制）和 9B（集成验证）。Step 8 重排为：自审 (8) -> 原则审查 (8c) -> 验证计划 (8b)。L2 pre-integration 门禁现在即使没有集成 TB 也要求 `module_verification_matrix.md` 存在且覆盖完整。
 - 新增/强化 L1/L2 fail-closed 门禁：`project_preflight_gate.py`、`project_artifact_gate.py`、`pre_integration_gate.py`、`final_delivery_gate.py`。
 - `final_delivery_gate.py` 也会复核 workflow state chain；直接绕过 `workflow_gate.py` 跑 final gate 会被拒绝。
 - `final_delivery_gate.py` 失败时禁止普通 `Status: PASS`；只能写 `BLOCKED`、`FAIL` 或带证据的 `BLOCKED_BY_GATE_DISPUTE`。

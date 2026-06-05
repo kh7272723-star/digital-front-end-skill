@@ -149,18 +149,27 @@ def _detect_integration_tb(tb_files: list[str], modules: dict[str, str]) -> list
     return integration_tbs
 
 
-def _has_module_evidence(proj_dir: str, module_name: str) -> bool:
-    """Check if a module has per-module TB or evidence."""
-    # Check for per-module TB: tb/tb_<module>.v
-    for subdir in ('tb', 'sim'):
-        tb_path = os.path.join(proj_dir, subdir, f'tb_{module_name}.v')
-        if os.path.isfile(tb_path):
-            return True
-        tb_path_sv = os.path.join(proj_dir, subdir, f'tb_{module_name}.sv')
-        if os.path.isfile(tb_path_sv):
-            return True
+def _line_has_pass_marker(line: str) -> bool:
+    """Return True only for explicit completed/pass evidence, not a bare log path."""
+    has_pass = bool(re.search(
+        r'\b(PASS|ALL_TESTS_PASS|SIMULATION_DONE|PROVEN|FORMAL_PASS)\b',
+        line, re.IGNORECASE))
+    has_negative = bool(re.search(
+        r'\b(FAIL|FAILED|NOT_RUN|PENDING|TBD|TODO|INCOMPLETE)\b',
+        line, re.IGNORECASE))
+    return has_pass and not has_negative
 
-    # Check module_verification_matrix.md for evidence
+
+def _line_has_waiver(line: str) -> bool:
+    """Return True for explicit waivers/accepted limitations."""
+    return bool(re.search(
+        r'\b(waiver|waived|accepted\s+limitation|integration[-\s]?only|'
+        r'top[-\s]?level|trivial)\b',
+        line, re.IGNORECASE))
+
+
+def _has_module_evidence(proj_dir: str, module_name: str) -> bool:
+    """Check if a module has explicit PASS/proof evidence or waiver in matrix."""
     matrix_path = os.path.join(proj_dir, 'docs', 'module_verification_matrix.md')
     matrix_text = _read_file(matrix_path)
     if not matrix_text:
@@ -168,14 +177,7 @@ def _has_module_evidence(proj_dir: str, module_name: str) -> bool:
 
     for line in matrix_text.splitlines():
         if re.search(r'\b' + re.escape(module_name) + r'\b', line, re.IGNORECASE):
-            # Check for evidence log path or waiver
-            has_log = bool(re.search(
-                r'(sim|logs|formal|out|build)[/\\][^|\s,;]+?\.(?:log|out|txt)',
-                line, re.IGNORECASE))
-            has_waiver = bool(re.search(
-                r'\b(waiver|waived|integration[-\s]?only|top[-\s]?level|trivial)\b',
-                line, re.IGNORECASE))
-            if has_log or has_waiver:
+            if _line_has_pass_marker(line) or _line_has_waiver(line):
                 return True
 
     return False
@@ -214,8 +216,96 @@ def _find_integration_sim_artifacts(proj_dir: str) -> list[str]:
     return artifacts
 
 
+def _find_top_modules(proj_dir: str, modules: dict[str, str]) -> set[str]:
+    """Identify top/wrapper modules that instantiate other RTL modules.
+
+    A top/wrapper module either instantiates >= 2 distinct modules, or has a
+    top/wrapper/integration-style name and instantiates at least one module.
+    Returns set of top module names.
+    """
+    module_names = set(modules.keys())
+    top_modules: set[str] = set()
+
+    for mod_name, fname in modules.items():
+        fpath = os.path.join(proj_dir, 'rtl', fname)
+        text = _read_file(fpath)
+        instantiated = set()
+        for other_mod in module_names:
+            if other_mod == mod_name:
+                continue
+            if re.search(r'\b' + re.escape(other_mod) + r'\s+\w+\s*\(', text):
+                instantiated.add(other_mod)
+        wrapper_named = bool(re.search(
+            r'(top|wrapper|integrat|subsystem|system)', mod_name, re.IGNORECASE))
+        file_named = bool(re.search(
+            r'(top|wrapper|integrat|subsystem|system)', fname, re.IGNORECASE))
+        if len(instantiated) >= 2 or (instantiated and (wrapper_named or file_named)):
+            top_modules.add(mod_name)
+
+    return top_modules
+
+
+def _check_module_verification_matrix(proj_dir: str, modules: dict[str, str],
+                                       top_modules: set[str]) -> list[str]:
+    """Check that module_verification_matrix.md covers all non-top sub-modules.
+
+    Each sub-module must have explicit PASS/proof evidence or waiver.
+    """
+    findings = []
+    matrix_path = os.path.join(proj_dir, 'docs', 'module_verification_matrix.md')
+    matrix_text = _read_file(matrix_path)
+
+    if not matrix_text.strip():
+        findings.append(
+            "PRE_INTEGRATION_STRICT: L2 project requires "
+            "docs/module_verification_matrix.md with per-module PASS evidence. "
+            "Create it and record each sub-module's TB, sim log, and PASS status.")
+        return findings
+
+    # Sub-modules = all modules except top/wrapper
+    sub_modules = {m for m in modules if m not in top_modules}
+    if not sub_modules:
+        return findings  # Only top modules -- nothing to check
+
+    # Check each sub-module in the matrix
+    for mod_name in sorted(sub_modules):
+        mod_found = False
+        has_pass = False
+        has_waiver = False
+
+        for line in matrix_text.splitlines():
+            if not re.search(r'\b' + re.escape(mod_name) + r'\b', line, re.IGNORECASE):
+                continue
+            mod_found = True
+            # Check for explicit PASS/proof marker. A bare log path is not PASS.
+            if _line_has_pass_marker(line):
+                has_pass = True
+            # Check for waiver
+            if _line_has_waiver(line):
+                has_waiver = True
+
+        if not mod_found:
+            findings.append(
+                f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' not listed in "
+                f"docs/module_verification_matrix.md. Add a row with TB, sim log, "
+                f"and PASS evidence or Accepted Limitation waiver.")
+        elif not has_pass and not has_waiver:
+            findings.append(
+                f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' in matrix but "
+                f"lacks PASS evidence or waiver. Record sim log path with PASS "
+                f"marker, or add Accepted Limitation with reason.")
+
+    return findings
+
+
 def check_pre_integration(proj_dir: str) -> list[str]:
-    """Main pre-integration gate check. Return list of findings."""
+    """Main pre-integration gate check. Return list of findings.
+
+    For L2 projects with >= 2 RTL modules:
+    1. Strict: require module_verification_matrix.md with per-module PASS
+       evidence for all non-top sub-modules (even without integration TB).
+    2. Existing: reject integration TB/sim artifacts before per-module evidence.
+    """
     findings = []
 
     level = _detect_level(proj_dir)
@@ -226,16 +316,22 @@ def check_pre_integration(proj_dir: str) -> list[str]:
     if len(modules) < 2:
         return findings  # Single-module projects exempt
 
-    # Find TB files and detect integration TBs
+    # --- Strict gate: require module verification matrix for L2 ---
+    top_modules = _find_top_modules(proj_dir, modules)
+    findings.extend(_check_module_verification_matrix(proj_dir, modules, top_modules))
+
+    # --- Existing gate: integration TB/sim artifacts before per-module evidence ---
     tb_files = _find_tb_files(proj_dir)
     if not tb_files:
-        return findings  # No TB files yet -- pre-integration, OK
+        return findings  # No TB files yet -- strict gate already checked above
 
     integration_tbs = _detect_integration_tb(tb_files, modules)
 
     # Check which modules lack per-module evidence
+    top_modules = _find_top_modules(proj_dir, modules)
+    modules_to_check = [m for m in sorted(modules.keys()) if m not in top_modules]
     missing_evidence = []
-    for mod_name in sorted(modules.keys()):
+    for mod_name in modules_to_check:
         if not _has_module_evidence(proj_dir, mod_name):
             missing_evidence.append(mod_name)
 

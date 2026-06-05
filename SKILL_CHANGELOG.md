@@ -1,5 +1,57 @@
 # Skill 迭代日志
 
+## 2026-06-05 - Workflow Phase Restructuring: 工作流阶段重排 + pre-integration 严格化
+
+### 背景
+
+当前工作流诱导 agent 在 Step 9 先生成/运行集成 TB，然后到 9-EXIT 或 final 才发现 L2 per-module simulation gate 没做，造成返工。根因：pre-rtl 门禁只检查骨架不检查合同内容；Step 7 承载了 per-module simulation 说明；Step 8/8b/8c 顺序不对（验证计划在原则审查前生成，可能 stale）；Step 9 混合了 per-module 和 integration；pre_integration_gate 在无 TB 时直接 PASS。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| pre-rtl 合同就绪检查 | `scripts/workflow_gate.py` gate_pre_rtl | L1 要求 timing-contract.md + verification_matrix.md 非空；L2 要求 interface-contracts.md + timing-contract.md + contract_implementation_matrix.md + protocol_claim_ledger.md + verification_matrix.md 非空 |
+| pre-rtl 门禁前移 | `SKILL.md` | 从 Step 1.2（骨架阶段）移到 Step 6a 之后、Step 7 之前。Step 1.2 保留为骨架预检（debug-only） |
+| Step 7 瘦身 | `SKILL.md` | 删除 Step 7 中的 per-module simulation 说明，移至 9A |
+| Step 8/8c/8b 重排 | `SKILL.md` | 原 8 -> 8b -> 8c 改为 8 -> 8c -> 8b。原则审查在验证计划前执行，避免验证计划 stale |
+| Step 9 拆分 | `SKILL.md` | 9A = 逐模块验证（L2 强制）：per-module TB + guarded sim + sim_log_gate + rtl_style_check + module_verification_matrix。9B = 集成验证：integration TB + sim + false-pass audit。9A-EXIT = pre-integration phase gate |
+| pre_integration_gate 严格化 | `scripts/pre_integration_gate.py` | L2 >=2 模块时即使无集成 TB 也要求 module_verification_matrix.md 存在且覆盖每个非 top 子模块；每个子模块需 PASS 证据或 Accepted Limitation waiver |
+| post-sim L2 复核 | `scripts/workflow_gate.py` gate_post_sim | L2 项目 post-sim 时重新运行 pre_integration_gate 确认证据完整 |
+
+### 设计边界
+
+- 不增加新命令或新阶段名。`--phase` 参数不变。
+- 不改变底层 gate 脚本接口。`pre_integration_gate.py` 是增强，不是替代。
+- Step 10 保持 thin delivery gate 角色。
+- L0/L1 不受 pre-integration 严格化影响。
+
+### 验收
+
+| 命令 | 结果 |
+|------|------|
+| `python -m py_compile scripts/workflow_gate.py scripts/pre_integration_gate.py scripts/final_delivery_gate.py scripts/rtl_style_check.py scripts/project_preflight_gate.py scripts/compile_log_gate.py scripts/sim_log_gate.py` | PASS |
+| `python -B scripts/skill_static_check.py` | PASS |
+| `python -m json.tool evals/evals.json` | PASS |
+| `python -m json.tool evals/benchmark.json` | PASS |
+| `python -B scripts/eval_benchmark_check.py` | PASS |
+| SKILL.md 行数 | 327 (<=500) |
+| SKILL.md ASCII | PASS |
+| L2 smoke: 无 module_verification_matrix 时 pre-integration | FAIL（预期） |
+| L2 smoke: 矩阵只有 log 路径但无 PASS marker | FAIL（预期） |
+| L2 smoke: 补齐 PASS evidence 后 pre-integration | PASS |
+
+### 文件变更
+
+- `scripts/pre_integration_gate.py`：严格化 + _find_top_modules + _check_module_verification_matrix
+- `scripts/workflow_gate.py`：gate_pre_rtl 合同检查 + gate_post_sim L2 复核
+- `SKILL.md`：pre-rtl 门禁前移、Step 7 瘦身、8/8c/8b 重排、9A/9B 拆分
+- `references/workflow/task-mode-routing.md`：Design Mode 流程图和 phase-local gate 表更新
+- `README.md` / `README_CN.md`：工作流重排说明
+- `SKILL_CHANGELOG.md`：本条记录
+- `CLAUDE.md`：开发记忆
+
+---
+
 ## 2026-06-05 - Workflow Gate Entry Consolidation: 门禁入口收敛
 
 ### 背景

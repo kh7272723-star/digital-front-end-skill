@@ -572,3 +572,42 @@ Policy update:
 
 This is a workflow simplification, not a new gate. Do not add new project
 microarchitecture constraints under this policy.
+
+## 2026-06-05 Workflow Phase Restructuring: Contract-Ready pre-rtl + 9A/9B Split
+
+Agents were generating integration TBs before per-module evidence because:
+1. pre-rtl gate only checked skeleton (empty files), not contract readiness.
+2. Step 9 mixed per-module and integration verification.
+3. pre_integration_gate passed when no TB existed (no matrix = no findings).
+4. Step 8/8b/8c order had verification plan before principle review.
+
+### Changes
+
+**pre_integration_gate.py** now requires `module_verification_matrix.md` for L2
+with >=2 modules, even without integration TB. New functions:
+- `_find_top_modules()`: identifies top/wrapper modules by instantiation count
+- `_check_module_verification_matrix()`: verifies each non-top sub-module has
+  PASS evidence or Accepted Limitation waiver in the matrix
+
+**workflow_gate.py** `gate_pre_rtl` now checks contract readiness:
+- L1: `docs/timing-contract.md` + `docs/verification_matrix.md` non-empty
+- L2: 5 contract docs non-empty (interface-contracts, timing-contract,
+  contract_implementation_matrix, protocol_claim_ledger, verification_matrix)
+- `gate_post_sim` now re-runs `pre_integration_gate.py` for L2 projects
+
+**SKILL.md** reordered:
+- pre-rtl gate moved from Step 1.2 to after Step 6a (contracts frozen)
+- Step 7 no longer contains per-module simulation instructions
+- Step 8 -> 8c -> 8b (principle review before verification plan)
+- Step 9 split: 9A (per-module sim, L2 mandatory) -> 9A-EXIT (pre-integration
+  gate) -> 9B (integration sim)
+
+### Files modified
+
+- `scripts/pre_integration_gate.py` — strict L2 module verification matrix check
+- `scripts/workflow_gate.py` — contract readiness in gate_pre_rtl, L2 re-confirm in gate_post_sim
+- `SKILL.md` — pre-rtl gate, 8/8c/8b reorder, 9A/9B split (327 lines)
+- `references/workflow/task-mode-routing.md` — pipeline flow and phase-local gate table
+- `README.md` / `README_CN.md` — workflow restructuring notes
+- `SKILL_CHANGELOG.md` — iteration entry
+- `CLAUDE.md` — this section

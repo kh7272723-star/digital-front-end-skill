@@ -19,10 +19,13 @@ appropriate mode before entering the standard pipeline.
 ```
 0 (entry routing) → 1 (parse) → 1.1(if L2) → 1.2(preflight L1/L2) → 1.5(if L2)
 → 1.6(if L2+delegated) → 2 → 2a → 3(freeze + matrix skeleton) → 4 → 5 → 5a
-→ 6 → 6a → 7 → 7b → 8 → 8b(verif plan) → 8c → 9(guarded sim) → 10(finalize)
+→ 6 → 6a → pre-rtl gate → 7 → 7b → 8(self-review) → 8c(principle review)
+→ 8b(verif plan) → 9A(per-module sim, L2) → pre-integration gate (L2)
+→ 9B(integration sim) → post-sim gate → 10(finalize)
 
 Step 3: create docs/contract_implementation_matrix.md skeleton immediately after contract freeze.
-Step 9: use scripts/run_sim_guarded.py, not bare vvp.
+Step 9A/9B: use scripts/run_sim_guarded.py, not bare vvp.
+Pre-RTL gate: after contracts frozen, before any RTL generation.
 ```
 
 ### Phase-local gate commands
@@ -36,7 +39,7 @@ final PASS.
 
 | Boundary | Command | Predecessors (L1/L2) | If FAIL |
 |----------|---------|---------------------|---------|
-| After skeleton creation | `python scripts/workflow_gate.py --phase pre-rtl <project_dir>` | none | Do not write RTL |
+| After contracts frozen (before RTL) | `python scripts/workflow_gate.py --phase pre-rtl <project_dir>` | none | Do not write RTL |
 | After RTL + compile log | `python scripts/workflow_gate.py --phase post-rtl <project_dir>` | pre-rtl | Do not write TB or integrate |
 | Before L2 integration TB/sim | `python scripts/workflow_gate.py --phase pre-integration <project_dir>` | post-rtl (L2 only) | Do not create integration artifacts |
 | After each simulation loop | `python scripts/workflow_gate.py --phase post-sim <project_dir>` | post-rtl; +pre-integration if L2 integration | Do not finalize |
@@ -44,8 +47,8 @@ final PASS.
 
 **Level-specific scope:**
 - **L0:** pre-rtl predecessor not enforced. Single-module projects skip pre-integration.
-- **L1:** pre-rtl required. Pre-integration is not forced; classify real integration projects as L2.
-- **L2:** full chain enforced. Per-module evidence required before integration.
+- **L1:** pre-rtl required (timing-contract + verification_matrix). Pre-integration is not forced; classify real integration projects as L2.
+- **L2:** full chain enforced. Pre-rtl checks contract readiness (5 docs non-empty). Per-module evidence required before integration.
 
 `final_delivery_gate.py` is an aggregation safety net and independently checks
 `docs/workflow_state.json`. It is not the normal final entry. Direct final-gate
