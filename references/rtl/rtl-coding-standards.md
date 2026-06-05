@@ -436,6 +436,151 @@ end
 
 ---
 
+### 2.5 FSM-Datapath Structural Purity (reinforced)
+
+These rules strengthen C5/C6/C7 with mechanical checks. See also `references/rtl/rtl-structural-purity.md` for full rationale, templates, and anti-patterns.
+
+| # | Grade | Rule |
+|---|:---:|------|
+| **C22** | **M** | **FSM sequential `always @(posedge clk)` block: only `cstate <= nstate`.** No datapath registers, counters, payload, or sideband may be updated in this block. |
+| **C23** | **M** | **FSM combinational `always @(*)` block: only `nstate` and single-bit control signals.** No multi-bit value assignments to addresses, data, byte counts, burst lengths, indices, or pointers. |
+| **C24** | **M** | **Datapath sequential `always @(posedge clk)` block: no `case(cstate)`, no `if (cstate == S_*)`.** All gating must use named single-bit control signals from the FSM. |
+| **C25** | **M** | **No signal driven from more than one `always` block.** This reinforces E1. |
+| **C26** | **S** | **All multi-bit counter/address/payload/pointer/index/FIFO-count registers belong exclusively in datapath blocks.** Not in FSM blocks, not in hybrid blocks. |
+
+#### 2.5.1 FSM Sequential Block - Single Assignment Only
+
+```verilog
+// Correct: pure state register
+always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+        cstate <= S_IDLE;
+    end else begin
+        cstate <= nstate;
+    end
+end
+```
+
+```verilog
+// Forbidden: FSM sequential block mixing state and datapath
+always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+        cstate <= S_IDLE;
+        byte_cnt_q <= 32'b0;     // datapath in FSM block
+    end else begin
+        cstate <= nstate;
+        if (accept) begin
+            byte_cnt_q <= byte_cnt_q + 32'd8;
+        end
+    end
+end
+```
+
+#### 2.5.2 Datapath Block - Control-Signal Gating Only
+
+```verilog
+// Forbidden: cstate reference in datapath block
+always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+        page_addr_q <= 64'b0;
+    end else begin
+        case (cstate)
+            S_PAGE_TX: if (accept) page_addr_q <= next_addr;
+        endcase
+    end
+end
+```
+
+```verilog
+// Correct: gated by FSM control signal
+always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+        page_addr_q <= 64'b0;
+    end else begin
+        if (page_tx_en && accept) begin
+            page_addr_q <= next_addr;
+        end
+    end
+end
+```
+
+### 2.6 Accepted-Operation Discipline
+
+| # | Grade | Rule |
+|---|:---:|------|
+| **C27** | **M** | **Every counter/pointer/payload/sideband register update must be gated by a named `*_fire`, `*_accept`, `*_en`, or `*_do` condition.** The condition name declares the operation semantics. |
+| **C28** | **S** | **Handshake acceptance conditions are defined once at module scope:** `wire accept_input = valid_i && ready_o; wire accept_output = valid_o && ready_i;` Reuse these names instead of inlining `valid && ready`. |
+
+Example:
+```verilog
+// Correct: named acceptance conditions
+wire nvm_read_do = nvm_rd_en_o;                    // issue equals acceptance
+wire w_fire      = axi_w_valid_o && axi_w_ready_i;  // handshake
+wire page_accept = page_valid_o && page_ready_i;    // handshake
+wire cmd_accept  = cmd_valid_i && cmd_ready_o;      // handshake
+
+always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+        nvm_global_offset_q <= 32'b0;
+    end else begin
+        if (start_i) begin
+            nvm_global_offset_q <= 32'b0;
+        end else if (nvm_read_do) begin
+            nvm_global_offset_q <= nvm_global_offset_q + 32'd8;
+        end else begin
+            nvm_global_offset_q <= nvm_global_offset_q;
+        end
+    end
+end
+```
+
+### 2.7 Unit and Width Discipline
+
+| # | Grade | Rule |
+|---|:---:|------|
+| **C29** | **S** | **Variables carrying physical quantities encode their unit in the suffix:** `_bytes`, `_beats`, `_entries`, `_len` (beats-1). |
+| **C30** | **S** | **Unit conversions are explicit and named.** `wire [16:0] page_beats = page_bytes_i >> LP_BLOCK;` The wire name declares the conversion. |
+| **C31** | **M** | **Arrays indexed by `$clog2(DEPTH)` width, never hardcoded.** `reg [LIST_IDX_W-1:0] list_idx_q;` where `localparam LIST_IDX_W = $clog2(LIST_ENTRIES);`. |
+
+Example:
+```verilog
+// Correct: explicit units and conversions
+localparam BUS_BYTES = AXI_DATA_W / 8;
+localparam LP_BLOCK  = $clog2(BUS_BYTES);
+wire [16:0] page_total_beats;  // beats, not bytes
+assign page_total_beats = page_bytes_i >> LP_BLOCK;  // bytes to beats, explicit
+
+// Forbidden: implicit unit mixing
+if (byte_cnt_q <= AXI_MAX_BURST)  // bytes vs beats-1; unclear which unit is intended
+```
+
+### 2.8 No Fake Parameterization
+
+| # | Grade | Rule |
+|---|:---:|------|
+| **C32** | **M** | **If a `parameter` defines a capacity, depth, width, or entry count, all dependent arrays, pointers, and loop bounds must be derived from it.** A parameter that exists but is locally overridden by a hardcoded constant is a reject. |
+
+```verilog
+// Forbidden: LIST_ENTRIES=512 but dependent logic is hardcoded
+parameter LIST_ENTRIES = 512;
+reg [63:0] list_buf [0:63];       // 64 is not derived from 512
+reg [5:0]  list_idx_q;            // 6-bit is not $clog2(512)
+assign list_ar_len_o = 8'd63;     // 63 is not derived from LIST_ENTRIES
+```
+
+```verilog
+// Correct: parameter drives dependent sizing
+parameter LIST_ENTRIES = 512;
+localparam LIST_BUF_DEPTH = 64;  // intentional hardware limit, documented
+localparam LIST_IDX_W = $clog2(LIST_ENTRIES);
+localparam LIST_ARLEN = (LIST_BUF_DEPTH * 8 / BUS_BYTES) - 1;
+reg [63:0] list_buf [0:LIST_BUF_DEPTH-1];
+reg [LIST_IDX_W-1:0] list_idx_q;
+assign list_ar_len_o = LIST_ARLEN[7:0];
+```
+
+---
+
 ## 5. Phase 3 Code Compliance Audit
 
 Based on the above standards, the current Phase 3 code has the following violations:

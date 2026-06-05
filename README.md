@@ -2,6 +2,20 @@
 
 A domain-specific AI Agent Skill that turns a general-purpose LLM into a disciplined digital front-end RTL design assistant. It distills authoritative engineering knowledge (IEEE standards, Arm AMBA specifications, synthesis/CDC methodology) into compact, machine-enforceable rules, and enforces a contract-first workflow: timing contract before cycle trace, cycle trace before RTL.
 
+## Latest release: v2026.06.05
+
+This release hardens the skill around evidence-bound RTL delivery, especially for L2 storage and DMA/NVMe-style subsystems. The main change is that final claims now have to bind to executable evidence, not just documentation text.
+
+Key updates:
+
+- Fail-closed project gates for L1/L2 deliverables: `project_preflight_gate.py`, `project_artifact_gate.py`, `pre_integration_gate.py`, and `final_delivery_gate.py`.
+- Mandatory L2 per-module verification evidence through `docs/module_verification_matrix.md`; integration simulation no longer substitutes for leaf-module evidence.
+- Delegation provenance checks: `Delegate: yes` requires `docs/delegation_plan.md` and role reports under `docs/subagents/`.
+- Protocol claim ledger evidence checks: `protocol_claim_ledger.md` rows with blank/TBD Evidence are rejected when a project claims PASS.
+- Storage mover evidence checks for WSTRB/unaligned transfers, RRESP/RD error propagation, `cpl_bytes`, PRP list public-interface exercise, and invalid-command completion.
+- Stronger testbench false-pass detection, including timeout-plus-`$finish`, missing X/Z checks, completion-only DMA/NVMe benches, and weak transaction-shape scoreboards.
+- Windows-safe simulation wrapper behavior: `.vvp` files are invoked through `vvp <file>` by `run_sim_guarded.py`.
+
 ## Why this exists
 
 General-purpose LLMs can generate syntactically valid Verilog, but they routinely:

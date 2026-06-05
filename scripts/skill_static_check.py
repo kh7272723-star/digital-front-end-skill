@@ -30,6 +30,17 @@ def check_skill_lines(root: Path, errors: list[str]) -> None:
         errors.append(f"SKILL.md has {len(lines)} lines; expected <= 500")
 
 
+def check_skill_ascii(root: Path, errors: list[str]) -> None:
+    skill = root / "SKILL.md"
+    for line_no, line in enumerate(read_text(skill).splitlines(), 1):
+        for col_no, ch in enumerate(line, 1):
+            if ord(ch) > 127:
+                errors.append(
+                    f"SKILL.md contains non-ASCII U+{ord(ch):04X} "
+                    f"at {line_no}:{col_no}")
+                return
+
+
 def check_evals(root: Path, errors: list[str]) -> None:
     evals_path = root / "evals" / "evals.json"
     with evals_path.open("r", encoding="utf-8") as f:
@@ -121,6 +132,7 @@ def main() -> int:
     errors: list[str] = []
 
     check_skill_lines(root, errors)
+    check_skill_ascii(root, errors)
     check_evals(root, errors)
     check_references_listed(root, errors)
     check_banned_terms(root, errors)

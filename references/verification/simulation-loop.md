@@ -99,6 +99,30 @@ Always run lint before simulation. A module that fails lint will produce unpredi
 
 ---
 
+## Per-Module Simulation (L2 mandatory, before integration)
+
+For L2 multi-module projects, do NOT jump to top-level integration simulation. Run the full lint-compile-simulate loop on each submodule FIRST:
+
+1. **Write a focused per-module TB** covering: reset, one normal operation, one boundary condition, one backpressure case. The TB does not need to be as comprehensive as the integration TB -- its purpose is to catch per-module bugs in isolation.
+
+2. **Run the full loop per module:** lint (Phase 1) -> compile (Phase 2) -> simulate (Phase 3) -> false-pass audit. Each module must pass all gates independently.
+
+3. **Gate commands per module:**
+   ```bash
+   python scripts/rtl_style_check.py rtl/<module>.v tb/tb_<module>.v
+   iverilog -g2012 -o sim/tb_<module>.vvp rtl/<module>.v tb/tb_<module>.v
+   python scripts/run_sim_guarded.py --timeout-sec 30 --log sim/tb_<module>.log -- vvp sim/tb_<module>.vvp
+   python scripts/sim_log_gate.py sim/tb_<module>.log
+   ```
+
+4. **Record per-module pass in `docs/module_verification_matrix.md` and `docs/dev_log.md`** with the module name, contract link, TB/formal path, evidence log, status, and any waivers. See `references/verification/per-module-simulation-gate.md`.
+
+5. **Only after ALL modules pass** per-module simulation, proceed to integration TB.
+
+**Why per-module first:** Integration-only simulation hides per-module bugs. When a per-module bug manifests at integration, it is exponentially harder to triage because the failure symptom is separated from the root cause by module boundaries, pipeline stages, and protocol handshakes. Per-module TBs isolate the bug to a single module, making debug linear instead of combinatorial.
+
+---
+
 ## Phase 2: Compile (Icarus Verilog)
 
 For multi-module designs, compile all source files together:
@@ -133,7 +157,9 @@ Flags:
 Run the compiled simulation with a timeout:
 
 ```bash
-timeout <seconds> vvp sim.vvp +vcd=<waveform.vcd> 2>&1
+# Use the guarded wrapper, not bare vvp
+python scripts/run_sim_guarded.py --timeout-sec <seconds> --max-vcd-mb 50 --max-log-mb 20 \
+    --log sim/sim_output.log --cwd <project_dir> -- vvp sim.vvp +vcd=<waveform.vcd>
 ```
 
 ### Simulation output protocol
@@ -181,8 +207,9 @@ Evaluate in this priority order (first match wins):
 
 | Priority | Result | Output pattern | Action |
 |----------|--------|---------------|--------|
+| 0 | **FALSE_PASS** | `ALL_TESTS_PASS` present BUT log also contains `exp`/`expected`/`mismatch`/`xxxx` in `$display` lines without corresponding `error_cnt++` or `TEST_FAIL` | Re-classify as FAIL. Fix testbench so data checks use `error_cnt <= error_cnt + 1` or `TEST_FAIL`. See NVMe io-datapath false-pass case. |
 | 1 | **HANG** | timeout killed, no `SIMULATION_DONE` | → Phase 5 |
-| 2 | **PASS** | `ALL_TESTS_PASS` present | Done — report success |
+| 2 | **PASS** | `ALL_TESTS_PASS` present AND no FALSE_PASS evidence found | Done — report success |
 | 3 | **FAIL** | `TEST_FAIL` present | Extract test_id and reason → Phase 4 |
 | 4 | **FATAL** | `$fatal` or `$finish` without `ALL_TESTS_PASS` | → fallback check |
 | 5 | **COMPILE_ONLY** | no output at all (empty stdout) | Testbench never started — check clock/reset |
@@ -192,10 +219,11 @@ Evaluate in this priority order (first match wins):
 Existing testbenches may not follow the output protocol (they were written before this standard). When the classification yields FATAL or COMPILE_ONLY but the output is non-empty, apply this fallback:
 
 1. Check if output contains a PASS-like pattern: `"PASS"`, `"OK"`, `"ALL TESTS PASSED"`, `"$finish"` with no preceding `"FAIL"` or `"ERROR"`
-2. Check if output contains a FAIL-like pattern: `"FAIL"`, `"ERROR"`, `"ASSERT"`, `"mismatch"`
-3. If PASS-like found and no FAIL-like found → classify as **PASS (non-compliant output)**, report success with a note that the testbench should be updated to use the standard protocol
-4. If FAIL-like found → classify as **FAIL**, extract the failure message and proceed to Phase 4
-5. If neither → classify as **UNKNOWN**, re-run with verbose output or inspect VCD
+2. Check if output contains a FAIL-like pattern: `"FAIL"`, `"ERROR"`, `"ASSERT"`, `"mismatch"`, `"exp"`, `"expected"`, `"xxxx"`
+3. If FAIL-like found BUT `ALL_TESTS_PASS` also present → classify as **FALSE_PASS**, report as FAIL with explanation
+4. If PASS-like found and no FAIL-like found → classify as **PASS (non-compliant output)**, report success with a note that the testbench should be updated to use the standard protocol
+5. If FAIL-like found and no `ALL_TESTS_PASS` → classify as **FAIL**, extract the failure message and proceed to Phase 4
+6. If neither → classify as **UNKNOWN**, re-run with verbose output or inspect VCD
 
 **Example non-compliant output and classification:**
 ```
@@ -341,8 +369,10 @@ end
 // In test:
 always @(posedge clk_i) begin
     if (cycle_cnt > MAX_CYCLES) begin
-        $display("HANG: exceeded %0d cycles at time %0t", MAX_CYCLES, $time);
-        $finish;
+        $display("TIMEOUT: exceeded %0d cycles at time %0t", MAX_CYCLES, $time);
+        fail_cnt = fail_cnt + 1;
+        $display("TESTS_FAILED");
+        $fatal;
     end
 end
 ```
@@ -418,11 +448,13 @@ module tb_<module_name>;
     // Cycle counter (for hang detection)
     always @(posedge clk_i) cycle_cnt <= cycle_cnt + 1;
 
-    // Timeout watchdog
+    // Timeout watchdog — must use $fatal for nonzero exit; $finish alone is false-pass risk
     initial begin
         #1_000_000;  // 1ms timeout
-        $display("FAIL: simulation timeout at %0t", $time);
-        $finish;
+        $display("TIMEOUT: simulation timeout at %0t", $time);
+        fail_cnt = fail_cnt + 1;
+        $display("TESTS_FAILED");
+        $fatal;  // nonzero exit code — TB_TIMEOUT_FATAL1
     end
 
     // VCD dump (for waveform analysis)
@@ -498,20 +530,99 @@ endmodule
 
 ---
 
+## TB Reliability Gate (mandatory before simulation)
+
+Every testbench must pass this gate before the first simulation run:
+
+### TBR1: Unbounded Wait Protection
+
+Every `while`, `wait`, `forever`, or polling loop that blocks on an external
+signal must have a cycle timeout or budget. Unbounded waits produce silent hangs
+that look like a simulation bug but are actually a testbench infrastructure
+failure.
+
+```verilog
+// ❌ Forbidden: unbounded wait
+while (!cpl_valid) @(posedge clk);
+
+// ✅ Correct: bounded wait with cycle budget
+integer wait_cnt = 0;
+while (!cpl_valid && wait_cnt < 150000) begin
+    @(posedge clk); wait_cnt = wait_cnt + 1;
+end
+if (!cpl_valid) begin
+    $display("TEST_FAIL: completion timeout");
+    test_err = test_err + 1;
+end
+```
+
+### TBR2: PASS Requires ALL Evidence
+
+`ALL_TESTS_PASS` may only be printed when ALL of these are true:
+- [ ] `SIMULATION_DONE` reached (no timeout)
+- [ ] `scripts/sim_log_gate.py` exits 0 on the actual simulation log
+- [ ] Compile completed with no warnings, or every warning has a written waiver
+- [ ] `scripts/rtl_style_check.py` has no unwaived findings on RTL and TB
+- [ ] No `ERROR`, `FAIL`, `mismatch`, `TIMEOUT` in the log (after audit)
+- [ ] No `X` or `Z` in captured data values
+- [ ] Expected beat/transaction count verified against actual
+- [ ] Completion status checked and correct
+- [ ] Contract-to-test trace completed for status, error, byte-count, busy, and transaction-shape sidebands
+
+**Timeout must use `$fatal` or `error_cnt++` plus `TESTS_FAILED`;** `$finish`-only
+timeout is a false-pass risk because the process exit code is still 0.
+
+### TBR3: Dual Scoreboard Requirement (DMA/NVMe)
+
+Every data-movement testbench must check BOTH:
+- [ ] **Payload scoreboard:** captured data = expected source data
+- [ ] **Transaction-shape scoreboard:** expected AW/AR count, AWADDR sequence,
+  AWLEN/ARLEN, WLAST/RLAST position, WSTRB on key beats, BRESP/RRESP,
+  completion ordering
+
+### TBR4: Captured Count vs Expected Count
+
+Any `cap_cnt` or captured-beat accumulator must be compared against an
+`expected_beats` or `expected_transactions` reference:
+
+```verilog
+// ✅ Correct: captured count checked against expected
+if (cap_cnt != expected_beats) begin
+    $display("TEST_FAIL: beat count mismatch: got %0d exp %0d", cap_cnt, expected_beats);
+    test_err = test_err + 1;
+end
+```
+
+### TBR5: Protocol Response/Status Consumption
+
+All wired response/status inputs (`*_b_resp_i`, `*_r_resp_i`, `cpl_status_o`,
+etc.) must EITHER be verified in the testbench OR have a documented waiver with
+reason. Wired-but-never-checked inputs are a verification blind spot.
+
+---
+
 ## Simulation loop checklist (for SKILL.md step 9)
 
 When simulation tools are available:
 
 - [ ] Lint passes with no errors (verilator preferred; yosys `check -assert` as fallback)
 - [ ] iverilog compiles all source files without errors (use `-Wall` for extra warnings)
+- [ ] `scripts/rtl_style_check.py` clean or all findings have written waivers
 - [ ] Testbench follows output protocol (RESET_RELEASED, TEST_START/PASS/FAIL, ALL_TESTS_PASS)
 - [ ] If testbench is non-compliant: apply fallback classification (PASS-like/FAIL-like pattern matching)
-- [ ] Simulation completes within timeout (no hang)
-- [ ] All directed tests pass
+- [ ] Simulation completes within timeout (no hang); timeout uses `$fatal` or `error_cnt++` + `TESTS_FAILED`
+- [ ] **`scripts/sim_log_gate.py` PASS** on the actual simulation log file
+- [ ] **Full log audit (Step 8b) completed before claiming PASS:** scan for `exp`/`expected`/`mismatch`/`xxxx` not guarded by error tracking → re-classify as FALSE_PASS if found
+- [ ] **L1/L2: global error counter.** Testbench uses a single `total_error_cnt` (or equivalent) gating `ALL_TESTS_PASS`, not per-test local counters that can be independently zero while others show errors
+- [ ] **DMA/NVMe: dual scoreboard.** Testbench has both payload scoreboard (data comparison) AND transaction-shape scoreboard (AWADDR, AWLEN, WLAST, WSTRB, BRESP, completion ordering)
+- [ ] **At least one backpressure/stall test.** Not all channels permanently ready. At least one test with WREADY=0 for ≥2 cycles or NVM multi-cycle response
+- [ ] **L1/L2 No-SPEC: `scripts/project_artifact_gate.py` PASS** on the project directory
+- [ ] All directed tests pass (with verified error tracking, not just $display)
 - [ ] If any test fails: bug pattern matched, fix applied, re-simulation passed (max 3 iterations)
 - [ ] If 3 iterations exhausted: residual issues reported with evidence
 - [ ] At least one golden reference test exists (see golden-reference-guide.md for strategy selection)
 - [ ] Golden reference test passes (functional correctness, not just structural)
+- [ ] No unchecked compensation-gate boxes in dev_log before claiming PASS
 
 When yosys is available (after simulation passes):
 

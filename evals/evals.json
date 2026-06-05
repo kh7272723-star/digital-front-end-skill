@@ -854,6 +854,633 @@
         "Output recommends DMA testbench checks beyond data comparison: beat count, address sequence, AWLEN, WLAST, WSTRB, responses, and completion ordering.",
         "Output references protocol-authority-map.md or protocol-authority-audit.md and axi-dma-channel-guidelines.md."
       ]
+    },
+    {
+      "id": 65,
+      "prompt": "Review this NVMe IO datapath project for false-pass and multi-page data integrity bugs:\n\nRTL files: nvme_read_engine.v (nvm_offset_q resets to 0 on each page_valid), nvme_prp_walker.v (LIST_ENTRIES=512, list_buf [0:63], ARLEN=63), nvme_io_top.v (axi_b_resp_i wired but unused)\n\nTestbench: tb_nvme_io.v — T2/T3 data checks use $display only (no error_cnt++), T1 uses proper error_cnt++. ALL_TESTS_PASS reported at end.\n\nSim output shows: T2 w_cap[0]=0xE00 exp 0, w_cap[448]=x exp 0xE00; T3 w_cap[0]=0xE00 exp 0.\n\nREVIEWER TASK: Read the provided files, identify every false-pass and data-integrity bug, classify each as testbench-false-pass, RTL-source-offset, RTL-buffer-mismatch, or protocol-unused-input. Then specify fixes for each. Do NOT claim PASS if evidence of wrong data exists in the log.",
+      "expected_output": "A review that identifies false-pass testbench (T2/T3 $display without error_cnt++), NVM source offset reset per page, PRP list 64-vs-512 mismatch, unused response input, and classifies each correctly.",
+      "files": [],
+      "assertions": [
+        "Identifies T2/T3 $display without error_cnt++ as a false-pass testbench bug — ALL_TESTS_PASS is misleading.",
+        "Identifies nvm_offset_q reset to 0 on page_valid as a source-offset bug causing multi-page data corruption.",
+        "Identifies LIST_ENTRIES=512 vs list_buf[0:63] depth mismatch as a PRP buffer capacity bug.",
+        "Identifies axi_b_resp_i wired-but-unused as a dropped error detection gap.",
+        "Output does NOT accept ALL_TESTS_PASS at face value after finding evidence of wrong data in logs.",
+        "Proposes a specific fix for each bug, not generic advice."
+      ]
+    },
+    {
+      "id": 66,
+      "prompt": "Review this RTL module for FSM-datapath structural purity violations:\n\nModule has an always @(*) block that computes nstate AND assigns next_page_addr = page_base_q + offset_q, next_page_bytes = bytes_left_q, and next_burst_len = (bytes_left > MAX) ? MAX-1 : bytes_left-1.\n\nModule has an always @(posedge clk) block that does both cstate <= nstate AND updates byte_cnt_q, page_cnt_q.\n\nModule has a datapath always @(posedge clk) block with 'case (cstate) S_PAGE_TX: if (accept) current_addr_q <= current_addr_q + 4096; endcase'.\n\nClassify each violation against RSP1-RSP4. Reference rtl-structural-purity.md. Propose the corrected block structure.",
+      "expected_output": "A review that identifies all violations mapped to RSP1/RSP2/RSP3/RSP4 and proposes the pure three-block structure.",
+      "files": [],
+      "assertions": [
+        "Identifies multi-bit assignments in FSM combinational block as RSP2 violation.",
+        "Identifies datapath registers in FSM sequential block as RSP1 violation.",
+        "Identifies case(cstate) in datapath sequential block as RSP3 violation.",
+        "Proposes FSM control signals (page_tx_en, etc.) to replace direct cstate references.",
+        "References rtl-structural-purity.md with specific rule IDs."
+      ]
+    },
+    {
+      "id": 67,
+      "prompt": "Review this NVMe PRP walker RTL and testbench for protocol completeness:\n\nPRP walker handles PRP1 offset=0, PRP2=data page, PRP2=list page. But: PRP1 non-zero offset not tested. PRP list 0 entries needed (last page is entry 1) not tested. Chain pointer for >512 entries not supported but no waiver. PRP entries not checked for page alignment. Testbench scoreboard checks only captured data, not AWADDR/AWLEN/WLAST/WSTRB/BRESP/completion ordering.\n\nIdentify every gap and classify each as normative requirement, project policy gap, or verification blind spot. Propose fixes and waiver where applicable.",
+      "expected_output": "A protocol review identifying PRP offset/boundary/alignment gaps, list chain waiver gap, and dual-scoreboard verification gap.",
+      "files": [],
+      "assertions": [
+        "Identifies PRP1 non-zero offset as untested boundary condition.",
+        "Identifies PRP list chain (>512 entries) gap and requires waiver or support.",
+        "Identifies PRP entry alignment check as missing normative requirement.",
+        "Identifies transaction-shape scoreboard gap (AWADDR/AWLEN/WLAST/WSTRB/BRESP not checked).",
+        "References nvme-guidelines.md §14.7-14.10 for specific checklist items."
+      ]
+    },
+    {
+      "id": 68,
+      "prompt": "You are the lead engineer for an L2 AXI/NVMe subsystem with 5 modules: cmd_tracker (~300 lines), prp_walker (~250 lines), read_engine (~350 lines), axi_adapter (~200 lines), io_top (~200 lines). Total estimated RTL ~1300 lines. Protocols: NVMe command set, AXI4-Full, internal page-stream handshake. The user has not specified parallel or single-agent execution.\n\nTASK: Classify the design, make the delegation decision, produce the delegation record (yes/no with reasons), assign roles if delegating OR write waiver with compensation gates if not. Then produce the L2 fork decomposition with per-module interface contracts. Do NOT generate any RTL.",
+      "expected_output": "A delegation decision record with classification L2, delegate yes with roles assigned, plus per-module contracts before any RTL.",
+      "files": [],
+      "assertions": [
+        "Output classifies the design as L2.",
+        "Output makes an explicit delegation decision (yes/no), not just 'consider sub-agents.'",
+        "If delegating: assigns specific roles (architect, RTL executors, verification, protocol reviewer).",
+        "If not delegating: provides waiver with reason + compensation gates (compile, RSP1-RSP7, boundary review, false-pass audit).",
+        "Output states that contracts must be frozen before sub-agent execution begins.",
+        "Output does NOT generate any RTL code -- task stops at contracts.",
+        "Output references sub-agent-delegation.md for decision matrix or prompt template."
+      ]
+    },
+    {
+      "id": 69,
+      "prompt": "A user says: 'Review my NVMe read engine RTL for bugs — I already ran simulation and got ALL_TESTS_PASS but the data looks wrong in the waveform.' \n\nTASK: Route this request to the correct workflow mode. Do NOT generate new RTL or walk through the full design pipeline. Instead: identify the mode, explain why it applies, state which gates are required (structural purity, protocol authority, false-pass audit), and describe the output format. Then briefly outline what a review of nvme_read_engine.v should check.",
+      "expected_output": "Mode routing to 'review' mode (not design mode). States that review skips full RTL pipeline, starts at Step 8. Lists mandatory gates: RSP1-RSP7, protocol claim ledger, false-pass audit. Does not generate new RTL.",
+      "files": [],
+      "assertions": [
+        "Routes to review mode, not design mode.",
+        "States that review starts at Step 8, skips Steps 1-7.",
+        "Lists FSM-Datapath Purity (RSP1-RSP7) as mandatory gate.",
+        "Mentions protocol authority/claim ledger or false-pass audit.",
+        "Does NOT generate new RTL or propose a full design pipeline.",
+        "References task-mode-routing.md or the mode routing table."
+      ]
+    },
+    {
+      "id": 70,
+      "prompt": "An L2 AXI DMA subsystem has passed Delegation Decision Gate with 'delegate=yes'. The architect has frozen all per-module interface contracts. \n\nTASK: Produce the Release Gate checklist before starting sub-agents, and for each AXI protocol hard claim in the AW/W/B controller, write a claim ledger entry with: claim text, label (Normative/Conservative pattern/Heuristic), source doc (IHI 0022), section, where applied, and verification evidence. Use the claim ledger format from protocol-claim-ledger.md.",
+      "expected_output": "Release Gate checklist with all items checked or flagged. Protocol claim ledger entries for AXI AW/W/B with source citations.",
+      "files": [],
+      "assertions": [
+        "Produces Release Gate checklist: contracts frozen, roles assigned, acceptance commands, integration reviewer, prompt contents.",
+        "Does NOT allow sub-agent start if any Release Gate item is unchecked.",
+        "Produces at least 3 claim ledger entries with label/source/section/applied-in/evidence.",
+        "Distinguishes Normative claims from Conservative patterns (not all claims are normative).",
+        "Cites IHI 0022 section numbers for normative claims.",
+        "References protocol-claim-ledger.md or sub-agent-delegation.md release record template."
+      ]
+    },
+    {
+      "id": 71,
+      "prompt": "Review this NVMe read engine testbench and RTL for SPEC consistency, TB reliability, and response propagation:\n\nSPEC says NLB=15, LBA_SIZE=512 -> transfer_bytes should be 8192. But the spec also mistakenly says 'page count = NLB' (wrong: should be ceil((NLB+1)*LBA_SIZE/PAGE_SIZE)).\n\nTestbench tb_clean.v has: `while (!cpl_valid) @(posedge clk);` (line 117) without timeout; `cap_cnt` captures beats but never compared against expected_beats; `m_b_resp` connected to DUT but never checked for SLVERR/DECERR; `cpl_status_o` wired but only checked as '=== 16'h0000' in run_test (good), but run_test is a task that can be skipped.\n\nTASKS: 1) Flag the SPEC inconsistency and classify it. 2) Identify all TB reliability gaps (unbounded wait, cap_cnt, response inputs). 3) State which RTL structural purity gates (RSP1-RSP7) apply to the read engine. 4) Propose minimal fixes for each gap.",
+      "expected_output": "SPEC inconsistency identified (NLB vs page count formula). TB gaps identified: unbounded while, cap_cnt without expected_beats, b_resp unchecked. RSP gates listed. Fixes proposed.",
+      "files": [],
+      "assertions": [
+        "Identifies NLB/page count formula inconsistency and classifies it as SPEC-FORMULA.",
+        "Identifies unbounded while(!cpl_valid) as TB reliability gap requiring cycle timeout.",
+        "Identifies cap_cnt without expected_beats comparison as false-pass risk.",
+        "Identifies b_resp connected-but-unchecked as response propagation gap.",
+        "Lists applicable RSP1-RSP7 gates for the read engine.",
+        "Proposes specific fixes, not generic advice."
+      ]
+    },
+    {
+      "id": 72,
+      "prompt": "Create a simplified NVMe Read I/O path RTL subsystem from scratch in a new directory. No SPEC.md is provided. The system receives read commands with CID, SLBA, NLB, PRP1, PRP2, reads local NVM data, writes host memory through AXI4 write channels, and returns completion/status. Provide RTL, testbench, design notes, simulation commands, and development log.\n\nDo not provide extra process instructions in the prompt. The skill should decide the engineering workflow.",
+      "expected_output": "A no-SPEC L2 workflow that first extracts requirements and creates canonical docs/dev_log.md, docs/SPEC.md, docs/interface-contracts.md, docs/timing-contract.md, docs/protocol_claim_ledger.md, docs/verification_matrix.md, and docs/contract_implementation_matrix.md before RTL. The design records assumptions, single/continuous command policy, verification plan, contract-to-implementation trace, and residual risks.",
+      "files": [],
+      "assertions": [
+        "Classifies the task as L2 or equivalent subsystem complexity.",
+        "Creates or explicitly proposes docs/SPEC.md separate from docs/dev_log.md.",
+        "Creates or explicitly proposes docs/interface-contracts.md.",
+        "Creates or explicitly proposes docs/timing-contract.md.",
+        "Creates or explicitly proposes docs/protocol_claim_ledger.md with protocol claim labels.",
+        "Creates or explicitly proposes docs/verification_matrix.md with contract-to-test trace.",
+        "Creates or explicitly proposes docs/contract_implementation_matrix.md with contract-to-RTL/TB trace.",
+        "Uses docs/dev_log.md as evidence chain for commands, warnings, fixes, waivers, and final gate results.",
+        "Does not silently invent unsupported NVMe/AXI hard claims without labeling them."
+      ]
+    },
+    {
+      "id": 73,
+      "prompt": "Review an NVMe PRP walker and testbench. The test is a 16KB transfer (NLB=31, LBA_SIZE=512) using PRP1 plus PRP2 as a PRP list pointer. The TB preloads only prp_list_wr_idx 0 and 1, checks total beat count and AW count, but does not compare AWADDR sequence. The design comment says max transfer is (1 + 1 + 64) * PAGE_SIZE because PRP2 plus 64 list entries are counted as data pages.\n\nIdentify protocol/spec errors and testbench false-pass risks. Propose minimal fixes.",
+      "expected_output": "A review that states PRP2 is not a data page when it is a list pointer, 16KB/4 pages needs PRP1 plus three list data entries, the (1+1+64) formula is wrong, and the TB must compare AWADDR for each expected PRP page.",
+      "files": [],
+      "assertions": [
+        "States that PRP2 list pointer is not itself a data page.",
+        "Computes 16KB/4-page transfer as PRP1 plus three PRP-list data entries.",
+        "Rejects the formula (1 + 1 + 64) * PAGE_SIZE for list-pointer mode.",
+        "Flags the testbench for preloading fewer than 3 list entries.",
+        "Requires AWADDR sequence checks for each PRP page, not just beat/AW count.",
+        "Classifies the issue as SPEC-FORMULA/SPEC-CLAIM plus false-pass verification gap."
+      ]
+    },
+    {
+      "id": 74,
+      "prompt": "Review a simplified NVMe read RTL that claims it supports continuous commands. The parser drives cmd_ready when its local parsed_valid is clear, but the downstream PRP walker is still busy. The PRP walker uses parsed_transfer_bytes_i and parsed_prp2_i combinationally to decide PRP2 page/list role after accepting the first command. There is no back-to-back command test.\n\nFind the bug and define the required contract/test fixes.",
+      "expected_output": "A review identifying command-context contamination: continuous command support requires system-level busy/credit gating or a command FIFO and all command fields used by PRP decisions must be latched. Requires back-to-back command test.",
+      "files": [],
+      "assertions": [
+        "Identifies cmd_ready based only on parser local state as unsafe when downstream is busy.",
+        "Identifies unlatched parsed_* combinational PRP role decision as command-context contamination.",
+        "Requires either explicit single-outstanding contract with system busy gating or a command FIFO.",
+        "Requires latching all command fields used after accept.",
+        "Requires a back-to-back command test that would fail if command 2 changes command 1 PRP/NLB decisions.",
+        "Connects the issue to interface contract and contract-to-test trace."
+      ]
+    },
+    {
+      "id": 75,
+      "prompt": "Run a code review on an RTL/TB snippet. RTL has b_error_q assigned in one always block when BVALID/BREADY sees SLVERR, and assigned again in a different always block when cmd_done_o asserts. The testbench prints 'FALSE-PASS AUDIT', 'Audit: checking AXI response consumption...', and 'Audit complete.' but the audit region has no if/assert/$fatal/error_cnt update. The TB also has no $isunknown checks and leaves busy unconnected.\n\nReport all structural and verification-gate failures.",
+      "expected_output": "A review that flags multi-driven b_error_q, fake false-pass audit, missing X/Z checks, and unconnected/unchecked busy sideband. It should reject ALL_TESTS_PASS until these are fixed or waived.",
+      "files": [],
+      "assertions": [
+        "Flags b_error_q assigned in multiple always blocks as RTL_MULTI_DRIVER1 or equivalent hard RTL error.",
+        "Flags display-only FALSE-PASS AUDIT as cosmetic and insufficient.",
+        "Flags missing X/Z checks in a protocol/data testbench.",
+        "Flags busy unconnected or unchecked as a contract-to-test sideband gap.",
+        "States that ALL_TESTS_PASS is not acceptable with compile/checker warnings or unwaived findings.",
+        "Proposes concrete fixes: single owner for b_error_q, real audit conditions, $isunknown checks, and busy expected-value checks."
+      ]
+    },
+    {
+      "id": 76,
+      "prompt": "Review this simulation output for false-pass risks. The testbench has a timeout block that prints TIMEOUT and then calls $finish. The simulation log shows TIMEOUT but the process exit code is 0. T1 passes, T2 hangs. The log does not contain ALL_TESTS_PASS or SIMULATION_DONE. Evaluate whether sim_log_gate.py and TB_TIMEOUT_FATAL1 should reject this output.",
+      "expected_output": "Identifies TIMEOUT+$finish as false-pass risk. States sim_log_gate.py rejects because TIMEOUT present and ALL_TESTS_PASS missing. States TB_TIMEOUT_FATAL1 reports an E-level finding because $finish lacks $fatal or an error counter.",
+      "files": [],
+      "assertions": [
+        "Identifies TIMEOUT + $finish (no $fatal) as a false-pass mechanism.",
+        "States sim_log_gate.py rejects: TIMEOUT present, ALL_TESTS_PASS missing, SIMULATION_DONE missing.",
+        "States TB_TIMEOUT_FATAL1 reports an E-level finding.",
+        "Explains that process exit code 0 from $finish misleads naive gates.",
+        "Proposes fix: use $fatal or error_cnt++ + TESTS_FAILED before $finish."
+      ]
+    },
+    {
+      "id": 77,
+      "prompt": "Review this NVMe project claim ledger. The ledger cites evidence tokens T3 (4-page PRP list AWADDR check) and T10 (backpressure with WREADY=0). However, the TB directory contains only one file tb_nvme_io.v which defines tests T1 through T7. There is no T3 with AWADDR check and no T10. Evaluate whether project_artifact_gate.py should reject this project.",
+      "expected_output": "Identifies evidence cross-reference failure. T3 and T10 cited in ledger but not found in TB files. States project_artifact_gate.py rejects with missing evidence token findings.",
+      "files": [],
+      "assertions": [
+        "Identifies that T3 and T10 are cited in claim ledger but absent from TB.",
+        "States project_artifact_gate.py rejects with evidence-missing findings.",
+        "Explains that ledger evidence citing non-existent tests is a documentation lie.",
+        "Proposes fix: either add the missing tests or remove the false evidence claims."
+      ]
+    },
+    {
+      "id": 78,
+      "prompt": "Review this L2 NVMe project for No-SPEC artifact completeness. The project directory has docs/dev_log.md, docs/SPEC.md, docs/interface-contracts.md, and docs/protocol_claim_ledger.md. But docs/timing-contract.md, docs/verification_matrix.md, and docs/contract_implementation_matrix.md are missing. Evaluate whether project_artifact_gate.py should reject this project.",
+      "expected_output": "Identifies missing timing-contract.md, verification_matrix.md, and contract_implementation_matrix.md. States project_artifact_gate.py rejects because L2 No-SPEC requires the canonical docs/ artifact set. Explains that verification_matrix.md bridges claim ledger evidence to TB checks and contract_implementation_matrix.md bridges contract items to RTL/TB implementation evidence.",
+      "files": [],
+      "assertions": [
+        "Identifies docs/timing-contract.md, docs/verification_matrix.md, and docs/contract_implementation_matrix.md as missing required artifacts.",
+        "States project_artifact_gate.py rejects for L2 No-SPEC projects.",
+        "Explains why verification_matrix.md is mandatory: bridges claim-to-TB trace.",
+        "Explains why contract_implementation_matrix.md is mandatory: bridges contract-to-RTL/TB implementation closure.",
+        "Lists the canonical docs/ artifacts including docs/dev_log.md, docs/SPEC.md, docs/interface-contracts.md, docs/timing-contract.md, docs/protocol_claim_ledger.md, docs/verification_matrix.md, and docs/contract_implementation_matrix.md."
+      ]
+    },
+    {
+      "id": 79,
+      "prompt": "Review this RTL file axi_write_master.v for RSP3 compliance. The file header comment says \"RSP3 compliant: all datapath blocks use named controls.\" However, line 358 has: always @(posedge clk_i) begin if (cstate == S_DONE) b_error_q <= 1'b0; end. Evaluate whether rtl_style_check.py should report this as W or E level.",
+      "expected_output": "Identifies RSP3 violation in datapath block (cstate == S_DONE). States that because the file claims RSP3 compliance in comments, the finding is upgraded to E-level. Comment-only compliance is invalid.",
+      "files": [],
+      "assertions": [
+        "Identifies cstate == S_DONE in datapath block as RSP3 violation.",
+        "States finding is upgraded to E-level because file claims compliance.",
+        "Explains comment-only compliance is invalid: code evidence overrides comments.",
+        "Proposes fix: use named done_clr_en control signal instead of cstate comparison."
+      ]
+    },
+    {
+      "id": 80,
+      "prompt": "Review this Verilog module port declaration for N1 false positives. The module uses ANSI port style: module test_mod (input wire clk_i, input wire rst_ni, input wire [7:0] data_i, output wire [15:0] result_o, output reg done); Evaluate whether rtl_style_check.py N1 checker should report wire or reg as port names.",
+      "expected_output": "States that N1 should NOT report wire or reg as port names. Only done (missing _o suffix) should be flagged. The ANSI type tokens wire/reg/logic are skipped by the parser.",
+      "files": [],
+      "assertions": [
+        "States N1 does not flag wire or reg as port names (ANSI type tokens skipped).",
+        "States N1 correctly flags done as missing _o suffix.",
+        "Explains the fix: ANSI parser matches direction [type] [width] name pattern.",
+        "Notes that task/function arguments are excluded from N1 checking."
+      ]
+    },
+    {
+      "id": 81,
+      "prompt": "You are auditing an L2 NVMe project. The dev_log says Delegate: yes but there are no subagent artifacts. There is no docs/delegation_plan.md and no docs/subagents/*.md files. The dev_log says Status: PASS.\n\nEvaluate whether project_artifact_gate.py should accept or reject this project. What is the minimum evidence required for L2 Delegate: yes to claim PASS?",
+      "expected_output": "Reject because L2 Delegate: yes requires docs/delegation_plan.md + 6 subagent role reports. Without these, PASS is invalid.",
+      "files": [],
+      "assertions": [
+        "States project_artifact_gate.py rejects the project.",
+        "States that L2 Delegate: yes requires docs/delegation_plan.md.",
+        "Lists at least 4 of the 6 required subagent role reports.",
+        "States that Status: PASS is invalid without delegation execution evidence."
+      ]
+    },
+    {
+      "id": 82,
+      "prompt": "Review this NVMe project SPEC. The SPEC says PRP list fetch uses AR channel and SLBA is used for NVM source address. But the RTL ties off m_axi_arvalid_o to 0 and nvm_addr_o = page_addr_i (not slba * LBA_SIZE + offset). The TB only checks completion status and bytes.\n\nProduce the contract_implementation_matrix.md for this project. Identify all gaps. Classify each gap as Blocking Gap (cannot PASS) or Accepted Limitation (waiver-able).",
+      "expected_output": "Matrix identifies AR tie-off and SLBA source as Blocking Gaps. TB missing transaction-shape scoreboard.",
+      "files": [],
+      "assertions": [
+        "Produces contract_implementation_matrix with PRP list fetch and SLBA rows.",
+        "Classifies AR channel tie-off and SLBA bypass as Blocking Gaps.",
+        "Identifies TB completion-only as gap in transaction-shape scoreboard.",
+        "States that the project cannot claim PASS with unwaivered Blocking Gaps."
+      ]
+    },
+    {
+      "id": 83,
+      "prompt": "Review this DMA testbench. It captures AWADDR, AWLEN, WDATA into arrays, checks completion status and cpl_bytes_written. But it never compares captured AWADDR against expected addresses, never verifies WLAST position, never checks WSTRB, and never checks BRESP values. The TB prints ALL_TESTS_PASS.\n\nEvaluate whether this TB meets the transaction-shape scoreboard requirement. What does TB_COMPLETION_ONLY1 detect?",
+      "expected_output": "TB is completion-only — missing AWADDR/AWLEN/WLAST/WSTRB/BRESP comparisons. TB_COMPLETION_ONLY1 reports as E-level.",
+      "files": [],
+      "assertions": [
+        "States TB is completion-only and does not meet transaction-shape requirement.",
+        "Identifies missing AWADDR comparison, WLAST position check, WSTRB check, BRESP check.",
+        "States TB_COMPLETION_ONLY1 reports an E-level finding.",
+        "States ALL_TESTS_PASS is not credible without transaction-shape checks."
+      ]
+    },
+    {
+      "id": 84,
+      "prompt": "Review this dev_log residual risks section:\n\nStatus: PASS\n\n## Residual Risks\n- No multi-page transfer testing.\n- PRP list chaining NOT implemented.\n- Accepted Limitation: simplified NVM model; waiver: deterministic pattern model, evidence T2.\n\nEvaluate whether project_artifact_gate.py should reject this dev_log. Which residual risks are Blocking Gaps vs Accepted Limitations?",
+      "expected_output": "Rejects because No multi-page transfer testing and NOT implemented are Blocking Gaps without waiver. NVM model is Accepted Limitation with waiver.",
+      "files": [],
+      "assertions": [
+        "Identifies No multi-page transfer testing as Blocking Gap.",
+        "Identifies NOT implemented as Blocking Gap.",
+        "Identifies NVM model as Accepted Limitation with waiver.",
+        "States project_artifact_gate.py rejects because Status: PASS with unwaivered Blocking Gaps."
+      ]
+    },
+    {
+      "id": 85,
+      "prompt": "Review this Verilog RTL line:\n\nif (bytes_remaining_q <= PAGE_SIZE) begin\n  take_last_page = 1'b1;\nend\n\nA separate sequential block has: bytes_remaining_q <= bytes_remaining_q - beat_bytes;\n\nA naive multi-driver checker flags bytes_remaining_q as assigned in 2 blocks because it sees two occurrences of '<=' with the same signal name. Explain why this is a false positive and what pattern the checker should use to distinguish between relational <= and non-blocking assignment <=.",
+      "expected_output": "Explains that relational <= inside if-condition is not a procedural assignment. Checker should only count assignments outside conditional expressions.",
+      "files": [],
+      "assertions": [
+        "Identifies that relational <= in if-condition is not a procedural assignment.",
+        "Explains that RTL_MULTI_DRIVER1 should only count <= as assignment when it is lhs <= rhs at block level.",
+        "Does NOT flag this as a multi-driver violation.",
+        "Describes the correct distinction between relational and procedural <=."
+      ]
+    },
+    {
+      "id": 86,
+      "prompt": "Review this RTL FIFO declaration:\n\nreg [DATA_WIDTH-1:0] mem [0:DEPTH-1];\n\nThis is in a synchronous FIFO module (not a testbench). DEPTH=64. The module uses this array with rd_ptr/wr_ptr for FWFT FIFO behavior.\n\nEvaluate whether rtl_style_check.py C17_ARR1 should flag this. What alternatives should be suggested?",
+      "expected_output": "C17_ARR1 flags this as W-level. Suggests BRAM primitive or explicit waiver. FWFT FIFO with small DEPTH may be acceptable with documented waiver.",
+      "files": [],
+      "assertions": [
+        "States C17_ARR1 detects unpacked reg array as W-level.",
+        "Suggests BRAM primitive or vendor memory as alternative.",
+        "Notes that small DEPTH FWFT FIFOs may be acceptable with documented waiver.",
+        "Does NOT flag if file is a testbench (tb_ prefix)."
+      ]
+    },
+    {
+      "id": 87,
+      "prompt": "Review this PRP walker RTL. The module has output ports m_axi_arvalid_o and m_axi_rresp_i but m_axi_arvalid_o is only ever assigned to 0 (tied off). The module has error output prp_err_o but it is only ever reset (prp_err_o <= 1'b0). The module SPEC says it supports PRP list fetch.\n\nWhat should rtl_style_check.py detect? What check codes trigger?",
+      "expected_output": "PRP_STUB1(E) reports on m_axi_arvalid_o always 0. ERR_STUB1(W) reports on prp_err_o always 0. Module claims PRP list fetch but AR channel is stubbed.",
+      "files": [],
+      "assertions": [
+        "States PRP_STUB1 reports an E-level finding on m_axi_arvalid_o only assigned 0.",
+        "States ERR_STUB1 reports a W-level finding on prp_err_o only assigned 0.",
+        "Explains that AR channel tie-off contradicts SPEC claim of PRP list fetch.",
+        "Notes this is a Blocking Gap — project cannot claim PASS."
+      ]
+    },
+    {
+      "id": 88,
+      "prompt": "Audit a No-SPEC NVMe read subsystem project. The directory has rtl/data_fifo.v, rtl/nvm_read_master.v, rtl/axi_write_master.v, rtl/nvme_prp_walker.v, rtl/nvme_read_top.v, tb/tb_nvme_read_top.v, and an empty docs/ directory. There is no docs/dev_log.md. The agent summary says all tests passed. Should project_artifact_gate.py classify it as L1 or L2, and can it claim PASS?",
+      "expected_output": "Classifies the project as inferred L2 from multi-module NVMe/AXI subsystem evidence and rejects PASS because canonical No-SPEC docs and delegation decision are missing.",
+      "files": [],
+      "assertions": [
+        "States the project is inferred L2 even without dev_log.md.",
+        "Rejects code-only delivery with empty docs for a No-SPEC subsystem.",
+        "Lists missing canonical docs including SPEC, dev_log, interface contracts, timing contract, protocol claim ledger, verification matrix, and contract implementation matrix.",
+        "States that a missing L2 delegation decision is a blocking project_artifact_gate finding."
+      ]
+    },
+    {
+      "id": 89,
+      "prompt": "Review this compile log from Icarus Verilog:\n\nrtl/nvme_prp_walker.v:374: warning: Part select PAGE_SIZE[63:0] is selecting after the parameter PAGE_SIZE[31:0].\nrtl/nvme_prp_walker.v:374:        : Replacing the out of bound bits with 'bx.\n\nThere are also inherited timescale warnings. Should compile_log_gate.py pass or fail?",
+      "expected_output": "compile_log_gate.py fails because out-of-bound part-select and 'bx replacement inject unknown values. Inherited timescale warnings alone are non-blocking, but they do not waive the hard width finding.",
+      "files": [],
+      "assertions": [
+        "Flags selecting after/out-of-bound part-select as a hard compile-log failure.",
+        "Flags replacement with 'bx as a hard unknown-value injection.",
+        "States inherited timescale warnings alone should not fail the compile gate.",
+        "States the project cannot claim compile-clean PASS with this log."
+      ]
+    },
+    {
+      "id": 90,
+      "prompt": "Review this NVMe PRP walker code comment and logic:\n\n// Simplified: advance by PAGE_SIZE\n// Full PRP list traversal would fetch from PRP2 list\ncurrent_host_addr_q <= current_host_addr_q + PAGE_SIZE[ADDR_WIDTH-1:0];\n\nThe SPEC claims PRP list support. What should rtl_style_check.py report?",
+      "expected_output": "Reports PRP_LIST_FAKE1 as E-level because PRP2 list data entries are not fetched and host page addresses are faked by PAGE_SIZE stepping. Also reports width-bound risk if PAGE_SIZE is narrower than ADDR_WIDTH.",
+      "files": [],
+      "assertions": [
+        "Flags PRP_LIST_FAKE1 as E-level.",
+        "Explains PRP2 list pointer must be fetched to obtain data page addresses.",
+        "Rejects claiming PRP list support when logic only increments by PAGE_SIZE.",
+        "Mentions the PAGE_SIZE[ADDR_WIDTH-1:0] width-bound/'bx risk when the parameter is too narrow."
+      ]
+    },
+    {
+      "id": 91,
+      "prompt": "Review this AXI write master. m_axi_wdata_o is assigned directly from dfifo_rdata_i. m_axi_wvalid_o is set on page_accept_i, before checking dfifo_empty or dfifo_count_i. dfifo_count_i is declared but unused. The design says AW/W/B are independent. What should the review conclude?",
+      "expected_output": "Reports AXI_WDATA_SOURCE1 as E-level: WVALID presents FIFO-backed WDATA without proving data availability, so fast AXI / slow producer can send stale or X data. Independence does not waive the data-source availability contract.",
+      "files": [],
+      "assertions": [
+        "Flags AXI_WDATA_SOURCE1 as E-level.",
+        "Identifies m_axi_wdata_o from FIFO output as requiring data availability proof.",
+        "States WVALID must not present a beat before !dfifo_empty/dfifo_count/have_data/full-burst contract is satisfied.",
+        "Explains AXI channel independence does not permit stale or empty WDATA."
+      ]
+    },
+    {
+      "id": 92,
+      "prompt": "Review this RTL structure. A non-state-register sequential block has if (cstate == S_DONE) busy_q <= 1'b0. Continuous assignments include assign busy_o = (cstate != S_IDLE) and assign page_ready_o = (cstate == S_IDLE). The author calls this a two-process FSM. What should rtl_style_check.py report?",
+      "expected_output": "Reports RTL_STRUCTURAL_PURITY_RSP3 as E-level for cstate in datapath sequential logic and RTL_STRUCTURAL_PURITY_RSP4 as E-level for outputs directly decoding cstate. The fix is named single-bit control signals from FSM combinational decode and datapath registers controlled by those enables.",
+      "files": [],
+      "assertions": [
+        "Flags cstate in non-state sequential datapath as RTL_STRUCTURAL_PURITY_RSP3 E-level.",
+        "Flags output assignments decoding cstate as RTL_STRUCTURAL_PURITY_RSP4 E-level.",
+        "Rejects calling this pure two-process FSM/datapath separation.",
+        "Proposes named control signals from FSM decode and datapath updates controlled by those signals."
+      ]
+    },
+    {
+      "id": 93,
+      "prompt": "Evaluate final delivery for a code-only NVMe subsystem. project_artifact_gate fails on missing docs, rtl_style_check fails on PRP_LIST_FAKE1 and AXI_WDATA_SOURCE1, compile_log_gate fails on 'bx replacement, and sim_log_gate fails because ALL_TESTS_PASS and SIMULATION_DONE are missing. The agent's final response says 'full design compiles and simulates successfully.' What should final_delivery_gate.py do?",
+      "expected_output": "final_delivery_gate.py fails and rejects the success claim. It aggregates artifact, RTL style, compile log, and sim log failures; no code-only delivery can claim PASS with any component gate failing.",
+      "files": [],
+      "assertions": [
+        "States final_delivery_gate.py must fail when any component gate fails.",
+        "Mentions artifact, RTL style, compile log, and sim log gates as separate components.",
+        "Rejects relying on the agent's textual success summary.",
+        "States missing logs or missing required docs are final-delivery blockers for L1/L2 No-SPEC projects."
+      ]
+    },
+    {
+      "id": 94,
+      "prompt": "Review this NVMe project for runaway simulation and multi-driver RTL purity: project has sim/ with large.vcd (102MB), no sim log, docs/ empty. RTL prp_walker.v has current_page_addr_q assigned in two always blocks. TB completion-only. Evaluate what rtl_style_check.py and final_delivery_gate.py should report.",
+      "expected_output": "final_delivery_gate FAIL: runaway VCD + no sim log. rtl_style_check FAIL: RTL_MULTI_DRIVER1 on current_page_addr_q. TB_COMPLETION_ONLY1.",
+      "files": [],
+      "assertions": [
+        "States oversized VCD (102MB > 50MB) triggers runaway gate FAIL.",
+        "States missing sim log triggers FAIL.",
+        "States current_page_addr_q in 2 always blocks triggers RTL_MULTI_DRIVER1(E).",
+        "States completion-only TB triggers TB_COMPLETION_ONLY1(E)."
+      ]
+    },
+    {
+      "id": 95,
+      "prompt": "Review this compile log: NAND flash page controller project compiles with warning \"24'd16777216 was truncated to fit in 24 bits; truncated value is 0\". The log also has timescale inherited warnings. Evaluate what compile_log_gate.py should report.",
+      "expected_output": "compile_log_gate.py FAIL: numeric constant truncation (24'd16777216 truncated to 0). Timescale inherited alone would not fail.",
+      "files": [],
+      "assertions": [
+        "States compile_log_gate reports FAIL for numeric truncation.",
+        "States 24'd16777216 truncation is a hard failure.",
+        "States timescale inherited warnings alone would PASS.",
+        "Explains why truncation to 0 is a real bug, not harmless."
+      ]
+    },
+    {
+      "id": 96,
+      "prompt": "Review this DMA AXI write engine for burst-level FIFO availability: m_axi_wvalid_o asserts on page start (aw_active && aw_ready) and m_axi_wdata_o comes from dfifo. The module has parameter AXI_MAX_BURST=64 and FIFO depth=64. There is no !dfifo_empty or have_full_burst check before WVALID assertion. The FIFO may have only 1 beat when burst of 64 starts. Evaluate what rtl_style_check.py and the AXI W contract require.",
+      "expected_output": "AXI_WDATA_SOURCE1(E): WVALID asserts without FIFO availability check. Continuous mode requires AWLEN+1 beats in FIFO before start.",
+      "files": [],
+      "assertions": [
+        "States AXI_WDATA_SOURCE1 reports an E-level finding.",
+        "States !dfifo_empty is insufficient for continuous burst mode.",
+        "States continuous mode requires FIFO has >= AWLEN+1 beats before WVALID.",
+        "States elastic mode is an alternative if declared in contract."
+      ]
+    },
+    {
+      "id": 97,
+      "prompt": "A user asks you to \"review this RTL for bugs.\" Review mode must NOT go through the full design pipeline. What routing mode applies? What gate-first order applies before manual hotspot review? What should the output format be?",
+      "expected_output": "Routes to review mode. Uses gate-first review order: project_artifact_gate/final-delivery evidence if available, rtl_style_check, compile_log_gate, sim_log_gate/runtime guard, then manual hotspot review with RSP1-RSP7, claim ledger, and false-pass audit. No RTL generation.",
+      "files": [],
+      "assertions": [
+        "Routes to review mode, not design mode.",
+        "Does NOT generate new RTL.",
+        "Lists mandatory gate-first review gates.",
+        "Mentions artifact/style/compile/sim/runtime evidence before manual hotspot review.",
+        "References task-mode-routing.md."
+      ]
+    },
+    {
+      "id": 98,
+      "prompt": "You start an L2 NVMe No-SPEC project. After classification and delegation decision, before any RTL, what skeleton must exist? What does project_preflight_gate.py check?",
+      "expected_output": "docs/ with 7 skeleton files, rtl/, tb/, sim/ directories. project_preflight_gate.py checks existence.",
+      "files": [],
+      "assertions": [
+        "Lists docs/ skeleton files.",
+        "Mentions project_preflight_gate.py.",
+        "States rtl/ and tb/ directories are required for L2.",
+        "Skeleton files may be empty placeholders initially."
+      ]
+    },
+    {
+      "id": 99,
+      "prompt": "Run a simulation with vvp. Use scripts/run_sim_guarded.py with 10-second timeout. The simulation hangs. What exit code does the wrapper return? What output marker is printed?",
+      "expected_output": "Exit 1 (timeout). Prints TIMEOUT marker. Log file contains simulation output up to timeout.",
+      "files": [],
+      "assertions": [
+        "Exit code is 1 for timeout.",
+        "Prints TIMEOUT.",
+        "References run_sim_guarded.py timeout behavior.",
+        "Does not print ALL_TESTS_PASS."
+      ]
+    },
+    {
+      "id": 100,
+      "prompt": "An L2 DMA subsystem has rtl/desc_fetch.v, rtl/axi_writer.v, docs/dev_log.md with Status: PASS, and a passing top-level sim log. There is no docs/module_verification_matrix.md and no per-module TB logs. What should project_artifact_gate.py report?",
+      "expected_output": "project_artifact_gate.py FAIL: missing docs/module_verification_matrix.md for the L2 per-module simulation gate. Top-level integration simulation is not enough for final PASS.",
+      "files": [],
+      "assertions": [
+        "States project_artifact_gate.py must fail.",
+        "Names missing docs/module_verification_matrix.md.",
+        "States L2 requires per-module simulation/proof evidence before integration PASS.",
+        "Rejects top-level-only simulation as sufficient evidence."
+      ]
+    },
+    {
+      "id": 101,
+      "prompt": "An L2 NAND controller has rtl/cmd_fsm.v and rtl/data_path.v. docs/module_verification_matrix.md lists both modules with sim/tb_cmd_fsm.log and sim/tb_data_path.log. Each log contains ALL_TESTS_PASS and SIMULATION_DONE. What should the per-module simulation gate accept?",
+      "expected_output": "The per-module simulation gate accepts the module rows: every rtl/*.v module is listed, each row points to an in-project passing log, and only then may integration simulation be used for final closure.",
+      "files": [],
+      "assertions": [
+        "States every rtl/*.v module must appear in the matrix.",
+        "States each non-waived row needs an in-project evidence log.",
+        "States ALL_TESTS_PASS and SIMULATION_DONE are valid passing log markers.",
+        "States integration simulation follows, not replaces, per-module evidence."
+      ]
+    },
+    {
+      "id": 102,
+      "prompt": "A sim log contains ALL_TESTS_PASS, SIMULATION_DONE, and RUN_SIM_GUARDED: command=vvp sim.vvp timeout=30s. A second log contains ALL_TESTS_PASS, SIMULATION_DONE, and RUN_SIM_GUARDED: TIMEOUT elapsed=30s. How should sim_log_gate.py classify them?",
+      "expected_output": "The first log PASSes because timeout=30s is wrapper metadata. The second log FAILs because RUN_SIM_GUARDED: TIMEOUT is a real timeout marker.",
+      "files": [],
+      "assertions": [
+        "Accepts RUN_SIM_GUARDED command metadata with timeout=30s.",
+        "Rejects RUN_SIM_GUARDED: TIMEOUT.",
+        "Does not skip all RUN_SIM_GUARDED lines blindly.",
+        "Requires ALL_TESTS_PASS and SIMULATION_DONE in both cases."
+      ]
+    },
+    {
+      "id": 103,
+      "prompt": "A testbench has two $display calls using format strings like \"$display(\\\"data=%02h exp=%02h\\\", data_q, exp_q);\" and no assignments to data_q. What should rtl_style_check.py do about RTL_MULTI_DRIVER1?",
+      "expected_output": "rtl_style_check.py should not report RTL_MULTI_DRIVER1 from identifiers inside $display format strings. String contents must be ignored before assignment/multi-driver pattern matching.",
+      "files": [],
+      "assertions": [
+        "States no RTL_MULTI_DRIVER1 should be emitted.",
+        "Explains identifiers inside string literals are not Verilog assignments.",
+        "Mentions $display format strings as the false-positive source.",
+        "Keeps real multiple procedural drivers as errors."
+      ]
+    },
+    {
+      "id": 104,
+      "prompt": "A TB watches u_dut.inst_fsm.cstate in debug code, while an RTL datapath always block uses if (cstate == S_DONE) data_q <= data_i. Which RSP checks should report findings?",
+      "expected_output": "TB hierarchical reads of cstate should not trigger RSP datapath-purity findings. The RTL datapath direct cstate decode should trigger the RSP3/RSP4 structural-purity gate.",
+      "files": [],
+      "assertions": [
+        "States TB hierarchical cstate debug reads are ignored by RSP checks.",
+        "States RTL datapath direct cstate decode is still rejected.",
+        "Distinguishes testbench observation from synthesizable datapath control.",
+        "Mentions RSP3/RSP4 or datapath/FSM purity."
+      ]
+    },
+    {
+      "id": 105,
+      "prompt": "A final PASS delivery has docs/verification_matrix.md rows P04 and P09 marked Pending/TBD, while tb/ only contains tests F01/F02/F03 and sim logs only show F01/F02/F03. What should project_artifact_gate.py report?",
+      "expected_output": "project_artifact_gate.py FAIL: final PASS cannot coexist with Pending/TBD matrix rows, and matrix test IDs P04/P09 lack TB or sim-log evidence.",
+      "files": [],
+      "assertions": [
+        "States project_artifact_gate.py must fail.",
+        "Rejects Pending/TBD rows under a final PASS claim.",
+        "Reports missing evidence for P04 and P09.",
+        "Checks verification matrix IDs against TB or sim-log evidence."
+      ]
+    },
+    {
+      "id": 106,
+      "prompt": "An L2 DMA project has rtl/axi_rd_engine.v, rtl/axi_wr_engine.v, rtl/data_fifo.v, and rtl/dma_top.v. A tb/tb_dma_top.v instantiates dma_top which instantiates all three leaf modules. There is no docs/module_verification_matrix.md and no tb/tb_axi_rd_engine.v or tb/tb_axi_wr_engine.v or tb/tb_data_fifo.v. What should pre_integration_gate.py report?",
+      "expected_output": "pre_integration_gate.py FAIL: integration TB tb_dma_top.v exists but axi_rd_engine, axi_wr_engine, data_fifo lack per-module evidence. L2 requires per-module simulation before integration.",
+      "files": [],
+      "assertions": [
+        "States pre_integration_gate.py must fail.",
+        "Detects integration TB instantiating multiple leaf modules.",
+        "Reports missing per-module evidence for leaf modules.",
+        "States L2 requires per-module simulation before integration."
+      ]
+    },
+    {
+      "id": 107,
+      "prompt": "An L2 project has docs/subagents/architect.md with content '# Architect Report\\nRole: architect\\nScope: top-level'. The file has no Input contract, Evidence source, Acceptance commands, or Findings sections. Delegate: yes in dev_log. What should project_artifact_gate.py report?",
+      "expected_output": "project_artifact_gate.py FAIL: role report architect.md missing provenance fields (Input contract, Evidence source, Acceptance commands, Findings/decision). Delegate: yes requires provenance in each role report.",
+      "files": [],
+      "assertions": [
+        "States project_artifact_gate.py must fail.",
+        "Validates provenance fields in subagent role reports.",
+        "Lists missing fields (Input contract, Evidence source, Acceptance commands, Findings).",
+        "States Delegate: yes without provenance is a FAIL."
+      ]
+    },
+    {
+      "id": 108,
+      "prompt": "A project has rtl/top.v instantiating sub_a and sub_b, rtl/sub_a.v, rtl/sub_b.v (3 RTL files). docs/dev_log.md exists but contains no L0/L1/L2 level keyword. What should the level inference return?",
+      "expected_output": "Level inference returns L2: 3 RTL files in rtl/ meet the artifact-based L2 threshold. A silent dev_log must not downgrade artifact-based L2 evidence.",
+      "files": [],
+      "assertions": [
+        "States level must be L2.",
+        "States 3+ RTL files triggers L2 inference.",
+        "States silent dev_log does not override artifact-based L2 evidence.",
+        "Mentions both project_artifact_gate.py and project_preflight_gate.py apply this rule."
+      ]
+    },
+    {
+      "id": 109,
+      "prompt": "An L2 project runs rtl_style_check.py --level L2 on an RTL file where the FSM combinational block assigns prp_addr_o = prp_base + offset. What should rtl_style_check.py report for RSP2?",
+      "expected_output": "rtl_style_check.py reports [E][RTL_STRUCTURAL_PURITY_RSP2] for prp_addr_o. With --level L2, RSP2 violations are E-level (hard error), not W-level.",
+      "files": [],
+      "assertions": [
+        "States RSP2 must be E-level when --level L2 is specified.",
+        "Names prp_addr_o as the violating signal.",
+        "States FSM combinational block must not assign multi-bit datapath signals.",
+        "Distinguishes L2 E-level from L0/L1 W-level behavior."
+      ]
+    },
+    {
+      "id": 110,
+      "prompt": "A compile log file is completely empty (0 bytes). What should compile_log_gate.py report?",
+      "expected_output": "compile_log_gate.py FAIL: empty or whitespace-only compile log. An empty log cannot prove compilation succeeded.",
+      "files": [],
+      "assertions": [
+        "States compile_log_gate.py must fail.",
+        "Reports empty or whitespace-only compile log.",
+        "States empty log is not evidence of successful compilation.",
+        "Distinguishes empty log from a log with no errors."
+      ]
+    },
+    {
+      "id": 111,
+      "prompt": "A sim log contains ALL_TESTS_PASS, SIMULATION_DONE, and a line 'TEST_PASS timeout_protection status=TIMEOUT expected_timeout=1'. A second log contains ALL_TESTS_PASS, SIMULATION_DONE, and 'RUN_SIM_GUARDED: TIMEOUT elapsed=30s'. How should sim_log_gate.py classify them?",
+      "expected_output": "The first log PASSes because status=TIMEOUT with ALL_TESTS_PASS and SIMULATION_DONE is expected timeout-protection test text. The second log FAILs because RUN_SIM_GUARDED: TIMEOUT is a real simulation timeout.",
+      "files": [],
+      "assertions": [
+        "Accepts expected timeout-protection text when ALL_TESTS_PASS and SIMULATION_DONE exist.",
+        "Rejects RUN_SIM_GUARDED: TIMEOUT as real timeout.",
+        "Distinguishes expected timeout context from real timeout failure.",
+        "Requires both ALL_TESTS_PASS and SIMULATION_DONE for expected timeout allowance."
+      ]
+    },
+    {
+      "id": 112,
+      "prompt": "A project has sim/top.vvp (compiled simulation) but no .log files in sim/. The sim/ directory also has no VCD files. What should final_delivery_gate.py report?",
+      "expected_output": "final_delivery_gate.py FAIL: found .vvp file(s) but no .log files. Standard delivery requires .log evidence from run_sim_guarded.py. Bare vvp execution without log capture is not acceptable evidence.",
+      "files": [],
+      "assertions": [
+        "States final_delivery_gate.py must fail.",
+        "Reports .vvp without .log as insufficient evidence.",
+        "States run_sim_guarded.py .log files are required.",
+        "Rejects bare vvp execution as delivery evidence."
+      ]
+    },
+    {
+      "id": 113,
+      "prompt": "A DMA testbench has $display(\"AWADDR=%h AWLEN=%d\", m_axi_awaddr, m_axi_awlen) but never compares AWADDR or AWLEN against expected values. What should project_artifact_gate.py report for scoreboard substance?",
+      "expected_output": "project_artifact_gate.py FAIL: scoreboard substance check finds AWADDR and AWLEN mentioned in TB but no comparison against expected value (no ==, check_task, expected_*, or assert). Signal mention alone is not scoreboard evidence.",
+      "files": [],
+      "assertions": [
+        "States project_artifact_gate.py must fail.",
+        "Reports AWADDR and AWLEN lack expected-value comparison.",
+        "States $display of signal values is not scoreboard evidence.",
+        "Requires actual comparison logic (==, check_task, expected_*, assert)."
+      ]
+    },
+    {
+      "id": 114,
+      "prompt": "An NVMe RTL file declares reg [63:0] prp_list_mem [0:5] but has no always block that writes to prp_list_mem and no AR channel output. The docs claim PRP list support. What should project_artifact_gate.py report?",
+      "expected_output": "project_artifact_gate.py FAIL: PRP feature claim check finds list_mem declaration but no load/write/fetch interface or AR channel. PRP list entries cannot be populated. Mark as Blocking Gap or implement list fetch path.",
+      "files": [],
+      "assertions": [
+        "States project_artifact_gate.py must fail.",
+        "Reports list_mem without load/fetch interface.",
+        "States PRP list entries cannot be populated without fetch path.",
+        "Requires Blocking Gap marking or list fetch implementation."
+      ]
     }
   ]
 }

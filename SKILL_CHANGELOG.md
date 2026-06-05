@@ -1,6 +1,723 @@
-# Skill Iteration Changelog
+# Skill 迭代日志
+
+## 2026-06-05 - v2026.06.05 发布：证据绑定与存储门禁加固
+
+### 发布摘要
+
+本版本将 2026-06-04 NAND/DMA/NVMe 三项目复盘中形成的门禁加固正式整理为发布版本 `v2026.06.05`。目标是减少 agent 的“合规表演”：最终 PASS、protocol claim、verification matrix、delegation decision 必须绑定到真实工程证据，而不是只出现在开发日志或总结文字中。
+
+### 主要能力
+
+| 能力 | 位置 | 说明 |
+|------|------|------|
+| L1/L2 fail-closed 门禁 | `project_preflight_gate.py`, `project_artifact_gate.py`, `pre_integration_gate.py`, `final_delivery_gate.py` | 缺少必要文档、模块级验证、委派证据、compile/sim log 时拒绝 final PASS |
+| Protocol Claim Ledger Evidence Gate | `project_artifact_gate.py` | 项目声称 PASS 时，`protocol_claim_ledger.md` 中 Evidence 为空/TBD/占位符的条目会 FAIL |
+| Storage Mover Evidence Gate | `project_artifact_gate.py` | 检查 WSTRB/unaligned、RRESP/RD error、`cpl_bytes`、PRP list 公共接口、invalid-command completion |
+| Pre-Integration Gate | `pre_integration_gate.py` | L2 项目在缺少逐模块证据时不允许直接进入集成仿真；支持识别 extensionless Icarus 输出 |
+| Windows `.vvp` 修复 | `run_sim_guarded.py` | Windows 下自动通过 `vvp <file>` 执行 `.vvp` |
+| README 发布说明 | `README.md`, `README_CN.md` | 中英文 README 均新增 `v2026.06.05` 发布说明 |
+
+### 验收
+
+| 命令 | 结果 |
+|------|------|
+| `python -B scripts/skill_static_check.py` | PASS |
+| `python -m py_compile scripts/project_artifact_gate.py scripts/pre_integration_gate.py scripts/run_sim_guarded.py scripts/final_delivery_gate.py scripts/sim_log_gate.py scripts/project_preflight_gate.py` | PASS |
+| `project_artifact_gate.py nvme-io-path` | FAIL as expected：捕获 protocol ledger TBD、PRP list backdoor、invalid-command completion 缺口、WSTRB/shape/T10/T11 缺口 |
+| `project_artifact_gate.py Descriptor-Based AXI DMA Mover` | FAIL as expected：捕获 RRESP/shape/T10/doc-only/模块级证据缺口 |
+| `pre_integration_gate.py NAND Flash page controller` | FAIL as expected：捕获 extensionless integration sim artifact 早于模块级 evidence |
+
+## 2026-06-04 - 存储项目证据绑定 + 门禁加固（第三轮）
+
+### 背景
+
+基于 NAND/DMA/NVMe 三个存储项目复盘发现的持续绕过门禁问题：verification matrix 行声称 PASS 但无 TB 执行证据、protocol claim ledger 的 Evidence 列为 TBD/blank、存储 mover 特定功能（WSTRB/RRESP/cpl_bytes/PRP list 公共接口）缺乏 TB 检查、extensionless Icarus 输出未被 pre-integration gate 识别、Windows 上 .vvp 文件无法直接执行。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Protocol Claim Ledger Evidence Gate | `project_artifact_gate.py` `check_protocol_claim_ledger_evidence()` | L1/L2 项目声称 PASS 时，claim ledger 每行 Evidence 必须非空、非 TBD、非占位符 |
+| Storage Mover Evidence Gate | `project_artifact_gate.py` `check_storage_mover_evidence()` | WSTRB/unaligned 需 TB 比对 expected_wstrb；RRESP/RD error 需 TB 检查非仅 BRESP；cpl_bytes 需检查；PRP list 需公共接口 exercise 非 hierarchical dut.* 写入；T10/T11/WSTRB/shape 声称需对应 TB markers |
+| Extensionless Icarus Artifact Detection | `pre_integration_gate.py` `_find_integration_sim_artifacts()` | 识别 `sim/tb_*`、`sim/top_*`、`sim/integration_*` 无扩展名 Icarus 输出为集成仿真产物 |
+| Windows .vvp Execution Fix | `run_sim_guarded.py` | Windows 上 `.vvp` 文件自动通过 `vvp <file>` 调用，不再尝试直接执行 |
+
+### 验收结果
+
+| 检查项 | 结果 |
+|------|:----:|
+| `python -B -m py_compile` 关键脚本 | PASS |
+| `python -B scripts/skill_static_check.py` | PASS |
+| `python -B scripts/project_preflight_gate.py` nvme-io-path | PASS |
+| `python -B scripts/project_artifact_gate.py` nvme-io-path | FAIL as expected: evidence tokens only in docs (C1-C5, T10, T11), missing module matrix/delegation, scoreboard substance (AWADDR/AWLEN/WSTRB/WLAST/BRESP), storage mover evidence (WSTRB, T10/T11/shape) |
+| `python -B scripts/pre_integration_gate.py` nvme-io-path | FAIL as expected: integration sim artifacts (.vvp, .log) before 6 modules lack per-module evidence |
+| `python -B scripts/final_delivery_gate.py` nvme-io-path | FAIL as expected: artifact + pre-integration + rtl_style (RSP2/RSP4/TB_COMPLETION_ONLY1/TB_TIMEOUT_FATAL1) + missing compile log |
+| `python -B scripts/project_artifact_gate.py` DMA Mover | FAIL as expected: evidence tokens only in docs (T5/T6/T8/T10/cpl), missing module matrix/delegation, scoreboard substance, storage mover evidence (RRESP, T10/T11/shape) |
+| `python -B scripts/rtl_style_check.py` prp_walker.v | FAIL as expected: C17_ARR1 + RSP4 x2 |
+| `python -B scripts/rtl_style_check.py --level L2` prp_walker.v | FAIL as expected: same findings, RSP4 stays E-level |
+
+---
+
+## 2026-06-04 - 断线恢复后的 Codex 补强验收
+
+### 背景
+
+本轮原计划继续采用“Codex 制定方案和验收标准 -> Claude 执行修改 -> 自动门禁 -> Codex 审计关键 diff”的流程。Claude Code 在执行过程中因本机网络中断/API 连接失败退出，未能形成可确认的完整执行结果。断线恢复后由 Codex 直接接管补强，并完成自动门禁与三个真实项目回归。
+
+### Codex 补强点
+
+| 项目 | 位置 | 说明 |
+|------|------|------|
+| PRP list 假加载误判修正 | `scripts/project_artifact_gate.py` | `list_mem[idx]` 声明或读取不再被当作 load/fetch 证据；必须看到 list memory 写入、list load/write/fetch 接口或 AR fetch 通道 |
+| PRP1 non-zero offset claim 收紧 | `scripts/project_artifact_gate.py` | 文档声称 PRP1 offset 支持时，RTL 缺少 offset/mask/base 逻辑或直接拒绝 non-zero offset 都会 FAIL |
+| L2 推断一致化 | `scripts/final_delivery_gate.py` | final gate 的 level 推断与 artifact/preflight gate 对齐，rtl >=3、多协议、top+>=2 leaf 都会触发 L2，从而传递 `--level L2` 给 `rtl_style_check.py` |
+| pre-integration 多协议补齐 | `scripts/pre_integration_gate.py` | 不再只识别 NVMe+AXI；DMA/NAND+AXI 同样作为 L2 多协议信号处理 |
+| pre-integration 噪音收窄 | `scripts/pre_integration_gate.py` | `compile.log`/build/vlog/iverilog 日志不再被当作 integration sim artifact；抢跑判断聚焦仿真运行产物 |
+| top+leaf 推断修正 | `scripts/project_artifact_gate.py`, `scripts/project_preflight_gate.py`, `scripts/final_delivery_gate.py`, `scripts/pre_integration_gate.py` | 识别一个 top module 实例化 >=2 个不同 leaf module 的结构，避免只统计同一模块实例次数 |
+
+### 验收结果
+
+| 检查项 | 结果 |
+|------|:----:|
+| `python -B -m py_compile` 关键脚本 | PASS |
+| `python -B -m json.tool` evals/benchmark | PASS |
+| `python -B scripts/skill_static_check.py` | PASS |
+| `python -B scripts/eval_benchmark_check.py` | PASS, TOTAL_EVALS=114, EXECUTABLE_TRIALS=23 |
+| `sim_log_gate.py` expected timeout smoke | PASS |
+| `sim_log_gate.py` real wrapper timeout smoke | FAIL as expected |
+| `nvme-io-path` 回归 | FAIL as expected: false delegation, missing module matrix, pre-integration violation, RSP2/RSP3, weak scoreboard, PRP claim |
+| `Descriptor-Based AXI DMA Mover` 回归 | FAIL as expected: artifact-based L2, missing module matrix/delegation decision, integration artifact before module evidence, weak scoreboard, no standard logs |
+| `NAND Flash page controller` 回归 | FAIL as expected: artifact-based L2, missing protocol ledger/module matrix/delegation decision, missing compile/sim logs |
+
+### 流程记录
+
+本轮属于 Claude 执行阶段被网络中断后的 Codex 兜底修改。后续如果继续按双 agent 流程执行，应在 Claude 断线/API 失败后明确记录“Claude 未完成”，再由 Codex 补丁或重新调用 Claude，避免开发日志误认为修改由 Claude 完整落地。
+
+## 2026-06-04 – L2 存储项目复盘第二轮：五项 P0 + 五项 P1 门禁加固
+
+### 背景
+
+Codex 审计三个 L2 存储项目（nvme-io-path、NAND Flash page controller、Descriptor-Based AXI DMA Mover），发现 agent 仍能绕过现有门禁：跳过逐模块仿真直接跑集成、伪造 delegation provenance、dev_log 缺 Level 导致 L2 被误判为 L1、RSP2 在 L2 项目仍是 W-level、verification matrix 只检查 doc 提及不检查 TB/sim 执行证据。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Pre-Integration Simulation Lock | `scripts/pre_integration_gate.py` (新), `final_delivery_gate.py` Step 1b | L2 项目 integration TB 或 sim artifact 存在但逐模块证据缺失时 FAIL |
+| False Delegation Provenance Gate | `project_artifact_gate.py` `_check_role_report_provenance()` | Delegate: yes 的 role report 必须包含 Role/Scope/Input contract/Evidence source/Acceptance commands/Findings 六个 provenance 字段 |
+| L2 Auto-Classification Hardening | `project_artifact_gate.py`, `project_preflight_gate.py` | rtl >=3 文件、top+>=2 leaf、multi-protocol 信号 -> L2；dev_log 无 Level 不覆盖 artifact 推断 |
+| RSP2 L2 Hard Error | `rtl_style_check.py` `--level L2`, `final_delivery_gate.py` | L2 项目 FSM comb block 分配 multi-bit datapath/sideband 信号升级为 E-level |
+| Verification Matrix Evidence Closure | `project_artifact_gate.py` `check_verification_matrix_evidence()` | 矩阵条目必须绑定 TB 文件或 sim log 执行证据；仅 doc 提及不算证据；planned-only 需 NOT_RUN/WAIVED |
+
+### P1 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Empty Compile Log Gate | `compile_log_gate.py` | 空白/纯 whitespace compile log 直接 FAIL |
+| Expected Timeout Allowance | `sim_log_gate.py` `is_expected_timeout_context()` | ALL_TESTS_PASS + SIMULATION_DONE 存在时，TEST_PASS.*timeout/status=TIMEOUT 类文本允许通过 |
+| Standard Log Artifact Requirement | `final_delivery_gate.py` Step 5 | .vvp 无 .log 不可接受；必须有 run_sim_guarded.py 产生的 .log 证据 |
+| Scoreboard Substance Gate | `project_artifact_gate.py` `check_scoreboard_substance()` | DMA/NVMe TB 提及 AWADDR/AWLEN/WLAST/WSTRB/BRESP 但无 expected comparison 逻辑则 FAIL |
+| PRP Feature Claim Gate | `project_artifact_gate.py` `check_prp_feature_claims()` | list_mem 无 load/fetch 接口、PRP1 non-zero offset 无 RTL 逻辑则 FAIL |
+
+### Reference 更新
+
+| 文件 | 说明 |
+|------|------|
+| `references/verification/per-module-simulation-gate.md` | 新增 Pre-Integration Lock 段落，明确集成仿真禁令 |
+| `SKILL.md` Step 9/10 | 新增 pre_integration_gate、delegation provenance、RSP2 L2、scoreboard substance、standard log artifact 等 finalization gates |
+
+### Evals
+
+新增 eval 106-114，覆盖 pre-integration lock、delegation provenance、L2 inference hardening、RSP2 hard error、empty compile log、expected timeout allowance、standard log artifact、scoreboard substance、PRP feature claim gate。新增 benchmark 维度 `pre_integration_lock`、`delegation_provenance`、`l2_classification_hardening`、`rsp2_level_escalation`、`empty_compile_log`、`expected_timeout_allowance`、`standard_log_artifact`、`scoreboard_substance`、`prp_feature_claim`。
+
+### 验收要求
+
+| 检查项 | 预期 |
+|------|:----:|
+| `python -m py_compile` 全部脚本 | PASS |
+| `python -m json.tool` evals/benchmark | PASS |
+| `python scripts/skill_static_check.py` | PASS |
+| `python scripts/eval_benchmark_check.py` | PASS，eval 总数 >= 114 |
+| nvme-io-path 回归 | FAIL (false delegation, missing module matrix, RSP2, PRP claim) |
+| NAND Flash 回归 | FAIL (missing protocol ledger/module matrix/standard logs) |
+| DMA Mover 回归 | FAIL (L2 classification, missing module matrix, RSP4, scoreboard) |
+
+---
+
+## 2026-06-04 — Codex 审计补漏：逐模块仿真硬门禁与门禁误报回归
+
+### 背景
+
+Claude Code 已完成本轮主体修改，但 Codex 复核后发现仍有三个会影响验收可信度的缺口：L2 逐模块仿真没有形成独立 reference 与最终矩阵门禁；`sim_log_gate.py` 会把真实的 `RUN_SIM_GUARDED: TIMEOUT` 当作 wrapper 元数据跳过；`rtl_style_check.py` 的 RSP 结构规则仍可能作用到 TB 层级调试代码。
+
+### Codex 补漏改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| L2 逐模块仿真硬门禁 | `references/verification/per-module-simulation-gate.md`, `SKILL.md`, `reference-index.md` | 新增独立 reference，要求 `docs/module_verification_matrix.md` 记录每个 RTL module 的 TB/formal 证据，集成仿真不能替代模块级证据 |
+| module verification matrix 自动检查 | `scripts/project_artifact_gate.py` | L2 项目缺少 `docs/module_verification_matrix.md`、module 未列入矩阵、证据日志缺失或无 PASS marker 时拒绝 final PASS |
+| verification matrix 证据闭环加强 | `scripts/project_artifact_gate.py` | final PASS 时拒绝 Pending/TBD/空白矩阵行，并把矩阵测试 ID 与 TB/sim log 交叉验证 |
+| guarded wrapper 日志误判修复 | `scripts/sim_log_gate.py` | 仅忽略 `RUN_SIM_GUARDED: command=... timeout=30s` 等良性元数据；真实 `RUN_SIM_GUARDED: TIMEOUT/FAIL` 仍然 FAIL |
+| TB 与 RTL RSP 分层 | `scripts/rtl_style_check.py` | TB 继续执行 false-pass 检查，但 RSP FSM/datapath purity 只作用于设计 RTL；TB 层级读取 `cstate` 不再误报 |
+| gate false-positive eval 回归 | `evals/evals.json`, `evals/benchmark.json` | 新增 eval 100-105，覆盖逐模块仿真、wrapper timeout、`$display` 字符串、多层级 TB debug、矩阵 ID 证据闭环 |
+
+### 验收要求
+
+| 检查项 | 预期 |
+|------|:----:|
+| `python -m py_compile` 关键脚本 | PASS |
+| `python -m json.tool` evals/benchmark | PASS |
+| `python scripts/skill_static_check.py` | PASS |
+| `python scripts/eval_benchmark_check.py` | PASS，eval 总数应 >= 105 |
+| smoke: `sim_log_gate.py` wrapper metadata | PASS |
+| smoke: `sim_log_gate.py` real `RUN_SIM_GUARDED: TIMEOUT` | FAIL |
+| smoke: L2 缺少 `module_verification_matrix.md` | FAIL |
+
+---
+
+## 2026-06-04 — L2 存储项目复盘：逐模块仿真 + 工具误报修复
+
+### 背景
+
+Codex 审计两个 L2 存储项目，发现五个反复出现的问题：跳过逐模块仿真直接跑集成、FSM/datapath purity 在集成时才暴露、verification_matrix 与 TB 测试名不匹配、sim_log_gate 误拒 wrapper 元数据、rtl_style_check 误报 $display 格式字符串。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| L2 逐模块仿真门禁 | `SKILL.md` Step 7/9/10, `simulation-loop.md` | L2 每个子模块必须先通过独立 TB 仿真，才能进入集成 TB |
+| verification_matrix 测试名交叉检查 | `project_artifact_gate.py`, `contract-to-test-trace-gate.md` | 解析 verification_matrix.md 中的 TEST_PASS/check_/test_ 引用，与 TB 文件交叉验证 |
+| sim_log_gate RUN_SIM_GUARDED 误报修复 | `sim_log_gate.py` | FAIL_PATTERNS 匹配时跳过 `RUN_SIM_GUARDED:` 等良性元数据行 |
+| rtl_style_check $display 格式串误报修复 | `rtl_style_check.py` | 新增 `_strip_string_contents()` 辅助函数，LHS 赋值正则匹配前移除字符串内容 |
+| TB_FPASS1 正则收窄 | `rtl_style_check.py` | 仅匹配 `mismatch`（强误报指标），不再匹配 `exp`/`expected`（良性格式标签）|
+| _collect_tb_content 重构 | `project_artifact_gate.py` | 提取公共 TB 内容收集函数，供 evidence_cross_ref 和 verification_matrix 共用 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| `python -m py_compile` 修改脚本 | PASS |
+| `python scripts/skill_static_check.py` | PASS |
+| SKILL.md 行数 | 456 / 460 |
+
+---
+
+## 2026-06-04 — 工作流入口前置 + 项目骨架预检 + 受控仿真包装器
+
+### 背景
+
+上一轮门禁已经能拦住坏交付，但流程仍有顺序问题：review/debug/protocol-audit 容易被完整 RTL pipeline 拖慢；No-SPEC 项目的 docs/matrix 常被最后补；仿真跑飞只能事后发现；contract implementation matrix 仍有 final-time reconstruction 风险。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Step 0 Workflow Entry Routing | `SKILL.md`, `references/workflow/task-mode-routing.md` | routing 前置到 Standard Workflow 之前；review/debug/protocol-audit/skill-maintenance 不进入完整 design pipeline |
+| Review gate-first 顺序 | `task-mode-routing.md`, eval 97 | review 先看 artifact/style/compile/sim/runtime evidence，再做 manual hotspot review |
+| Project Skeleton / Preflight Gate | `SKILL.md` Step 1.2, `scripts/project_preflight_gate.py` | RTL 前检查 `docs/`, `rtl/`, `tb/`, `sim/` 和 7 个 canonical docs skeleton |
+| Contract matrix 前移 | `SKILL.md` Step 3, `contract-implementation-gate.md` | contract freeze 后立即创建 `contract_implementation_matrix.md` skeleton，开发过程中逐项填 evidence |
+| Guarded simulation wrapper | `scripts/run_sim_guarded.py`, `simulation-loop.md`, `SKILL.md` Step 9 | 替代裸 `vvp`；捕获 log、限制 timeout、限制 VCD/log 大小、UTF-8 安全输出 |
+| Final/preflight 关系明确 | `SKILL.md` Step 10 | preflight 是 RTL 前骨架门，final_delivery 是交付前聚合门 |
+
+### Codex 审计补漏
+
+| 补漏 | 位置 | 说明 |
+|------|------|------|
+| VCD/log 超限硬失败 | `run_sim_guarded.py` | size limit exceeded 返回 RC=3，不再打印 wrapper 伪造的 `ALL_TESTS_PASS` |
+| Wrapper 失败写回 log | `run_sim_guarded.py` | size 超限时写入 `RUN_SIM_GUARDED_FAIL`，即使 child 已打印 `ALL_TESTS_PASS`，`sim_log_gate.py` 仍会拒绝 |
+| L1/L2 skeleton 一致 | `project_preflight_gate.py` | L1/L2 No-SPEC 均要求 `tb/`，保证 TB 不是后补品 |
+| Eval 可追踪维度 | `benchmark.json` | 新增 `workflow_routing_gate_first_review`, `project_skeleton_preflight_no_spec`, `guarded_sim_wrapper_timeout_vcd_limit` |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| `python -m py_compile` 新增/关键脚本 | PASS |
+| `python -m json.tool` evals/benchmark | PASS |
+| `python scripts/skill_static_check.py` | PASS |
+| `python scripts/eval_benchmark_check.py` | PASS，99 evals |
+| `project_preflight_gate.py` 空项目 | FAIL，符合预期 |
+| `project_preflight_gate.py` 完整 skeleton | PASS |
+| `run_sim_guarded.py` 正常命令 | RC=0，log 保留 testbench markers |
+| `run_sim_guarded.py` timeout | RC=1，打印 TIMEOUT |
+| `run_sim_guarded.py` VCD 超限 | RC=3，不打印 wrapper 伪造 PASS |
+| VCD 超限 log 复核 | `sim_log_gate.py` RC=1，符合预期 |
+
+---
+
+## 2026-06-04 — Codex 审计补漏：RSP1 升级与 UTF-8 门禁输出
+
+### 背景
+
+Claude Code 在本轮修改过程中因本机断电/连接中断未能完整返回最终报告，但工作区已有部分写入。Codex 接管验收后执行补漏，重点处理两个问题：中文路径在 gate 聚合输出中乱码，以及 RSP1 仍以 W 级报告，严重度不足以体现“状态寄存器块只更新 cstate”的硬边界。
+
+### 补漏改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| UTF-8 安全输出 | `compile_log_gate.py`, `final_delivery_gate.py`, `project_artifact_gate.py`, `rtl_style_check.py`, `sim_log_gate.py` | stdout/stderr 统一 UTF-8 + replace，`final_delivery_gate.py` 子进程强制 `PYTHONIOENCODING=utf-8`，中文路径不再乱码 |
+| RSP1 升级 | `rtl_style_check.py` | `cstate` state-register block 中出现任何其他寄存器赋值由 W 升级为 E |
+| TB 自动发现补强 | `final_delivery_gate.py` | style gate 自动扫描 `sim/tb_*.v`，即使 artifact gate 另行报告非规范 TB 位置，也不会漏掉 false-pass TB 检查 |
+| 验证记录补齐 | 本日志 + `CLAUDE.md` | 记录断点恢复、Codex 补漏和真实项目回归结果 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| `python -m py_compile` 关键脚本 | PASS |
+| `python scripts/skill_static_check.py` | PASS |
+| `python scripts/compile_log_gate.py` smoke test | PASS |
+| `python scripts/eval_benchmark_check.py` | PASS |
+| DMA artifact gate | FAIL，符合预期：不再误报 delegation 缺失，改为要求 compensation gates |
+| NAND artifact gate | FAIL，符合预期：识别非规范 delegation，仍拒绝缺失 docs 与 compensation gates |
+| NAND compile log gate | FAIL，符合预期：拦截 `24'd16777216` numeric truncation |
+| NVMe final delivery gate | FAIL，符合预期：拦截缺 docs、非规范 TB 位置、RSP1/RSP4、compile x 注入、缺 sim log、102MB VCD |
+
+---
+
+## 2026-06-03 — Runtime 失控门禁 + 编译强化 + 交付物完整性 + RTL 纯度修正
+
+### 触发背景
+
+Descriptor DMA Mover、NAND Flash Page Controller、nvme-io-path 三个项目审计发现：仿真 PASS 但 final gate FAIL；compile truncation 24'd16777216->0 未被门禁拦截；无 sim log/超大 VCD 时仍声称完成；delegation markdown 格式解析不全；TB 偏 completion-only；RTL 纯度检查有误报。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Runtime/runaway guard | `final_delivery_gate.py` Step 5 | VCD>50MB、log>20MB、大量 VCD 文件、无 sim log -> FAIL |
+| 编译门禁强化 | `compile_log_gate.py` | numeric truncation (24'd16777216)、out-of-bound/x注入、编码安全输出 |
+| 交付物完整性 | `project_artifact_gate.py` | delegation 兼容 markdown bold + Delegation Decision 备选格式；evidence 兼容 sim/tb_*.v；TBD/空白/Summary 空 -> FAIL |
+| RTL 纯度误报修正 | `rtl_style_check.py` | FSM comb single-bit enable 含 _cnt_ 不再误报；PRP_STUB/PRP_LIST_FAKE 仅扫 RTL 不扫 TB |
+| AXI W 连续 burst | SKILL.md Step 2a | continuous 模式需 FIFO 有 AWLEN+1 beats，仅 !dfifo_empty 不够 |
+
+### P1 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| 回归 evals | `evals/evals.json` + `benchmark.json` | 新增 nvme_runaway_and_rsp_purity、nand_timeout_width_warning、dma_axi_w_burst_fifo_starvation |
+| 开发记忆 | CLAUDE.md + SKILL_CHANGELOG.md | 本轮记录 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| py_compile | PASS |
+| json.tool + eval_benchmark_check | PASS |
+
+---
+
+## 2026-06-03 — 空 docs + PRP stub/简化 + 位宽越界编译警告硬化
+
+### 触发原因
+
+nvme-io-path 最新项目：`docs/` 空、无 dev_log、无 SPEC、无合约，仅产出 RTL + 仿真成功摘要。`project_artifact_gate` 因缺 dev_log 默认为 L1 未拒绝。编译日志有 Icarus warning `PAGE_SIZE[63:0] selecting after PAGE_SIZE[31:0]` 但未被门禁拒绝。RTL prp_walker 注释 `Simplified` 暴露假 PRP 实现。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| L2 自动推断 | `project_artifact_gate.py` | 无 dev_log 时从项目复杂度推断 L2：rtl/*.v >=3、NVMe+AXI 信号共存、tb/+rtl/ 目录结构 |
+| PRP_STUB2 / PRP_LIST_FAKE1 | `rtl_style_check.py` | E 级：PRP 相关文件中检测 `Simplified`、`would fetch from PRP2 list`、`advance by PAGE_SIZE` 等假 PRP list 实现 |
+| WIDTH_BOUND1 | `rtl_style_check.py` | W 级：检测窄参数做宽位选择（如 PAGE_SIZE[63:0]），Icarus 填充 'bx |
+| AXI_WDATA_SOURCE1 | `rtl_style_check.py` | E 级：WVALID/WACTIVE 不能在 FIFO 数据可用性未证明时呈现 FIFO-backed WDATA |
+| RSP3 升级 + RSP4 | `rtl_style_check.py` | E 级：datapath 时序块和输出/数据通路赋值不得直接解码 `cstate/S_*` |
+| NVM_STRAY_DATA1 | `rtl_style_check.py` | W 级：NVM read data ready / FIFO write enable 不能脱离 collect/active 控制 |
+| compile_log_gate | `scripts/compile_log_gate.py` | 新增：编译日志中的 out-of-bound select、`'bx` replacement、width/port mismatch、implicit net、latch 等硬拒绝 |
+| final_delivery_gate | `scripts/final_delivery_gate.py` | 新增：聚合 artifact/style/compile/sim 四类门禁；缺 docs 或缺日志不能交付 PASS |
+| eval 88-93 | `evals/evals.json`, `evals/benchmark.json` | 新增 fail-closed 交付、空 docs L2 推断、编译日志、PRP 假实现、AXI WDATA、FSM/datapath 纯度 eval |
+| CLAUDE.md | CLAUDE.md | 记录本轮硬化教训 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| py_compile（6 个脚本） | PASS |
+| skill_static_check | PASS |
+| json.tool + eval_benchmark_check | PASS（93 evals / 34+1 dimensions / 23 executable trials） |
+| SKILL.md | PASS（462 行，ASCII） |
+| compile_log_gate timescale-only 合成日志 | PASS（不误伤 inherited timescale） |
+| nvme-io-path: project_artifact_gate | FAIL（预期：L2 推断 + 7 个 docs 缺失 + 无 delegation decision） |
+| nvme-io-path: rtl_style_check | FAIL（预期：PRP_LIST_FAKE1、AXI_WDATA_SOURCE1、RSP3/RSP4、NVM_STRAY_DATA1、TB false-pass） |
+| nvme-io-path: compile_log_gate | FAIL（预期：PAGE_SIZE 越界 part-select + `'bx` replacement） |
+| nvme-io-path: sim_log_gate | FAIL（预期：缺 ALL_TESTS_PASS / SIMULATION_DONE） |
+| nvme-io-path: final_delivery_gate | FAIL（预期：四类门禁聚合拒绝） |
+
+---
+
+## 2026-06-03 — L2 委派证据 + 合同实现闭环 + 残余风险分级门禁
+
+### 触发原因
+
+nvme-io-path 审计发现：dev_log `Delegate: yes` 但无 sub-agent work package / role reports / integration reviewer 证据；SPEC 写 PRP list fetch 但 RTL tie off AR/R、`prp_err_o` 恒 0、`slba` 未进入 NVM 源地址；TB completion-only 缺 transaction-shape scoreboard；PASS 同时 residual risks 含 `No .*testing`/`NOT supported` 等阻塞语义；No-SPEC artifact 路径不一致。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| L2 委派执行证据门禁 | SKILL.md Step 1.1 | Delegate: yes 必须产出 `docs/delegation_plan.md` + subagent role reports |
+| 委派 artifact schema | sub-agent-delegation.md | 7 个强制交付物：delegation plan + 6 个 role reports；缺任何一项 `project_artifact_gate.py` 拒绝 PASS |
+| 合同实现矩阵 | NEW `references/workflow/contract-implementation-gate.md` | 每个 contract item -> RTL producer/consumer + TB check + waiver；NVMe/DMA 必须覆盖 6 类 |
+| 合同矩阵门控 | SKILL.md Step 10 + `project_artifact_gate.py` | `docs/contract_implementation_matrix.md` 为 L1/L2 No-SPEC 必需交付物 |
+| Transaction-shape 强制 | SKILL.md Step 8b | completion-only TB 不通过 PASS；`rtl_style_check.py` TB_COMPLETION_ONLY1 保持 E 级 |
+| 残余风险分级 | `contract-implementation-gate.md` + `project_artifact_gate.py` | Blocking Gap / Accepted Limitation / Residual Risk 三级；PASS 时禁止无豁免阻塞项 |
+| No-SPEC artifact 路径统一 | SKILL.md + `project_artifact_gate.py` | 规范路径 `docs/` 下 |
+
+### P1 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| RTL_MULTI_DRIVER1 误报修复 | `rtl_style_check.py` | 关系 `<=` 在条件中不再误报为过程赋值 |
+| C17_ARR1 检测 | `rtl_style_check.py` | W 级：`reg [..] mem [..]` 非打包数组，需 BRAM 或 waiver |
+| PRP_STUB1 检测 | `rtl_style_check.py` | E 级：AR 通道信号只被赋 0，PRP list fetch 疑似 stubbed |
+| ERR_STUB1 检测 | `rtl_style_check.py` | W 级：error 输出只赋 0，错误传播路径疑似 stubbed |
+| PRP_STUB1 降误报 | `rtl_style_check.py` | Codex 审计补漏：PRP_STUB1 只在 NVMe/PRP 上下文触发，普通 AXI AR tie-off 不误报 |
+| Eval 文案补漏 | `evals/evals.json` | Codex 审计补漏：修复 eval 84-86 空 snippet，更新 No-SPEC canonical `docs/` 路径 |
+| SKILL.md ASCII 静态门禁 | `skill_static_check.py` | 将 SKILL.md 非 ASCII 检查并入常规静态门禁，避免中英文/特殊符号回归 |
+| CLAUDE.md | CLAUDE.md | 记录本轮回归教训 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| skill_static_check.py | PASS |
+| SKILL.md ASCII audit | PASS |
+| py_compile（3 个脚本） | PASS |
+| json.tool + eval_benchmark_check | PASS（34 dimensions, 87 evals） |
+| project_artifact_gate on nvme-io-path | PASS：按预期 REJECT，缺 `docs/SPEC.md`、claim ledger、verification matrix、contract matrix、delegation evidence |
+| rtl_style_check on nvme-io-path | PASS：按预期拒绝 `PRP_STUB1`、`ERR_STUB1`、`C17_ARR1`、`RTL_MULTI_DRIVER1`、`TB_TIMEOUT_FATAL1`、`TB_COMPLETION_ONLY1` |
+| residual-risk synthetic gate | PASS：`Status: PASS` + 未豁免 `No multi-page transfer testing` 被拒绝 |
+| generic AXI AR tie-off scope test | PASS：非 NVMe/PRP 上下文下不触发 `PRP_STUB1` |
+
+---
+
+## 2026-06-03 — SKILL.md 编码清理
+
+### 触发原因
+
+SKILL.md 编码规则章节包含中文 CJK 文本，且全文散布非 ASCII 符号（em dash、箭头、勾选、Unicode 不等号等）。部分终端渲染异常，且破坏仅限 ASCII 的工具链。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| 中译英 | SKILL.md 第 70-80 行 | 编码规则章节：中文全部替换为语义等价的英文 |
+| 非 ASCII 符号替换 | SKILL.md 全文 | `—` -> `--`、`→` -> `->`、`✅` -> `[PASS]`、`≤` -> `<=`、`≥` -> `>=`、`§` -> `section` |
+| 编码策略 | CLAUDE.md | 新增规则：SKILL.md 必须保持 English-only 且编码稳定 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| skill_static_check.py | PASS |
+| py_compile（3 个脚本） | PASS |
+| json.tool evals.json / benchmark.json | PASS |
+| eval_benchmark_check.py | PASS（33 维度，80 条 eval） |
+| Select-String 审计（CJK/乱码/禁用符号） | CLEAN |
+
+---
+
+## 2026-06-03 — 低约束 NVMe 回归加固
+
+### 触发原因
+
+最新一次零 SPEC `nvme-io-path` 运行暴露了多类非协议特异性缺陷：FSM/数据通路职责混杂、`axi_wr_engine` 存在真实的多驱动寄存器、仅打印文本的假通过审计、缺少 X/Z 检测、侧信道未检查、宽度常量硬编码、以及 PRP 列表地址形状测试仅计数 beat 而未校验地址。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| No-SPEC 交付物 | `SKILL.md` | L1/L2 零 SPEC 工作必须创建 `SPEC.md`、`docs/interface-contracts.md`、`docs/protocol_claim_ledger.md`、`docs/verification_matrix.md`；`dev_log.md` 仅作证据链 |
+| 合约到测试追溯 | `references/workflow/contract-to-test-trace-gate.md` | 每个可见的状态/错误/计数/地址侧信道必须映射到 RTL 生产者/消费者逻辑，并有 TB 检查或豁免 |
+| PASS 门控收紧 | `references/verification/simulation-loop.md` | PASS 现在要求编译干净或警告豁免、`rtl_style_check.py` 干净、合约到测试追溯完成 |
+| L2 委派豁免收紧 | `references/architecture/sub-agent-delegation.md` | "模块紧密耦合"不再足够；豁免必须说明为何架构/验证/协议/集成通道无法独立运行 |
+| 检查器加固 | `scripts/rtl_style_check.py` | 新增/强化 `RTL_MULTI_DRIVER1`、`TB_FPASS_AUDIT1`、`TB_XZ1`、`TB_SIDEBAND1`、`PARAM_HARDCODE1`、`PARAM_PARTSEL1`、`TB_PRP_LIST1`、`TB_PRP_AWADDR1`、单行 `TB_WAIT1` |
+| Eval 扩展 | `evals/evals.json`、`evals/benchmark.json` | 新增 eval 72-75，覆盖零 SPEC 交付物、PRP 列表地址形状、背靠背命令上下文、多驱动/假通过负面测试 |
+| 执行器记忆 | `CLAUDE.md` | 记录低约束 NVMe 回归教训，供后续 Claude Code 执行参考 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| py_compile `rtl_style_check.py` | PASS |
+| json.tool `evals/evals.json` / `evals/benchmark.json` | PASS |
+| eval_benchmark_check.py | PASS（33 维度，75 条 eval） |
+| `rtl_style_check.py` 对 `nvme-io-path` | 命中全部预期回归：`b_error_q` 多驱动、RSP3 FSM/数据通路杂质、假审计、缺失 X/Z、未检查 `busy`/`cpl_bytes_written`、`BUS_BYTES[63:0]` 硬编码、缺失 PRP 列表数据条目地址检查、缺失 AWADDR 检查、无界单行 wait |
+
+---
+
+## 2026-06-03 — 仿真/证据加固
+
+### 触发原因
+
+nvme-io-path 项目编译通过但 T2 挂死。TB 超时块打印 TIMEOUT 后调用 `$finish`，进程退出码为 0，朴素门控误判为成功。协议 claim ledger 引用了 T3/T10 证据，但这些测试在 TB 文件中并不存在。`docs/verification_matrix.md` 缺失。RSP3 在有合规注释的情况下仍被违反。TB 仅检查完成状态/字节数，缺少事务形状计分板。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| `sim_log_gate.py` | `scripts/sim_log_gate.py`（新建） | CLI 门控：仅当日志包含 ALL_TESTS_PASS + SIMULATION_DONE 且无 TIMEOUT/FAIL/FATAL/mismatch/xxxx/X-Z 时 exit 0。拒绝 nvme-io-path 的 TIMEOUT 日志。 |
+| `project_artifact_gate.py` | `scripts/project_artifact_gate.py`（新建） | CLI 门控：L1/L2 No-SPEC 要求 dev_log + SPEC + interface-contracts + protocol_claim_ledger + verification_matrix。证据交叉校验：解析 ledger 中的 T-number token，在 TB 文件中验证。因缺少 verification_matrix.md 和 T3/T10 证据而拒绝 nvme-io-path。 |
+| TB_TIMEOUT_FATAL1 | `scripts/rtl_style_check.py` | E 级：超时块打印 TIMEOUT + 调用 `$finish` 但无 `$fatal` 或错误计数器。进程退出码 0 = 假通过。 |
+| TB_COMPLETION_ONLY1 | `scripts/rtl_style_check.py` | E 级：DMA/NVMe TB 检查完成但从未比较 AWADDR/AWLEN/WSTRB/WLAST/BRESP。 |
+| RSP3 注释声明升级 | `scripts/rtl_style_check.py` | 若文件注释声称 RSP3/RSP 合规但实际触发违规，升级为 E 级。仅注释合规无效。 |
+| N1 ANSI 解析修复 | `scripts/rtl_style_check.py` | 修复：ANSI 声明中 `wire`/`reg`/`logic` 不再被误报为端口名。task/function 参数已排除。 |
+| TB_SIDEBAND1 严格化 | `scripts/rtl_style_check.py` | `cpl_bytes_written` 现在要求与 `expected_bytes`/`expected_count` 比较，而非任意比较。 |
+| 超时必须使用 `$fatal` | `references/verification/simulation-loop.md` | 模板超时看门狗从 `$finish` 改为 `$fatal` + `fail_cnt++` + `TESTS_FAILED`。TBR2 已更新。 |
+| `sim_log_gate.py` 必须通过 | `references/verification/simulation-loop.md` | 检查项：`sim_log_gate.py` 必须在实际仿真日志上 exit 0 才能声称 PASS。 |
+| `project_artifact_gate.py` 必须通过 | `references/verification/simulation-loop.md` | 检查项：L1/L2 No-SPEC 必须通过交付物门控。 |
+| 证据交叉校验 | `references/workflow/contract-to-test-trace-gate.md` | Ledger 证据 token（T-number）必须出现在 TB 文件中。verification_matrix.md 格式已规定。 |
+| RSP3a：数据通路 done/clear | `references/rtl/rtl-structural-purity.md` | 数据通路 done/clear 必须使用命名的 `*_clr_en`/`*_set_en`，不得使用 `cstate == S_DONE`。 |
+| 仅注释合规 | `references/rtl/rtl-structural-purity.md` | 注释声称合规 + 代码违反 = E 级发现。需豁免格式。 |
+| 终结门控 | `SKILL.md` Step 10 | 新增 `sim_log_gate.py`、`project_artifact_gate.py`、`rtl_style_check.py` 为必需终结门控。 |
+| Eval 扩展 | `evals/evals.json` | 新增 eval 76-80，覆盖超时假通过、ledger 证据交叉引用、缺失 verification_matrix、RSP3 注释声明、N1 ANSI 解析器。 |
+| Benchmark | `evals/benchmark.json` | 将 eval 76-80 加入 sim_false_pass_prevention、verification_closure、fsm_datapath_purity、tool_driven_verification 维度。 |
+| Codex 审计修复：日志编码 | `scripts/sim_log_gate.py` | 按字节读取并规范化 UTF-8/UTF-16/NUL 混编的 PowerShell 日志，确保真正的 TIMEOUT 日志被拒绝。 |
+| Codex 审计修复：No-SPEC 检测 | `scripts/project_artifact_gate.py` | `No user spec provided` 不再视为存在用户 SPEC 的肯定证据。 |
+
+### 验证
+
+| 检查项 | 结果 |
+|------|:----:|
+| py_compile 全部 3 个脚本 | PASS |
+| json.tool evals.json / benchmark.json | PASS |
+| eval_benchmark_check.py | PASS（33 维度，80 条 eval） |
+| `rtl_style_check.py` 对 `nvme-io-path/tb/tb_nvme_io.v` | TB_TIMEOUT_FATAL1(E)、TB_COMPLETION_ONLY1(E)、TB_SIDEBAND1(W)、TB_XZ1(W) |
+| `rtl_style_check.py` 对 `nvme-io-path/rtl/axi_write_master.v` | RSP3(E) 附注释声明升级 |
+| `sim_log_gate.py` 对 TIMEOUT 日志 | REJECT（TIMEOUT，缺失 ALL_TESTS_PASS，缺失 SIMULATION_DONE） |
+| `sim_log_gate.py` 对 PASS 日志 | PASS |
+| `project_artifact_gate.py` 对 nvme-io-path | REJECT（缺失 verification_matrix.md，缺失 T3/T10 证据） |
+| UTF-16/PowerShell TIMEOUT 日志 | REJECT，明确 TIMEOUT 标记 |
+
+---
 
 记录 digital-front-end-skill 的迭代历史：每次项目 review 发现的 skill 缺陷、改进措施、当前状态。
+
+---
+
+## 2026-06-02 — NVMe PRP 角色纠偏 + RTL_MULTI_DRIVER1 + 假通过审计强制
+
+### 触发背景
+
+最新 nvme-io-path 低约束产物暴露：PRP2 list pointer 误计为数据页 (`(1+1+64)*PAGE_SIZE` 反模式)；parser parsed_valid 被多 always 块驱动；TB 无界 wait；false-pass audit 沦为空 $display。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| PRP2 role 明确 | nvme-guidelines.md §11.3a | PRP2=data page vs PRP2=list pointer 互斥；list pointer 不是数据页；`total_data_pages = 1 + N_list_entries`；16KB/4页 example + AWADDR 检查 |
+| S3/S4 修正 | spec-consistency-gate.md | PRP2 role 区分；chain pointer 不计入 data pages；`(1+1+N)` 反模式标注 |
+| RTL_MULTI_DRIVER1 | rtl_style_check.py | 同一 reg/wire 在多个 always 块赋值 → E 级别报错 |
+| TB_FPASS_AUDIT1 | rtl_style_check.py | 只有 $display audit/false-pass 文本无 error tracking → W 级别 false-pass 审计风险 |
+| CLAUDE.md | CLAUDE.md | 提示执行者输出需独立审计 + 已知回归检查路径纠正 |
+
+### 验证
+
+| 检查 | 结果 |
+|------|:----:|
+| py_compile | PASS |
+| skill_static_check | PASS |
+| json.tool evals/benchmark | PASS |
+| eval_benchmark_check | PASS (33 dims, 71 evals) |
+| rtl_style_check on nvme-io-path | RTL_MULTI_DRIVER1(1E) + RSP3(3W) 全部命中 |
+
+---
+
+## 2026-06-02 — SPEC 一致性门控 + TB 可靠性门控 + NVMe 精度修正
+
+### 触发背景
+
+nvme-io-path tb_clean.v review 发现：unbounded while 无 timeout、cap_cnt 无 expected_beats 对照、m_b_resp 接但未检、cpl_status 未健壮验证。同时 SPEC 中 NLB byte count 公式和 PRP page count 公式存在潜在不一致风险。claim ledger 中的 Normative claim 缺少版本/章节/行号 trace。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| **SPEC Consistency Gate** | SKILL.md Step 1.7 + new `references/workflow/spec-consistency-gate.md` | 硬公式验证 (S1-S6, A1-A3, G1-G2) + 4 类 failure classification |
+| **TB Reliability Gate** | `simulation-loop.md` TBR1-TBR5 | 无界 wait 保护、PASS 证据要求、双 scoreboard、cap_cnt vs expected、response 消费 |
+| **NVMe Accuracy Correction** | `nvme-guidelines.md` §15 | NLB byte count、PRP1 offset、PRP list chain/waiver、completion/error 传播、AXI response 消费 |
+| **Claim Ledger 强化** | `protocol-claim-ledger.md` | Normative 必须有版本+章节+行号；Unverified 不得写 must/shall；waiver 必须 multi-location 同步 |
+| **TB_WAIT1** | `rtl_style_check.py` | 无界 while/wait 无 cycle timeout/$fatal |
+| **TB_CAPCNT1** | `rtl_style_check.py` | cap_cnt 无 expected_beats 对照 |
+| **TB_STATUS1** | `rtl_style_check.py` | cpl_status 连接但从未比较 |
+| **PRESP1 强化** | `rtl_style_check.py` | message 要求 propagation 或 waiver |
+| **Eval 71** | `evals/evals.json` | SPEC consistency + TB reliability + response propagation 综合审查 |
+| **spec_tb_reliability** | `evals/benchmark.json` | 新 benchmark 维度 |
+
+### 验证
+
+| 检查 | 结果 |
+|------|:----:|
+| skill_static_check.py | PASS (447 lines) |
+| py_compile rtl_style_check.py | PASS |
+| json.tool evals/benchmark | PASS |
+| eval_benchmark_check.py | PASS (33 dimensions, 71 evals) |
+| rtl_style_check on nvme-io-path | TB_WAIT1(4) + TB_CAPCNT1(2) + TB_STATUS1(2) + TB_FPASS1(3) + PRESP1(1) all hit |
+
+### 审计补漏
+
+- 修复新的引用错误：`16'h0F` 是十进制 15，不是 21。
+- 收紧 PRP list 措辞：若需要下一个 list page，当前页的最后一个 entry 是 chain pointer，不是 data PRP。
+- 扩展 `TB_WAIT1` 以捕获多行循环，如 `while (!_done) begin ... @(posedge clk); ... end`。
+- 扩展 `TB_CAPCNT1` 以捕获 `cap_cnt <= cap_cnt + 1` / `cap_cnt = cap_cnt + 1`，不仅限于 `cap_cnt++`。
+
+---
+
+## 2026-06-02 — 工作流路由 + 验证排序 + 发布门控 + 协议声明账本 + SKILL.md 余量
+
+### 触发背景
+
+SKILL.md 正好 500 行，维护余量为 0。Step 8b 同时包含 functional test 规划和执行，与 Step 9 职责冲突。L2 sub-agent 只有 Decision Gate 没有执行前 Release Gate。协议 claim 缺少结构化追踪。Review/debug 模式被迫走完整 RTL 生成流程。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| **Task Mode Routing** | SKILL.md + new `references/workflow/task-mode-routing.md` | 6 种模式路由：design/review/debug/protocol-audit/skill-maintenance/L2-orchestration。Review/debug 不走完整 RTL 流程 |
+| **Step 8b/9 职责重排** | SKILL.md | 8b = 验证计划（golden strategy + scoreboard plan + false-pass audit plan）。9 = TB 生成 + 仿真执行 + false-pass audit |
+| **Step 1.6 Release Gate** | SKILL.md | L2 委派后必须通过：contracts frozen、roles assigned、acceptance commands defined、integration reviewer、prompt 包含 RSP1-RSP7 + authority labels |
+| **弱词替换** | SKILL.md Step 1.5 | "consider further decomposition" → "must split further OR assign dedicated owner OR write waiver" |
+| **Protocol Claim Ledger** | new `references/timing/protocol-claim-ledger.md` | 结构化表格：claim/label/source/section/applied-in/evidence。每个 must/shall/violation 必须入账 |
+| **SKILL.md 瘦身** | SKILL.md | 500 → 443 行 (-57)。冗长说明下沉到 references |
+| **Reference index 更新** | reference-index.md | 新增 task-mode-routing + protocol-claim-ledger 索引 |
+| **CLAUDE.md** | CLAUDE.md | Release Gate + SKILL.md headroom 维护规则 |
+| **Eval 69, 70** | evals/evals.json | mode routing + release gate; claim ledger + verification sequencing |
+| **Benchmark 维度** | evals/benchmark.json | workflow_routing_release_gate + protocol_claim_ledger |
+
+### 验证
+
+| 检查 | 结果 |
+|------|:----:|
+| skill_static_check.py | PASS (443 lines) |
+| py_compile rtl_style_check.py | PASS |
+| json.tool evals/benchmark | PASS |
+| eval_benchmark_check.py | PASS (32 dimensions, 70 evals) |
+| git diff --check | clean (LF/CRLF only) |
+
+---
+
+## 2026-06-02 — 委派决策门控：L2 强制委派决策
+
+### 触发背景
+
+之前 L2 表格的 Agent strategy 为 "Consider decomposing into 2-3 sub-agents" -- 弱提示，在多轮 review (CDMA R1-R6, NVMe Phase 3) 中从未真正触发 sub-agent 委派。L2 项目持续由 single agent 执行，导致超时/遗漏/质量下降。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| L0/L1/L2 表格 Agent strategy 重写 | SKILL.md Step 1 | L2 从 "Consider" 改为 "Mandatory delegation decision" |
+| Step 1.1 Delegation Decision Gate | SKILL.md (新增) | 7 个 hard triggers; yes/no 强制; waiver 模板 |
+| sub-agent-delegation.md 全面重写 | references/architecture/ | Decision Matrix + Record 模板 + 5 种推荐 roles + contract-freeze 前置 + acceptance commands |
+| eval 68 | evals/evals.json | L2 AXI/NVMe 委派决策任务 |
+| delegation_decision_gate 维度 | evals/benchmark.json | 新 benchmark 维度 |
+| CLAUDE.md 更新 | CLAUDE.md | 追加 delegation decision gate 为 top-priority |
+
+### 核心规则
+
+- L0: 禁止委派（除非用户要求 parallel review）
+- L1: 默认不委派（除非 TB/review 完全独立 per-module）
+- L2: 强制 decision record (yes/no)。7 个 hard triggers 触发 yes；不委派写 waiver。
+- Sub-agent 执行不得早于 per-module interface contract freeze
+
+---
+
+## 2026-06-02 — RTL 结构纯度门禁 + FSM 静态检查 + NVMe 协议完备性 + 双 Scoreboard
+
+### 触发背景
+
+nvme-io-path review + CDMA R1-R6 反复出现 FSM-datapath 混写，是最高频且最难在仿真中暴露的结构性缺陷。同一 session 也发现 NVMe PRP offset/list/chain/alignment/response 验证盲区。
+
+### 改动内容
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| **RTL Structural Purity Gate** | SKILL.md Step 6a (新增) | 7 步 gate (RSP1-RSP7) 在 RTL 编写前拦截 FSM/datapath 混写 |
+| **Step 7 强化** | SKILL.md | 强制阅读 rtl-structural-purity.md + rtl-coding-standards.md |
+| **Step 8 增加 FSM Purity 类别** | SKILL.md | self-review checklist 新增 FSM-Datapath Purity 7 项 (RSP1-RSP7) |
+| **Step 10 纯度复检** | SKILL.md | finalization 增加 purity gate re-check |
+| **rtl-structural-purity.md** | NEW references/rtl/ | 纯二段式 FSM 模板、三大 block type 边界、禁止示例与修正、waiver 规则 |
+| **C22-C26** | rtl-coding-standards.md §2.5 | M 级硬规则：FSM seq 单赋值、FSM comb 单比特输出、datapath 无 cstate、datapath 归属清单 |
+| **C27-C28** | rtl-coding-standards.md §2.6 | M/S 级 accepted-operation discipline |
+| **C29-C31** | rtl-coding-standards.md §2.7 | S/M 级 unit/width discipline |
+| **C32** | rtl-coding-standards.md §2.8 | M 级 no fake parameterization |
+| **RTL_FSM1** | rtl_style_check.py | FSM combinational block 中出现多比特 `=` 赋值检测 |
+| **RTL_FSM2** | rtl_style_check.py | Datapath sequential block 中出现 `case(cstate)` 或 `S_*` 检测 |
+| **RTL_FSM3** | rtl_style_check.py | FSM sequential block 中 cstate `<= nstate` 之外的数据通路寄存器检测 |
+| **协议权威审计强化** | protocol-authority-audit.md | 增加 step 6：must/shall 必须标注 label + 验证 section number 准确性 |
+| **NVMe §14.7-14.10** | nvme-guidelines.md | PRP offset/boundary/alignment/chain/BRESP/opcode/nsid/dual-scoreboard 完备检查项 |
+| **双 Scoreboard** | golden-reference-guide.md | L2 DMA/NVMe 必须同时有 payload + transaction-shape 两个独立 scoreboard |
+| **全局 error counter** | golden-reference-guide.md + simulation-loop.md | L1/L2 必须 total_error_cnt，禁止 per-test 局部 counter |
+| **Backpressure 最小测试** | golden-reference-guide.md + simulation-loop.md | 至少一个 WREADY 回压 + NVM 多周期延迟测试 |
+| **Eval 66** | evals/evals.json | FSM-datapath purity 违规识别任务 |
+| **Eval 67** | evals/evals.json | NVMe PRP completeness (offset/list/chain/alignment/scoreboard) 审查任务 |
+| **fsm_datapath_purity + nvme_prp_completeness** | evals/benchmark.json | 两个新 benchmark 维度 |
+
+### 修复
+
+- SKILL.md "**If the specification..." 未闭合粗体修复
+- SKILL.md NVMe/DMA 段落规范化
+
+### 验证
+
+| 检查 | 结果 |
+|------|:----:|
+| py_compile rtl_style_check.py | PASS |
+| json.tool evals.json | PASS |
+| json.tool benchmark.json | PASS |
+| skill_static_check.py | PASS (SKILL.md 487 lines, under 500) |
+| eval_benchmark_check.py | PASS (67 evals, new fsm_datapath_purity + nvme_prp_completeness dimensions covered) |
+| rtl_style_check on nvme-io-path prp_walker | PASS as detector: 19 expected warnings (RTL_PRP1 + RTL_STRUCTURAL_PURITY_RSP2/RSP3) |
+
+---
+
+## 2026-06-02 — False-Pass 防御体系：仿真日志审计 + NVMe 多页数据连续性 + PRP 缓冲区匹配
+
+### 触发项目
+
+nvme-io-path（NVMe IO Datapath）review 发现 4 类 false-pass 漏洞：
+
+| 类型 | 证据 | 影响 |
+|------|------|------|
+| **测试台 false-pass** | T2/T3 数据 mismatch 只用 `$display`，未增加 `error_cnt`；log 显示 `ALL_TESTS_PASS` | 错误数据被标记为通过 |
+| **NVM 源偏移每页重置** | `nvme_read_engine.v` 中 `nvm_offset_q <= 32'b0` on page_valid，导致多页读取重复第一页数据 | 多页传输数据 silently corrupt |
+| **PRP list buffer 不匹配** | `LIST_ENTRIES=512` 但 `list_buf [0:63]` (64 entries)，`ARLEN=63` | 无法容纳完整 PRP list |
+| **未用 protocol 输入** | `axi_b_resp_i` 已连接但从未检查，`cmd_opcode_i`/`cmd_nsid_i` 未验证 | 协议错误和路由错误被 silently dropped |
+
+### 改动内容
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| **Step 8b 仿真日志审计** | SKILL.md | 新增 false-pass 防御 checklist：扫描 `exp`/`mismatch`/`xxxx` 无 error tracking 时判 FAIL |
+| **Step 9 日志审计强制** | SKILL.md | `ALL_TESTS_PASS` 后必须先做 Step 8b 审计才能声称通过 |
+| **Step 10 最终化防护** | SKILL.md | 新增 4 项 false-pass finalization 检查 |
+| **L2 NVMe/DMA 合同要求** | SKILL.md | 全局源字节游标不能每页重置；目标 vs 源游标分离；多页测试用非均匀数据 |
+| **False-Pass 日志分类器** | `simulation-loop.md` | 分类表中新增 Priority 0 FALSE_PASS；fallback 分类器扩展 `exp`/`expected`/`xxxx` |
+| **NVMe 多页连续性** | `golden-reference-guide.md` | DMA 扩展项 8：NVM source offset = global cursor，不随 PRP 页重置 |
+| **NVMe PRP 数据路径检查项** | `nvme-guidelines.md` | 新增 §14：6 个子章节 (14.1-14.6) 覆盖 source address 连续性、PRP buffer 匹配、W 通道数据可用性、testbench false-pass 模式、未用输入、最小多页测试 |
+| **TB_FPASS1 checker** | `rtl_style_check.py` | `$display.*exp` 无 `error_cnt++` 检测 |
+| **RTL_NVM1 checker** | `rtl_style_check.py` | NVM offset 在 page_valid 时清 0 + nvm_addr = slba + offset 检测 |
+| **RTL_PRP1 checker** | `rtl_style_check.py` | LIST_ENTRIES ≠ list_buf depth / ARLEN mismatch 检测 |
+| **RTL_WEMPTY1 checker** | `rtl_style_check.py` | WVALID set on AW handshake 无 fifo_empty/have_next 检测 |
+| **Eval 65** | `evals/evals.json` | NVMe multi-page PRP false-pass review 任务 |
+| **nvme_dma_false_pass 维度** | `evals/benchmark.json` | 新 benchmark 维度，eval 65 覆盖 |
+
+### 验证结果
+
+| 检查 | 结果 |
+|------|:----:|
+| `py_compile rtl_style_check.py` | PASS |
+| `json.tool evals.json` | PASS |
+| `json.tool benchmark.json` | PASS |
+| `skill_static_check.py` | PASS |
+| `eval_benchmark_check.py` | PASS |
+| rtl_style_check 扫 nvme-io-path RTL | Warning 符合预期 (见下方) |
+
+### 残余风险
+
+- `rtl_style_check.py` 的 RTL_WEMPTY1 和 RTL_NVM1 是启发式检测，可能漏报复杂 case（如 offset reset 在间接位置）
+- 新 checker 尚未在大规模 RTL 上做误报率测试
+- 仿真日志审计依赖 agent 实际执行 Step 8b checklist，不能只用 skill 文本命令保证
 
 ---
 

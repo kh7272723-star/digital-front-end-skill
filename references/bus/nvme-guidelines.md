@@ -422,6 +422,52 @@ Last entry of a full list page:
 4. Entries are packed starting at entry 0 — no gaps
 5. The total number of PRP entries needed is implied by `(NLB+1) × LBA_size` and page_size
 
+### 11.3a PRP2 Role — Critical Distinction
+
+PRP2 has TWO mutually exclusive roles. Confusing them produces wrong page counts
+and data to wrong addresses.
+
+| PRP2 role | Condition | Meaning |
+|-----------|-----------|---------|
+| **PRP2 = data page** | `transfer_bytes <= first_page_cap + PAGE_SIZE` | PRP2 IS a data page (the second and final page) |
+| **PRP2 = list pointer** | `transfer_bytes > first_page_cap + PAGE_SIZE` | PRP2 is NOT a data page; it points to the PRP List |
+
+**When PRP2 is a list pointer, PRP2 is NOT a data page.** The total data pages are:
+```
+total_data_pages = 1 (PRP1) + N_list_entries
+```
+where `N_list_entries` is the number of data PRP entries consumed from the PRP List
+(excluding chain pointers).
+
+**Anti-example — wrong formula (do not use):**
+```
+total_data_pages = 1 + 1 + 64   // WRONG: PRP2-list is not a data page
+max_transfer = (1 + 1 + 64) * PAGE_SIZE  // WRONG: double-counts PRP2
+```
+
+**Correct formula for a design with LIST_DEPTH data entries cached (no chaining):**
+```
+total_data_pages = 1 (PRP1) + LIST_DEPTH
+max_transfer_bytes = (1 + LIST_DEPTH) * PAGE_SIZE  -- PRP1 offset further reduces first page
+```
+
+**Example: 16KB / 4 pages, PRP1 + PRP2-list, LIST_DEPTH >= 3:**
+- Page 0: PRP1 (first page, may have offset)
+- Page 1: PRP list entry 0
+- Page 2: PRP list entry 1
+- Page 3: PRP list entry 2
+- Total: 4 data pages = 1 (PRP1) + 3 (list entries)
+- Testbench MUST check AWADDR for each of the 4 pages
+
+**Chain pointer rule (re-stated):**
+The last entry of a FULL PRP list page (entry 511 for MPS=4KiB) is:
+- A **chain pointer** if more data pages remain → points to the NEXT PRP List page
+- **Zeros/unused** if this is the last list page
+- NEVER a data PRP entry
+
+The data PRP entries and the chain pointer share the same list page but serve
+different roles. Do not count the chain pointer as a data page.
+
 ### 11.4 Hardware Traversal Algorithm
 
 ```verilog
@@ -682,3 +728,168 @@ Each in-flight I/O command needs:
 - Read data engine output: AXI AW/W transactions to host memory
 - Write data engine output: AXI AR/R transactions from host memory
 - CQE post engine: same interface as Admin (structured → AXI write)
+
+---
+
+## 14. PRP / NVM Read Data Path — RTL Review Checklist
+
+**Purpose:** Prevent false-pass NVMe read engine RTL where simulation reports `ALL_TESTS_PASS` but multi-page data is silently corrupt. Based on nvme-io-path Phase 3 review evidence.
+
+### 14.1 NVM source address continuity
+
+The NVM source address is a global cursor derived from SLBA and the cumulative bytes issued across ALL pages. It must never reset to zero on a page boundary:
+
+```
+CORRECT:   nvm_addr = slba * LBA_SIZE + global_data_offset  (global, never resets)
+INCORRECT: nvm_addr = slba * LBA_SIZE + nvm_offset_q       (if nvm_offset_q reset to 0 per page)
+```
+
+**Checklist:**
+- [ ] Find `nvm_offset_q` (or equivalent source byte counter). Is it reset to 0 on `page_valid && page_ready`? If yes and `nvm_addr_o = slba * LBA_SIZE + nvm_offset_q` → **BUG: source repeats per page.**
+- [ ] Verify that only `page_host_addr_q` (destination) is loaded from `page_addr_i`. Source offset must be global.
+- [ ] If the design uses a `page_*` prefix for both source and destination state, rename to distinguish (`nvm_global_offset_q` vs `page_dest_addr_q`).
+
+### 14.2 PRP walker list buffer depth vs parameter
+
+The `LIST_ENTRIES` parameter defines the conceptual PRP list capacity (512 entries for 4 KiB page). The hardware cache must match or handle overflow explicitly:
+
+**Checklist:**
+- [ ] Compare `parameter LIST_ENTRIES` against `list_buf` array depth. If `LIST_ENTRIES=512` but `list_buf [0:63]` → **mismatch.**
+- [ ] Check `list_idx_q` width: must be ≥ `$clog2(LIST_ENTRIES)`. 6-bit index wraps at 64.
+- [ ] Check `ARLEN`: must be `min(LIST_ENTRIES * 8 / BUS_BYTES - 1, AXI_MAX_BURST-1)`. Hardcoded 63 is wrong if LIST_ENTRIES differs.
+- [ ] Multi-page PRP list chaining is not supported by a 64-entry shallow buffer. Document as limitation.
+
+### 14.3 W channel data availability
+
+WVALID must not assert purely on `AW handshake` — it must also ensure the data FIFO has the next beat:
+
+**Checklist:**
+- [ ] Find WVALID assertion condition: `w_active_q <= 1'b1` on `aw_active_q && aw_ready_i`. Is there a `!fifo_empty` or `have_data` check? If not, WVALID asserts with stale/empty FIFO data.
+- [ ] In elastic mode: each presented W beat must hold `WVALID/WDATA/WSTRB/WLAST` stable until `WREADY`.
+- [ ] Test with `WREADY` backpressure + slow NVM (multi-cycle `nvm_rvalid_i`) to expose underflow.
+
+### 14.4 Testbench false-pass patterns
+
+**Checklist:**
+- [ ] Find every `$display` with data comparison text (`exp`, `expected`, `mismatch`). Is it followed by `error_cnt <= error_cnt + 1` within 3 lines? If not → **false-pass.**
+- [ ] Verify that `ALL_TESTS_PASS` is gated by `error_cnt == 0`. If `error_cnt` is not incremented on data mismatch, the gate is misleading.
+- [ ] T2/T3 data checks must use the same `check()` or `error_cnt++` mechanism as T1. `$display`-only verification is documentation, not checking.
+
+### 14.5 Unused protocol inputs
+
+**Checklist:**
+- [ ] `axi_b_resp_i` / `axi_r_resp_i`: if wired but never compared against `OKAY` (2'b00), protocol errors are silently dropped.
+- [ ] `cmd_opcode_i`: if connected but never validated, non-Read commands silently enter the read engine.
+- [ ] `cmd_nsid_i`: if unused, commands to wrong namespaces go undetected.
+
+### 14.6 Minimum multi-page test
+
+For any NVMe read engine with `PAGE_SIZE` parameter:
+- [ ] At least one test with transfer spanning ≥2 pages
+- [ ] Expected data differs per page (not all-zeros, not `nm[i] = i*8` which repeats every page at offset 0)
+- [ ] Expected data for page N+1 is computed as `slba * LBA_SIZE + page_N_offset + PAGE_SIZE`, not `page_addr + 0`
+
+### 14.7 PRP offset, boundary, and alignment
+
+**PRP1 non-zero offset:**
+- [ ] PRP1 offset (`prp1_i[11:0]`) may be non-zero. First page capacity = `PAGE_SIZE - prp1_offset`. Transfer starts at the byte offset within the first page, not at page base.
+- [ ] Verify: `first_page_cap = PAGE_SIZE - prp1_offset`. If `transfer_bytes <= first_page_cap` → single page, PRP2 unused.
+
+**PRP2 decision boundary:**
+- [ ] `prp2_is_page` when `transfer_bytes > first_page_cap` AND `transfer_bytes <= first_page_cap + PAGE_SIZE`
+- [ ] `prp2_is_list` when `transfer_bytes > first_page_cap + PAGE_SIZE`
+- [ ] Test both decision paths with NLB values that cross each boundary.
+
+**PRP list entry usage:**
+- [ ] PRP list entry 0 is the FIRST data page after the first two pages. Empty PRP lists (0 entries needed) are legal when the last page is entry 1.
+- [ ] Entry 0 must be used — do not skip it.
+
+**PRP list chain:**
+- [ ] 512 entries per 4 KiB list page. If another list page is required, the current list page's last entry is a chain pointer, not a data PRP.
+- [ ] If the design does NOT support chaining, document as a limitation with max transfer size: `(2 + LIST_ENTRIES) * PAGE_SIZE` bytes.
+- [ ] Waiver required if chaining is unsupported but LIST_ENTRIES > 64.
+
+**PRP alignment:**
+- [ ] Every PRP entry (PRP1, PRP2, PRP list entries) must be page-aligned: `addr[11:0] == 12'h000` for MPS=4KiB. Non-aligned PRP entries are an NVMe protocol error.
+- [ ] PRP list pages themselves must be page-aligned.
+
+### 14.8 B response error to completion status
+
+- [ ] `axi_b_resp_i` must be checked: `OKAY` (2'b00) = normal. `EXOKAY` (2'b01) = exclusive OK. `SLVERR` (2'b10) = slave error. `DECERR` (2'b11) = decode error.
+- [ ] Non-OKAY B response → completion status must indicate error. Do not silently pass `SLVERR`/`DECERR`.
+- [ ] If `b_resp_i` is wired but never compared against `2'b00`, the design silently swallows bus errors.
+
+### 14.9 Opcode and NSID validation
+
+- [ ] `cmd_opcode_i` must be validated: only `Read` (0x02) should enter the read engine. `Write` (0x01), `Flush` (0x00), or other opcodes routed to the read engine are a routing bug.
+- [ ] `cmd_nsid_i` must be compared against the expected namespace ID. Commands to wrong namespaces that silently proceed are a data integrity bug.
+- [ ] If these signals are wired but never validated, document as residual risk with waiver.
+
+### 14.10 Transaction-shape scoreboard (mandatory for L2)
+
+Every NVMe DMA testbench must have BOTH:
+- [ ] **Payload scoreboard**: captured write data matches expected source data (byte-by-byte)
+- [ ] **Transaction-shape scoreboard**: checks AWADDR sequence, AWLEN, WLAST position, WSTRB on first/middle/last beats, BRESP value, completion ordering (completion only after all B responses received), beat count per burst, total burst count
+
+---
+
+## 15. Accuracy Correction Checklist
+
+**Purpose:** Prevent NVMe spec misinterpretation where local assumptions are
+written as protocol rules, and where response/status inputs are wired but never
+validated. Use during Step 2 (timing contract) and Step 8 (self-review).
+
+### 15.1 NLB and Byte Count
+
+- [ ] **NLB is zero-based.** `transfer_bytes = (NLB + 1) * LBA_SIZE`. NLB=0 means 1 LBA (512 bytes for LBA_SIZE=512).
+- [ ] NLB declared as hex (e.g. `16'h0F`) is exactly 15 decimal. Verify comments, test names, and byte-count tables do not introduce hex/decimal confusion.
+- [ ] All byte count formulas use `(NLB+1)*LBA_SIZE`, never `NLB*LBA_SIZE`.
+
+### 15.2 PRP1 Non-Zero Offset
+
+- [ ] **PRP1 offset = prp1_i[11:0] for MPS=4KiB.** If offset != 0, first page has reduced capacity.
+- [ ] **First page capacity = PAGE_SIZE - prp1_offset**, not always PAGE_SIZE.
+- [ ] **Subsequent pages (PRP2/list entries) are full pages:** only the first page has
+  reduced capacity. Each PRP list entry represents a full PAGE_SIZE page.
+  This is a normative NVMe requirement; do not write local policy to override it.
+
+### 15.3 PRP List: Entries, Chain, Waiver Boundaries
+
+- [ ] **PRP list = 512 entries per 4KiB page** (`PAGE_SIZE/8 = 512`). Not 64. 64 is a
+  local hardware cache depth, not the protocol-defined list capacity.
+- [ ] **Entry 0 is used.** The first data page after PRP2 goes to list entry 0.
+- [ ] **Last entry of a full list page is a chain pointer** ONLY when more list pages
+  are needed. If no more pages, do not insert a chain pointer.
+- [ ] **If LIST_ENTRIES > 64 but list_buf depth = 64:** requires a waiver documenting
+  that multi-page PRP list chaining is not supported. Max transfer =
+  `(2 + 64) * PAGE_SIZE` for this waiver.
+- [ ] **Chain pointer not supported → waiver MUST be in SPEC, DEV_LOG, claim ledger,
+  and RTL comments.** Not just one place.
+
+### 15.4 Completion Status and Error Propagation
+
+- [ ] **`cpl_status_o` must encode completion outcome.** `0x0000` = success.
+  Non-zero statuses map to NVMe error types.
+- [ ] **AXI B response errors MUST propagate to completion status.**
+  `axi_b_resp_i` must be checked: `SLVERR`/`DECERR` → completion status != 0.
+- [ ] **AXI R response (if applicable) errors must propagate** similarly.
+- [ ] **Opcode validation:** only Read (0x02) enters read engine. Other opcodes
+  must be rejected or routed correctly.
+- [ ] **NSID validation:** cmd_nsid_i compared against configured NSID. Mismatch
+  → completion error.
+
+### 15.5 AXI Response/Status Inputs — Consume or Waiver
+
+- [ ] `axi_b_resp_i` — must be consumed (checked for OKAY) or waivered with reason.
+- [ ] `axi_r_resp_i` (if AR channel used) — same requirement.
+- [ ] `cpl_status_o` — testbench must verify status value, not just poll
+  `cpl_valid`.
+
+### 15.6 Label Discipline
+
+Every claim in this file must be labeled. Do not:
+- Write a local hardware limit (e.g. "64-entry cache") as a protocol rule
+- Call a conservative pattern a normative requirement
+- Say "the spec requires" without citing section number
+
+If only payload is checked, a design that emits correct data to wrong addresses, wrong burst shapes, or wrong response handling will false-pass.

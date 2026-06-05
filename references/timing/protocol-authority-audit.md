@@ -8,11 +8,12 @@ Use this file when reviewing or updating protocol material in this skill. Its jo
 
 For every protocol-specific reference file:
 
-1. List the protocol version and primary source.
-2. Mark every hard statement as **Normative**, **Project policy**, **Conservative pattern**, **Heuristic**, or **Unverified**.
+1. List the protocol version and primary source at the top of the file.
+2. Mark every hard statement as **Normative**, **Project policy**, **Conservative pattern**, **Heuristic**, or **Unverified**. A statement that uses `must`, `shall`, `spec requires`, `protocol violation`, `required`, or `no provision for` without one of these labels is **unreviewed** and must be treated as Unverified.
 3. Replace unsupported `must`, `shall`, `required`, and `violation` wording with the correct label.
-4. Check that assertions match the exact rule being claimed.
+4. Check that assertions and testbench checks match the exact rule being claimed — not a stronger or weaker version.
 5. Check that testbenches verify both data values and protocol shape: transaction count, address sequence, burst length, last-beat markers, byte enables, responses, and completion ordering.
+6. For every `must`/`shall` claim citing an Arm AMBA or NVMe spec: verify the exact section number and wording against the primary source. If the section doesn't say what the reference claims, downgrade to Conservative pattern or Heuristic.
 
 ## Primary source index
 

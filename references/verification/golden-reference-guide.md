@@ -91,8 +91,38 @@ This file defines the golden reference methodology: how to create expected-value
 5. `B`/`R` response capture and error propagation into completion status
 6. Completion only after required write responses or read data beats have been observed
 7. Independent backpressure on every AXI channel, not a permanently-ready happy path
+8. **NVMe multi-page source continuity:** For NVMe read engines, the NVM source address must advance continuously across PRP page boundaries. `nvm_offset_q` must NOT be reset to zero on a new PRP page accept — each new page provides a destination address, not a source reset. Verify with non-uniform expected data per page (not all-zeros or `i*8` patterns that repeat every page).
 
 If the testbench only iterates over captured output beats and never checks how many beats should have appeared, it can pass when the DUT silently emits too few transactions.
+
+**Dual-scoreboard requirement (mandatory for L2 DMA/NVMe):**
+
+A DMA or NVMe memory-mover testbench must have TWO independent scoreboards, not one:
+
+1. **Payload scoreboard:** Captured `w_cap[beat]` data compared byte-by-byte against expected source data. This catches wrong data values.
+2. **Transaction-shape scoreboard:** Counts AW handshakes, checks each AWADDR against expected sequence, verifies AWLEN matches expected burst length, confirms WLAST position, checks WSTRB on first/middle/last beats, captures BRESP value per burst, and ensures completion only after all B responses received.
+
+The payload scoreboard alone CANNOT catch: wrong addresses, wrong burst lengths, missing WLAST, wrong byte enables, silently dropped B errors, or completion before all data written.
+
+**Global error counter requirement (mandatory for L1/L2):**
+
+The testbench must accumulate ALL errors into a single `total_error_cnt` (or equivalent) that gates `ALL_TESTS_PASS`. Per-test local counters that can independently be zero while others show errors produce false-pass results. Pattern:
+
+```verilog
+integer total_error_cnt;
+initial total_error_cnt = 0;
+// In each test: increment total_error_cnt on any mismatch
+// At end: if (total_error_cnt == 0) $display("ALL_TESTS_PASS");
+```
+
+**Backpressure test minimum (mandatory for L2):**
+
+At least one test must apply non-trivial backpressure:
+- WREADY deasserted for ≥2 consecutive cycles mid-burst
+- NVM rvalid_i delayed ≥3 cycles (multi-cycle NVM read response)
+- Both backpressure and data delay simultaneously (stress test)
+
+Permanently-ready channels mask data availability bugs (stale FIFO output, missing underflow protection, WVALID timing).
 
 ---
 

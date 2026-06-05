@@ -12,157 +12,526 @@
       "name": "module_timing",
       "description": "Leaf RTL timing contracts, state elements, cycle traces, and checks.",
       "min_count": 6,
-      "eval_ids": [1, 5, 7, 8, 13, 17, 20, 35]
+      "eval_ids": [
+        1,
+        5,
+        7,
+        8,
+        13,
+        17,
+        20,
+        35,
+        65,
+        66
+      ]
     },
     {
       "name": "protocol_axi_full",
       "description": "Full AXI channel, burst, outstanding, response, and error semantics.",
       "min_count": 2,
-      "eval_ids": [24, 29, 31, 32, 33, 64]
+      "eval_ids": [
+        24,
+        29,
+        31,
+        32,
+        33,
+        64
+      ]
     },
     {
       "name": "protocol_axi_lite",
       "description": "AXI-Lite register and small-slave behavior.",
       "min_count": 1,
-      "eval_ids": [22]
+      "eval_ids": [
+        22
+      ]
     },
     {
       "name": "protocol_axi_dma",
       "description": "AXI DMA ordering, response tracking, completion, and slice planning.",
       "min_count": 5,
-      "eval_ids": [9, 15, 16, 23, 24, 25, 34, 64]
+      "eval_ids": [
+        9,
+        15,
+        16,
+        23,
+        24,
+        25,
+        34,
+        64
+      ]
     },
     {
       "name": "protocol_apb",
       "description": "APB setup/access phase, wait, byte strobe, and error behavior.",
       "min_count": 1,
-      "eval_ids": [26]
+      "eval_ids": [
+        26
+      ]
     },
     {
       "name": "protocol_ahb_lite",
       "description": "AHB-Lite address/data phase alignment and HREADY behavior.",
       "min_count": 1,
-      "eval_ids": [27]
+      "eval_ids": [
+        27
+      ]
     },
     {
       "name": "protocol_axi_stream",
       "description": "AXI-Stream payload, sideband, packet, and backpressure behavior.",
       "min_count": 1,
-      "eval_ids": [28]
+      "eval_ids": [
+        28
+      ]
     },
     {
       "name": "system_hierarchy",
       "description": "Large-system decomposition, interface contracts, invariants, and safe slicing.",
       "min_count": 3,
-      "eval_ids": [9, 15, 23]
+      "eval_ids": [
+        9,
+        15,
+        23,
+        68,
+        69
+      ]
     },
     {
       "name": "verification_closure",
       "description": "Verification matrices, tool evidence, and signoff boundary discipline.",
       "min_count": 4,
-      "eval_ids": [14, 19, 21, 30, 37]
+      "eval_ids": [
+        14,
+        19,
+        21,
+        30,
+        37,
+        65,
+        69,
+        70,
+        71,
+        77,
+        78,
+        81,
+        82,
+        83,
+        84
+      ]
     },
     {
       "name": "debug_review",
       "description": "First-divergent-cycle reasoning and protocol bug review.",
       "min_count": 3,
-      "eval_ids": [2, 12, 24, 64]
+      "eval_ids": [
+        2,
+        12,
+        24,
+        64,
+        65,
+        69
+      ]
     },
     {
       "name": "protocol_authority_accuracy",
       "description": "Correctly separates normative protocol rules from local conservative implementation policies.",
       "min_count": 1,
-      "eval_ids": [64]
+      "eval_ids": [
+        64
+      ]
     },
     {
       "name": "cdc_safety",
       "description": "CDC refusal, safe pattern selection, and coherency warnings.",
       "min_count": 1,
-      "eval_ids": [6]
+      "eval_ids": [
+        6
+      ]
     },
     {
       "name": "project_adaptation",
       "description": "Existing repository style, reset, lint, and local convention adaptation.",
       "min_count": 1,
-      "eval_ids": [18, 38]
+      "eval_ids": [
+        18,
+        38
+      ]
     },
     {
       "name": "synthesis_timing",
       "description": "Synthesis inference, constraints, micro-architecture, and timing-closure awareness.",
       "min_count": 2,
-      "eval_ids": [36, 39]
+      "eval_ids": [
+        36,
+        39
+      ]
     },
     {
       "name": "specialized_rtl_patterns",
       "description": "Reusable RTL/IP patterns such as credits, retry buffers, width conversion, data integrity, and multi-bank memory.",
       "min_count": 4,
-      "eval_ids": [40, 41, 42, 43, 44]
+      "eval_ids": [
+        40,
+        41,
+        42,
+        43,
+        44
+      ]
     },
     {
       "name": "bug_prevention",
       "description": "Proactive bug pattern matching, known-pattern warnings, and prevention assertions during RTL generation.",
       "min_count": 2,
-      "eval_ids": [45, 46, 47]
+      "eval_ids": [
+        45,
+        46,
+        47,
+        65,
+        66,
+        67,
+        71,
+        82,
+        85,
+        86,
+        87
+      ]
     },
     {
       "name": "tool_driven_verification",
       "description": "Tool-driven RTL verification: compile, simulate, interpret output, iterate fixes.",
       "min_count": 2,
-      "eval_ids": [48, 49]
+      "eval_ids": [
+        48,
+        49,
+        76,
+        80,
+        85,
+        86,
+        87,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102
+      ]
     },
     {
       "name": "low_power_design",
       "description": "Clock gating, operand isolation, power domains, UPF basics, and power-aware verification.",
       "min_count": 1,
-      "eval_ids": [50]
+      "eval_ids": [
+        50
+      ]
     },
     {
       "name": "dft_awareness",
       "description": "Scan chain readiness, memory BIST, test-mode overrides, and DFT-friendly RTL patterns.",
       "min_count": 1,
-      "eval_ids": [51]
+      "eval_ids": [
+        51
+      ]
     },
     {
       "name": "uvm_methodology",
       "description": "Constrained-random verification, coverage-driven closure, UVM architecture, and scoreboard strategy.",
       "min_count": 1,
-      "eval_ids": [52]
+      "eval_ids": [
+        52
+      ]
     },
     {
       "name": "synthesis_timing_closure",
       "description": "Synthesis-aware RTL, SDC constraints, critical path optimization, and area/timing tradeoffs.",
       "min_count": 1,
-      "eval_ids": [53]
+      "eval_ids": [
+        53
+      ]
     },
     {
       "name": "formal_verification",
       "description": "SVA properties for formal, safety/liveness classification, and formal vs simulation guidance.",
       "min_count": 1,
-      "eval_ids": [54]
+      "eval_ids": [
+        54
+      ]
     },
     {
       "name": "physical_awareness",
       "description": "Floorplanning, wire delay, IO planning, clock tree synthesis, and package considerations for RTL engineers.",
       "min_count": 1,
-      "eval_ids": [55]
+      "eval_ids": [
+        55
+      ]
     },
     {
       "name": "verification_planning",
       "description": "Verification plans with coverage models, constrained-random strategy, directed tests, and exit criteria.",
       "min_count": 1,
-      "eval_ids": [56]
+      "eval_ids": [
+        56
+      ]
     },
     {
       "name": "uvm_testbench",
       "description": "UVM-structured testbench with transaction, driver, monitor, scoreboard, and coverage collector.",
       "min_count": 1,
-      "eval_ids": [57]
+      "eval_ids": [
+        57
+      ]
     },
     {
       "name": "design_intuition",
       "description": "FIFO depth sizing, pipeline stage count, area/timing estimation, and red flag identification using engineering heuristics.",
       "min_count": 2,
-      "eval_ids": [58, 59]
+      "eval_ids": [
+        58,
+        59,
+        65
+      ]
+    },
+    {
+      "name": "nvme_dma_false_pass",
+      "description": "Detection of false-pass NVMe/DMA testbenches: log audit for undetected data mismatches, NVM source offset page-reset, PRP list buffer-parameter mismatch, unused protocol response inputs.",
+      "min_count": 1,
+      "eval_ids": [
+        65,
+        66,
+        67,
+        73,
+        75,
+        81,
+        83,
+        84,
+        87,
+        88,
+        89,
+        90,
+        91,
+        93,
+        94,
+        95,
+        96
+      ]
+    },
+    {
+      "name": "fsm_datapath_purity",
+      "description": "FSM-datapath structural purity: RSP1-RSP7 gate enforcement, control-signal gating, no cstate in datapath, no multi-bit in FSM comb.",
+      "min_count": 1,
+      "eval_ids": [
+        66,
+        75,
+        79,
+        85,
+        86,
+        92,
+        104
+      ]
+    },
+    {
+      "name": "nvme_prp_completeness",
+      "description": "NVMe PRP completeness: non-zero offset, page/list boundary, alignment, chain pointer, opcode/nsid validation, transaction-shape scoreboard.",
+      "min_count": 1,
+      "eval_ids": [
+        67,
+        73,
+        90
+      ]
+    },
+    {
+      "name": "delegation_decision_gate",
+      "description": "Explicit delegation decision after L0/L1/L2 classification: yes/no record, role assignment or waiver, contract-freeze precondition.",
+      "min_count": 1,
+      "eval_ids": [
+        68,
+        81
+      ]
+    },
+    {
+      "name": "workflow_routing_release_gate",
+      "description": "Task mode routing (design/review/debug/protocol-audit) + L2 sub-agent Release Gate with contract-freeze + acceptance commands + RSP1-RSP7 prompt requirements.",
+      "min_count": 1,
+      "eval_ids": [
+        69,
+        70,
+        97,
+        98,
+        99
+      ]
+    },
+    {
+      "name": "workflow_routing_gate_first_review",
+      "description": "Review-mode routing must skip full RTL generation and run evidence/gate checks before manual hotspot review.",
+      "min_count": 1,
+      "eval_ids": [
+        97
+      ]
+    },
+    {
+      "name": "project_skeleton_preflight_no_spec",
+      "description": "No-SPEC L1/L2 projects must create docs/, rtl/, tb/, sim/ and canonical skeleton documents before RTL.",
+      "min_count": 1,
+      "eval_ids": [
+        98
+      ]
+    },
+    {
+      "name": "guarded_sim_wrapper_timeout_vcd_limit",
+      "description": "Simulation must use run_sim_guarded.py with timeout and artifact-size failure behavior instead of bare vvp.",
+      "min_count": 1,
+      "eval_ids": [
+        99
+      ]
+    },
+    {
+      "name": "protocol_claim_ledger",
+      "description": "Structured protocol claim tracking: claim/label/source/section/applied-in/evidence for every must/shall/violation.",
+      "min_count": 1,
+      "eval_ids": [
+        70,
+        82
+      ]
+    },
+    {
+      "name": "spec_tb_reliability",
+      "description": "SPEC consistency verification (formulas/units/protocol claims self-consistent) + TB reliability gates (unbounded wait protection, cap_cnt vs expected, status/response propagation).",
+      "min_count": 1,
+      "eval_ids": [
+        71,
+        72,
+        73,
+        74,
+        75,
+        82,
+        83,
+        84,
+        89,
+        93,
+        94,
+        96,
+        97,
+        98,
+        99
+      ]
+    },
+    {
+      "name": "contract_implementation_closure",
+      "description": "Contract-implementation matrix: RTL producer/consumer, TB check, waiver for every contract item. Residual risk tier classification (Blocking/Accepted/Residual).",
+      "min_count": 1,
+      "eval_ids": [
+        82,
+        83,
+        84,
+        88,
+        93,
+        105
+      ]
+    },
+    {
+      "name": "final_delivery_fail_closed",
+      "description": "Final delivery gate aggregation: project artifacts, RTL style, compile logs, and simulation logs must all pass before any PASS claim.",
+      "min_count": 1,
+      "eval_ids": [
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        100,
+        105
+      ]
+    },
+    {
+      "name": "per_module_sim_gate",
+      "description": "L2 projects must run per-module simulation/proof before integration and record module_verification_matrix evidence.",
+      "min_count": 1,
+      "eval_ids": [
+        100,
+        101
+      ]
+    },
+    {
+      "name": "gate_false_positive_resilience",
+      "description": "Automation gates must avoid known false positives while still rejecting real failures.",
+      "min_count": 1,
+      "eval_ids": [
+        102,
+        103,
+        104
+      ]
+    },
+    {
+      "name": "pre_integration_lock",
+      "description": "L2 projects must not run integration simulation until per-module evidence exists. pre_integration_gate.py rejects integration TB/sim artifacts before module evidence.",
+      "min_count": 1,
+      "eval_ids": [
+        106
+      ]
+    },
+    {
+      "name": "delegation_provenance",
+      "description": "Delegate: yes requires provenance fields (Role, Scope, Input contract, Evidence source, Acceptance commands, Findings) in each subagent role report.",
+      "min_count": 1,
+      "eval_ids": [
+        107
+      ]
+    },
+    {
+      "name": "l2_classification_hardening",
+      "description": "Artifact-based L2 inference (RTL count, multi-protocol signals) overrides silent dev_log. Both preflight and artifact gates apply consistently.",
+      "min_count": 1,
+      "eval_ids": [
+        108
+      ]
+    },
+    {
+      "name": "rsp2_level_escalation",
+      "description": "RSP2 multi-bit datapath in FSM combinational block is E-level for L2 projects (--level L2 flag).",
+      "min_count": 1,
+      "eval_ids": [
+        109
+      ]
+    },
+    {
+      "name": "empty_compile_log",
+      "description": "Empty or whitespace-only compile logs must fail compile_log_gate.py.",
+      "min_count": 1,
+      "eval_ids": [
+        110
+      ]
+    },
+    {
+      "name": "expected_timeout_allowance",
+      "description": "Expected timeout-protection test text (TEST_PASS.*timeout, status=TIMEOUT) allowed when ALL_TESTS_PASS and SIMULATION_DONE exist. Real RUN_SIM_GUARDED: TIMEOUT still rejected.",
+      "min_count": 1,
+      "eval_ids": [
+        111
+      ]
+    },
+    {
+      "name": "standard_log_artifact",
+      "description": "Standard .log files from run_sim_guarded.py required for delivery. .vvp without .log is insufficient evidence.",
+      "min_count": 1,
+      "eval_ids": [
+        112
+      ]
+    },
+    {
+      "name": "scoreboard_substance",
+      "description": "DMA/NVMe TBs must compare AWADDR/AWLEN/WLAST/WSTRB/BRESP against expected values. Signal-name mention alone is not scoreboard evidence.",
+      "min_count": 1,
+      "eval_ids": [
+        113
+      ]
+    },
+    {
+      "name": "prp_feature_claim",
+      "description": "PRP list support claims require actual fetch/load path in RTL. list_mem without load interface or PRP1 offset without RTL logic must be Blocking Gap.",
+      "min_count": 1,
+      "eval_ids": [
+        114
+      ]
     }
   ],
   "official_protocol_sources": [
@@ -176,7 +545,17 @@
         "references/axi-dma/axi-lite-guidelines.md",
         "references/axi-dma/axi-dma-channel-guidelines.md"
       ],
-      "eval_ids": [22, 24, 25, 29, 31, 32, 33, 34, 64]
+      "eval_ids": [
+        22,
+        24,
+        25,
+        29,
+        31,
+        32,
+        33,
+        34,
+        64
+      ]
     },
     {
       "protocol": "APB",
@@ -185,7 +564,9 @@
       "reference_files": [
         "references/bus/apb-guidelines.md"
       ],
-      "eval_ids": [26]
+      "eval_ids": [
+        26
+      ]
     },
     {
       "protocol": "AHB-Lite",
@@ -194,7 +575,9 @@
       "reference_files": [
         "references/bus/ahb-lite-guidelines.md"
       ],
-      "eval_ids": [27]
+      "eval_ids": [
+        27
+      ]
     },
     {
       "protocol": "AXI-Stream",
@@ -203,7 +586,9 @@
       "reference_files": [
         "references/axi-dma/axi-stream-guidelines.md"
       ],
-      "eval_ids": [28]
+      "eval_ids": [
+        28
+      ]
     }
   ],
   "executable_trials": [

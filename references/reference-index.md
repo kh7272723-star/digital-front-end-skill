@@ -9,6 +9,8 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - Source-to-rule conversion or methodology grounding: `references/timing/authority-synthesis.md`
 - Protocol-specific AXI, AXI-Lite, AXI-Stream, APB, AHB, ACE, or CHI rules: `references/timing/protocol-authority-map.md` before adding or changing rules
 - Protocol authority audit and correction log: `references/timing/protocol-authority-audit.md` before editing protocol reference files or turning a protocol claim into an assertion
+- **Protocol claim ledger:** `references/timing/protocol-claim-ledger.md` — template for project-local claim ledgers in the dev log or project `protocol_claim_ledger.md`: claim, label (Normative/Project policy/Conservative pattern/Heuristic/Unverified), source doc, section, applied-in, evidence. Every must/shall/violation in RTL/assertions/TB must be recorded in the project ledger, not in the skill reference.
+- **SPEC consistency before RTL:** `references/workflow/spec-consistency-gate.md` — mandatory L1/L2 gate for formulas, units, protocol-claim consistency, expected counts, and response/status propagation before timing contracts or RTL.
 - **RTL 编码规范（首要）**: `references/rtl/rtl-coding-standards.md` — 整合项目 M/S/R 三级规范与 skill 最佳实践，覆盖命名、代码结构、FSM 模板、复位策略、时序优化
 - Naming or interface style: `references/timing/naming-guidelines.md`（补充 `rtl-coding-standards.md` 未覆盖的 CDC 同步链命名、FIFO 内部命名等）
 - Ready/valid, req/ack, FIFO, pipeline handoff: `references/timing/protocol-semantics.md`, then `references/timing/cycle-trace-guidelines.md`
@@ -17,6 +19,7 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 
 ## Architecture and hierarchy
 
+- L1/L2 sideband/status/response coverage: `references/workflow/contract-to-test-trace-gate.md` - map each contract field to RTL producer/consumer logic plus a TB check or waiver.
 - Complete DMA, AXI subsystem, cache, NoC, bus bridge, multi-channel engine, or full top integration: `references/architecture/hierarchical-design-guidelines.md`, `references/architecture/system-contract-template.md`, `references/architecture/interface-contract-template.md`, `references/architecture/integration-invariants.md`
 - AXI DMA architecture or slicing: also `references/axi-dma/axi-dma-planning-example.md`, `references/axi-dma/axi-dma-channel-guidelines.md`, `references/architecture/subsystem-rtl-slicing-guidelines.md`
 - AXI full masters/slaves/bridges: `references/axi-dma/axi-full-guidelines.md`. Multi-ID/outstanding: also `references/axi-dma/axi-multi-outstanding-guidelines.md`
@@ -24,11 +27,12 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - AXI-Lite register blocks or small slaves: `references/axi-dma/axi-lite-guidelines.md`
 - APB, AHB-Lite, or AXI-Stream blocks: `references/bus/apb-guidelines.md`, `references/bus/ahb-lite-guidelines.md`, `references/axi-dma/axi-stream-guidelines.md`
 - NVMe controller design (Admin + NVM I/O commands, PRP traversal, doorbell, queue model, data transfer): `references/bus/nvme-guidelines.md`
+- **Task mode routing:** `references/workflow/task-mode-routing.md` — select the correct workflow mode (design/review/debug/protocol-audit/skill-maintenance/L2-orchestration) before entering the standard pipeline. Review/debug modes skip full RTL generation.
 - Architecture tradeoffs: `references/architecture/tradeoff-guidance.md` and `references/architecture/micro-arch-decisions.md`
 - Staged implementation: `references/architecture/staged-bringup-guidelines.md`
 - Arbiters: `references/patterns/advanced-patterns.md` and `references/patterns/arbiter-examples.md`
 - **Underspecified or vague requirements → structured contract:** `references/architecture/requirement-extraction-template.md` — use BEFORE writing any timing contract; classifies dimensions as Required/Implied/Assumed/Unknown, documents design decisions
-- **Sub-agent delegation:** `references/architecture/sub-agent-delegation.md` — prompt template, inline critical rules, multi-module integration rules
+- **Sub-agent delegation:** `references/architecture/sub-agent-delegation.md` — L0/L1/L2 decision matrix, mandatory L2 yes/no record, Release Gate record, waiver/compensation gates, contract-freeze precondition, role definitions (architect, RTL executor, verification executor, protocol authority reviewer, integration reviewer), prompt template with RSP1-RSP7 + protocol authority labels, acceptance commands, multi-module integration rules
 - **Pipeline design patterns:** `references/architecture/pipeline-design-patterns.md` — feed-forward, feedback, multi-rate, split-merge, cut-through vs store-forward; RTL templates + common errors + backpressure propagation rules
 - **Memory hierarchy & buffer strategy:** `references/architecture/memory-hierarchy.md` — FIFO depth formulas, SKID buffer, ping-pong, arbitration comparison, prefetch strategies, WSTRB alignment
 - **Performance analysis:** `references/architecture/performance-analysis.md` — throughput calculation, latency budgeting, backpressure deadlock detection, utilization analysis, Little's Law for hardware
@@ -61,6 +65,8 @@ Task-to-reference mapping. Read this file when you need the right reference for 
 - If an RTL fixture is provided, use `scripts/rtl_check.py --case <fixture_dir>` when Icarus Verilog is available
 - Tool-driven RTL verification or iterative debug: `references/design/tool-driven-workflow.md`
 - Golden reference methodology: `references/verification/golden-reference-guide.md` — functional verification strategies for all module types, testbench templates for known I/O pairs, software reference models, readback scoreboards, data integrity scoreboards, invariant checkers, and latency checkers
+
+- L2 per-module simulation before integration: `references/verification/per-module-simulation-gate.md` -- required module verification matrix, per-module TB/log evidence, waiver rules, and final gate behavior
 
 ## Signoff and closure
 

@@ -2,6 +2,20 @@
 
 一个面向数字前端 RTL 设计的领域专用 AI Agent Skill。它将通用 LLM 转变为严格遵循工程规范的数字前端设计助手，把权威工程知识（IEEE 标准、Arm AMBA 规范、综合/CDC 方法论）提炼为紧凑、可机器执行的规则，并强制执行「合同优先」工作流：先写时序合同，再写周期迹线，最后才写 RTL。
 
+## 最新版本：v2026.06.05
+
+本版本重点加强“证据绑定”的 RTL 交付流程，尤其针对 L2 存储、DMA、NVMe 类子系统。核心变化是：最终 PASS 声明必须绑定到可执行证据，不能只依赖文档描述或开发日志。
+
+主要更新：
+
+- 新增/强化 L1/L2 fail-closed 门禁：`project_preflight_gate.py`、`project_artifact_gate.py`、`pre_integration_gate.py`、`final_delivery_gate.py`。
+- L2 项目必须通过 `docs/module_verification_matrix.md` 提供逐模块验证证据；顶层集成仿真不能替代叶子模块验证。
+- 委派证据门禁：`Delegate: yes` 必须提供 `docs/delegation_plan.md` 以及 `docs/subagents/` 下的角色报告。
+- 协议声明账本证据门禁：项目声明 PASS 时，`protocol_claim_ledger.md` 中 Evidence 为空或 TBD 的条目会被拒绝。
+- 存储 mover 专项证据门禁：检查 WSTRB/非对齐传输、RRESP/RD error 传播、`cpl_bytes`、PRP list 公共接口 exercise、invalid-command completion。
+- 强化 testbench false-pass 检测：包括 TIMEOUT + `$finish`、缺少 X/Z 检查、completion-only DMA/NVMe 测试、transaction-shape scoreboard 过弱等。
+- Windows 下 `run_sim_guarded.py` 会自动用 `vvp <file>` 运行 `.vvp` 文件。
+
 ## 为什么需要这个 Skill
 
 通用 LLM 能生成语法正确的 Verilog，但经常：
