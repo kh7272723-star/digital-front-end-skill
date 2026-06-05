@@ -29,6 +29,12 @@ OUT = []
 FILE = ""
 LEVEL = 'L1'  # default; overridden by --level CLI arg
 
+CONTROL_SUFFIXES = (
+    'en', 'we', 're', 'load', 'clr', 'set', 'start', 'stop',
+    'push', 'pop', 'fire', 'accept', 'valid', 'ready', 'hold',
+    'sel', 'done', 'incr', 'inc',
+)
+
 
 def warn(level, code, line_no, msg):
     """Append a finding. level: E=error, W=warning."""
@@ -587,12 +593,58 @@ def _block_code(block):
     return '\n'.join(_strip_line_comment(raw) for _, raw in block)
 
 
+def _declared_scalar_signals(lines):
+    """Return signal names declared as scalar or explicit [0:0].
+
+    This is intentionally conservative. It covers common ANSI/non-ANSI Verilog
+    one-line declarations used by generated RTL; unknown widths are not treated
+    as scalar unless the declaration omits a range.
+    """
+    scalars = set()
+    decl_re = re.compile(
+        r'\b(?:input|output|inout|wire|reg|logic)\b'
+        r'(?:\s+(?:wire|reg|logic|signed))*\s*'
+        r'(?P<range>\[[^\]]+\])?\s*(?P<names>[^;]+);')
+    ansi_port_re = re.compile(
+        r'^\s*(?:input|output|inout)\b'
+        r'(?:\s+(?:wire|reg|logic|signed))*\s*'
+        r'(?P<range>\[[^\]]+\])?\s*(?P<name>[A-Za-z_]\w*)\s*[,)]?')
+    for raw in lines:
+        code = _strip_line_comment(raw).strip()
+        m = decl_re.search(code)
+        if m:
+            width = (m.group('range') or '').replace(' ', '')
+            if width and width != '[0:0]':
+                continue
+            for item in m.group('names').split(','):
+                item = item.strip()
+                name_m = re.match(r'([A-Za-z_]\w*)', item)
+                if name_m:
+                    scalars.add(name_m.group(1))
+            continue
+
+        m = ansi_port_re.search(code)
+        if m:
+            width = (m.group('range') or '').replace(' ', '')
+            if not width or width == '[0:0]':
+                scalars.add(m.group('name'))
+    return scalars
+
+
+def _is_control_name(name):
+    for suffix in CONTROL_SUFFIXES:
+        if re.search(rf'_{suffix}(?:_o|_q|_d|_r)?$', name):
+            return True
+    return False
+
+
 def check_fsm_comb_multi_bit(lines):
     """RTL_STRUCTURAL_PURITY_RSP2: multi-bit datapath assignment in FSM comb decode.
 
     In L2 projects, RSP2 violations are E-level (hard error) because FSM/datapath
     separation is mandatory for multi-module integration.  In L0/L1, RSP2 is W-level.
     """
+    scalar_signals = _declared_scalar_signals(lines)
     for start_line, block in _collect_always_blocks(lines, r'always\s*@\s*\(\s*\*\s*\)'):
         text = _block_code(block)
         # Treat as an FSM comb block only when it mentions state machinery.
@@ -607,7 +659,7 @@ def check_fsm_comb_multi_bit(lines):
             lhs = m.group(1)
             if lhs == 'nstate':
                 continue
-            if re.match(r'^\w*_(en|clr|fire|load|start|done|sel)(_o)?$', lhs):
+            if _is_control_name(lhs) and lhs in scalar_signals:
                 continue
             # Sideband and datapath-like names are not control signals even if 1-bit.
             suspicious = re.search(

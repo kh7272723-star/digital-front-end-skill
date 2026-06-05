@@ -8,8 +8,14 @@
 
 主要更新：
 
+- 工作流门禁前移到具体阶段出口：`pre-rtl`、`post-rtl`、`pre-integration`、`post-sim`、`final`。
+- 新增 `scripts/workflow_gate.py`，让 agent 每个阶段只需执行一个 wrapper 命令，降低长上下文 L2 项目漏跑脚本的概率。**状态锁：** 每次 PASS 写入 `docs/workflow_state.json`；后续阶段要求前置阶段 PASS 验签。`--force` 仅用于人工指示的恢复场景，不是 waiver。
+- `workflow_gate.py` 现在是 Design Mode 唯一正常门禁入口；其他 gate 脚本是 wrapper 内部实现或 debug 工具，直接输出不算阶段证据。
 - 新增/强化 L1/L2 fail-closed 门禁：`project_preflight_gate.py`、`project_artifact_gate.py`、`pre_integration_gate.py`、`final_delivery_gate.py`。
+- `final_delivery_gate.py` 也会复核 workflow state chain；直接绕过 `workflow_gate.py` 跑 final gate 会被拒绝。
+- `final_delivery_gate.py` 失败时禁止普通 `Status: PASS`；只能写 `BLOCKED`、`FAIL` 或带证据的 `BLOCKED_BY_GATE_DISPUTE`。
 - L2 项目必须通过 `docs/module_verification_matrix.md` 提供逐模块验证证据；顶层集成仿真不能替代叶子模块验证。
+- RSP1-RSP4 是 L2 硬结构门禁；“仿真通过”不能作为 FSM/datapath 边界违规的 waiver。
 - 委派证据门禁：`Delegate: yes` 必须提供 `docs/delegation_plan.md` 以及 `docs/subagents/` 下的角色报告。
 - 协议声明账本证据门禁：项目声明 PASS 时，`protocol_claim_ledger.md` 中 Evidence 为空或 TBD 的条目会被拒绝。
 - 存储 mover 专项证据门禁：检查 WSTRB/非对齐传输、RRESP/RD error 传播、`cpl_bytes`、PRP list 公共接口 exercise、invalid-command completion。

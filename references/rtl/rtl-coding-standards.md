@@ -72,7 +72,7 @@ This document integrates project coding conventions with digital-front-end-skill
 | # | Grade | Rule |
 |---|:---:|------|
 | C5 | M | Be explicitly clear whether a module is **datapath** or **state machine** — no ambiguous third category. |
-| C6 | M | **No datapath inside a state machine** (multi-bit arithmetic, complex assignments). FSM outputs single-bit enable signals only. |
+| C6 | M | **No datapath inside a state machine** (multi-bit arithmetic, complex assignments). FSM outputs declared scalar controls only, using suffixes such as `_en`, `_we`, `_re`, `_load`, `_clr`, `_push`, `_pop`, `_fire`, `_accept`, `_incr`, `_done`. |
 | C7 | M | **No FSM-like code inside a datapath** module. Datapath modules contain no `case(cstate)` structures. |
 | C8 | R | State machine in a separate file `xxx_fsm.v`, instantiated in the datapath file `xxx.v`. |
 | C9 | M | State machine uses **two-process** style: combinational (`always @(*)`) + sequential (`always @(posedge clk_i)`). |

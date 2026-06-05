@@ -8,8 +8,23 @@ This release hardens the skill around evidence-bound RTL delivery, especially fo
 
 Key updates:
 
+- Phase-local workflow gates now appear at the point where they matter:
+  `pre-rtl`, `post-rtl`, `pre-integration`, `post-sim`, and `final`.
+- New `scripts/workflow_gate.py` wrapper gives agents one command per phase,
+  reducing skipped gate scripts in long L2 projects. **State lock:**
+  each PASS writes `docs/workflow_state.json`; later phases require
+  predecessor PASS stamps. `--force` is human-directed recovery only, not a waiver.
+- `workflow_gate.py` is now the only normal Design Mode gate entry. Sibling
+  gate scripts are wrapper internals or debug tools; direct outputs from them
+  do not count as phase evidence.
 - Fail-closed project gates for L1/L2 deliverables: `project_preflight_gate.py`, `project_artifact_gate.py`, `pre_integration_gate.py`, and `final_delivery_gate.py`.
+- `final_delivery_gate.py` now checks the workflow state chain too, so direct
+  final-gate bypasses of `workflow_gate.py` are rejected.
+- `final_delivery_gate.py` failure now blocks any plain `Status: PASS`; use
+  `BLOCKED`, `FAIL`, or `BLOCKED_BY_GATE_DISPUTE` with evidence.
 - Mandatory L2 per-module verification evidence through `docs/module_verification_matrix.md`; integration simulation no longer substitutes for leaf-module evidence.
+- RSP1-RSP4 are L2 hard structural gates. Passing simulation is not a valid
+  waiver for FSM/datapath boundary violations.
 - Delegation provenance checks: `Delegate: yes` requires `docs/delegation_plan.md` and role reports under `docs/subagents/`.
 - Protocol claim ledger evidence checks: `protocol_claim_ledger.md` rows with blank/TBD Evidence are rejected when a project claims PASS.
 - Storage mover evidence checks for WSTRB/unaligned transfers, RRESP/RD error propagation, `cpl_bytes`, PRP list public-interface exercise, and invalid-command completion.
@@ -262,4 +277,3 @@ python scripts/yosys_extract.py --top <module> --sources <files>
 ## License
 
 This project is a curated engineering knowledge base and evaluation framework. See individual reference files for attribution of authoritative sources (IEEE, Arm, SNUG, etc.).
-

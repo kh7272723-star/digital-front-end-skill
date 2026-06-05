@@ -1,5 +1,150 @@
 # Skill 迭代日志
 
+## 2026-06-05 - Workflow Gate Entry Consolidation: 门禁入口收敛
+
+### 背景
+
+Phase State Lock 已能记录阶段 PASS 并阻断缺失前置阶段，但主流程仍存在入口二义性：Step 1.2 使用 `project_preflight_gate.py` 或 `workflow_gate.py --phase pre-rtl` 二选一；Step 10 将 `workflow_gate.py --phase final` 称为 Shortcut；7b/9-EXIT 将底层 gate 脚本与 phase wrapper 并列，容易让 agent 继续直接跑底层脚本而不写 workflow state。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| 唯一正常入口 | `SKILL.md`, `references/workflow/task-mode-routing.md` | Design Mode 正常门禁入口统一为 `python scripts/workflow_gate.py --phase <phase> <project_dir>`。 |
+| 底层脚本降级 | `SKILL.md`, `task-mode-routing.md` | `project_preflight_gate.py`、`final_delivery_gate.py`、`rtl_style_check.py`、`compile_log_gate.py`、`sim_log_gate.py` 等表述为 wrapper 内部实现或 debug 工具；直接输出不算阶段证据。 |
+| pre-rtl 入口消歧 | `SKILL.md` Step 1.2 | 删除 `or` 口径：正常路径必须跑 `workflow_gate.py --phase pre-rtl`，`project_preflight_gate.py` 仅 debug-only。 |
+| final 入口消歧 | `SKILL.md` Step 10 | 将 `Shortcut` 改为 `Required command`；`final_delivery_gate.py` 是 direct-call safety net，不是正常入口。 |
+| 发布说明同步 | `README.md`, `README_CN.md` | 明确 workflow gate 是 Design Mode 唯一正常门禁入口。 |
+
+### 设计边界
+
+本轮不增加新门禁、不改变 RTL/协议检查语义，只降低 agent 的执行歧义。状态锁仍约束流程和证据，不约束项目特定微架构。
+
+### 验收
+
+| 命令/检查 | 结果 |
+|-----------|------|
+| `python -B scripts/skill_static_check.py` | PASS |
+| `python -m py_compile` 关键 gate 脚本 | PASS |
+| `python -m json.tool evals/evals.json` / `evals/benchmark.json` | PASS |
+| `python -B scripts/eval_benchmark_check.py` | PASS, TOTAL_EVALS=114, EXECUTABLE_TRIALS=23 |
+| SKILL.md 行数 / ASCII | 472 行，ASCII-only |
+| 状态锁负向 smoke | PASS：缺 `pre-rtl` 时 `post-rtl` FAIL，且不写状态文件 |
+| direct-final 绕过 smoke | PASS：无 `workflow_state.json` 时 `final_delivery_gate.py` FAIL 并提示先跑 `pre-rtl` |
+| L2 final 前置链 smoke | PASS：缺 `pre-integration` PASS 戳时 final FAIL |
+| L0 正向链 smoke | PASS：`post-rtl -> post-sim -> final` 成功写入状态链 |
+
+---
+
+## 2026-06-05 - Phase State Lock: 阶段状态锁 + 前置门禁强制
+
+### 背景
+
+Phase-gate distribution 已将门禁移到阶段出口，但 agent 仍可跳过前置阶段直接执行后续阶段。根因：无跨阶段状态记忆，每个 `--phase` 调用独立运行，不检查前置阶段是否已通过。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| 状态文件 | `scripts/workflow_gate.py` | 每次 PASS 写入 `docs/workflow_state.json`（UTF-8 JSON），记录 schema_version、level、各阶段 status/timestamp/command/evidence。 |
+| 前置阶段强制 | `scripts/workflow_gate.py` | post-rtl 要求 pre-rtl PASS（L1/L2）；pre-integration 要求 post-rtl PASS（L2）；post-sim 要求 post-rtl + pre-integration PASS（L2 集成场景）；final 要求完整前置链。缺少前置时打印 NEXT_REQUIRED_COMMAND 并 exit 1。 |
+| --force 恢复 | `scripts/workflow_gate.py` | `--force` 跳过前置检查，用于恢复场景。仍只在门禁通过时写 PASS。 |
+| final 绕过复核 | `scripts/final_delivery_gate.py` | final gate 读取 `docs/workflow_state.json`，缺少适用阶段 PASS 戳时 FAIL；直接绕过 `workflow_gate.py` 不能获得 final PASS。 |
+| L0 轻量行为 | `scripts/workflow_gate.py` | L0 不强制 pre-rtl 前置；单模块项目跳过 pre-integration。 |
+| Level 感知前置链 | `scripts/workflow_gate.py` | `filter_required_predecessors()` 根据 detected level 和项目状态动态计算必需前置。 |
+| 状态锁文档 | `SKILL.md` | Phase Exit Gates 表头新增状态锁说明。 |
+| Level 范围文档 | `references/workflow/task-mode-routing.md` | Phase-local gate 表新增前置列和 Level-specific scope 段。 |
+
+### P1 设计约束
+
+- 不新增 `--enter` 命令。一个 `--phase` 命令完成门禁+状态写入。
+- 不强制 agent 记忆多个子命令。`workflow_gate.py` 内部聚合已有门禁脚本。
+- 状态文件 deterministic：`sort_keys=True`，UTC 时间戳，evidence 截断 200 字符。
+
+### P2 Level 特定范围
+
+| Level | pre-rtl 前置 | pre-integration | 完整链 |
+|-------|-------------|-----------------|--------|
+| L0 | 不强制 | 跳过 | pre-rtl -> post-rtl -> post-sim -> final |
+| L1 | 强制 | 不强制；真实集成项目应分类为 L2 | 同 L0 |
+| L2 | 强制 | 强制 | pre-rtl -> post-rtl -> pre-integration -> post-sim -> final |
+
+### P3 通用性守卫
+
+硬门禁强制的是通用 RTL/verif/delivery 证据，不是项目特定微架构。协议特定声明必须标注 Normative / Project policy / Conservative pattern / Heuristic / Unverified。
+
+### 验收
+
+| 命令 | 结果 |
+|------|------|
+| `python -m py_compile` 关键 gate 脚本 | PASS |
+| `python -B scripts/skill_static_check.py` | PASS |
+| `python -m json.tool evals/evals.json` / `evals/benchmark.json` | PASS |
+| `python -B scripts/eval_benchmark_check.py` | PASS, TOTAL_EVALS=114, EXECUTABLE_TRIALS=23 |
+| SKILL.md 行数 | 487 (<=500) |
+| SKILL.md ASCII 扫描 | 无非 ASCII |
+| 状态锁负向测试 | PASS：缺 pre-rtl 时 `post-rtl` FAIL，输出 NEXT_REQUIRED_COMMAND，且不写 workflow_state.json |
+| 状态锁正向测试 | PASS：L0 `post-rtl -> post-sim -> final` 写入状态链，`final_delivery_gate.py` PASS |
+| final 绕过测试 | PASS：直接运行 `final_delivery_gate.py` 且无 workflow_state.json 时 FAIL |
+| L2 final 前置链测试 | PASS：缺 `pre-integration` PASS 戳时 final FAIL |
+| 三个真实项目回归 | FAIL as expected：缺状态链时立即输出 NEXT_REQUIRED_COMMAND，且不生成 workflow_state.json |
+
+### 文件变更
+
+- `scripts/workflow_gate.py`：状态锁 + 前置强制 + --force + level 感知；缺前置阶段时不写状态。
+- `scripts/final_delivery_gate.py`：新增 workflow state chain 复核，防止直接绕过 wrapper。
+- `SKILL.md`：Phase Exit Gates 表头状态锁说明。
+- `references/workflow/task-mode-routing.md`：phase-local gate 表前置列 + Level scope。
+- `README.md` / `README_CN.md`：Latest release 状态锁说明。
+- `CLAUDE.md`：开发记忆。
+
+---
+
+## 2026-06-05 - Phase-Gate Distribution: 门禁从 Step 10 分发到阶段出口
+
+### 背景
+
+三个重新生成的存储项目仍然跳过或延迟了工作流门禁。根因：SKILL.md 在 Step 10 Finalize 集中了约 30 个门禁检查项，agent 将门禁视为最终清单而非阶段退出条件。
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| RTL Phase Gate | `SKILL.md` 7b-EXIT | rtl_style_check 干净、compile_log_gate 通过、RSP1-RSP7 已修复、L2 RSP2 E-level、debug 反模式检查。在 self-review 之前执行。 |
+| Simulation Phase Gate | `SKILL.md` 9-EXIT | sim_log_gate 通过、pre_integration_gate 通过、逐模块证据 (L2)、contract-implementation matrix、scoreboard substance、transaction-shape scoreboard、dev-log 残余风险分类。在 finalization 之前执行。 |
+| Step 10 精简 | `SKILL.md` Step 10 | 从 ~30 个检查项精简为 thin delivery gate：final_delivery_gate.py 编排器 + project_artifact_gate + project_preflight_gate + delegation provenance + runtime guard + maturity statement。 |
+| Phase wrapper | `scripts/workflow_gate.py` | 新增 `pre-rtl`、`post-rtl`、`pre-integration`、`post-sim`、`final` 五个阶段入口；每个阶段失败即非零退出。 |
+| RSP2 控制后缀修正 | `rtl_style_check.py`, `rtl-structural-purity.md` | 合法单 bit 控制后缀扩展为 `_en/_we/_re/_load/_clr/_set/_start/_stop/_push/_pop/_fire/_accept/_valid/_ready/_hold/_sel/_incr/_inc/_done`，避免 NAND 风格控制脉冲误报；多 bit datapath 仍为违规。 |
+| Final PASS 状态约束 | `SKILL.md`, `task-mode-routing.md` | `final_delivery_gate.py` 失败时禁止普通 `Status: PASS`，只能写 `BLOCKED`、`FAIL` 或带证据的 `BLOCKED_BY_GATE_DISPUTE`。 |
+
+### 设计理由
+
+- 每个阶段门禁包含 "If any FAIL: fix, re-run, re-check" 指令，形成局部反馈循环而非延迟到最终。
+- `final_delivery_gate.py` 仍然运行所有门禁作为安全网；阶段门禁是工作流级强制执行。
+- 从 Step 10 移出的项目：rtl_style_check/compile_log_gate/RSP/debug -> 7b-EXIT；sim_log_gate/pre_integration/per-module/scoreboard/PRP/AXI/DMA -> 9-EXIT。
+- `workflow_gate.py` 只聚合已有门禁，不替代底层脚本；目的是减少 agent 在长上下文中漏跑脚本。
+
+### 验收
+
+| 命令 | 结果 |
+|------|------|
+| `python scripts/skill_static_check.py` | PASS |
+| `wc -l SKILL.md` | 480 (<=500) |
+| `python -m py_compile scripts/workflow_gate.py scripts/rtl_style_check.py` | PASS |
+| 非 ASCII 扫描 | SKILL.md 无 CJK/非 ASCII 字符 |
+
+### 文件变更
+
+- `SKILL.md`：phase exit table、7b-EXIT、9-EXIT、Step 10 精简。
+- `scripts/workflow_gate.py`：新增阶段 wrapper。
+- `scripts/rtl_style_check.py`：RSP2 scalar control suffix 识别。
+- `references/rtl/rtl-structural-purity.md` / `references/rtl/rtl-coding-standards.md`：RSP2 文字口径与脚本一致。
+- `references/workflow/task-mode-routing.md`：新增 phase-local gate 命令。
+- `README.md` / `README_CN.md`：同步最新说明。
+- `CLAUDE.md`：记录本轮迭代。
+
+---
+
 ## 2026-06-05 - v2026.06.05 发布：证据绑定与存储门禁加固
 
 ### 发布摘要

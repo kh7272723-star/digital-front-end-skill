@@ -66,12 +66,17 @@ nonblocking assignment is allowed in that block except reset assignment to
 The FSM combinational block may assign:
 
 - `nstate`
-- single-bit controls such as `*_en`, `*_clr`, `*_fire`, `*_load`, `*_start`,
-  `*_done`
+- declared scalar controls with suffixes such as `*_en`, `*_we`, `*_re`,
+  `*_load`, `*_clr`, `*_set`, `*_start`, `*_stop`, `*_push`, `*_pop`,
+  `*_fire`, `*_accept`, `*_valid`, `*_ready`, `*_hold`, `*_sel`, `*_incr`,
+  `*_inc`, `*_done`
 - simple single-bit output decodes from state, such as
   `assign done_o = (cstate == S_DONE)`
 
-It must not assign multi-bit datapath values.
+It must not assign multi-bit datapath values. A name such as `dp_addr_we_o` is
+legal only when it is declared scalar and behaves as a write-enable control;
+`addr_o`, `addr_n`, `bytes_o`, `data_o`, and other payload/sideband values
+remain datapath-owned even if the value is computed from state.
 
 Forbidden:
 

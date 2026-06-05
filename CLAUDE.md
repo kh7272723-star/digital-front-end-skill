@@ -234,6 +234,11 @@ python -m py_compile scripts\project_artifact_gate.py
 python -m json.tool evals\evals.json
 python -m json.tool evals\benchmark.json
 python scripts\eval_benchmark_check.py
+python scripts\workflow_gate.py --phase pre-rtl <project_dir>
+python scripts\workflow_gate.py --phase post-rtl <project_dir>
+python scripts\workflow_gate.py --phase pre-integration <project_dir>  # L2 only
+python scripts\workflow_gate.py --phase post-sim <project_dir>
+python scripts\workflow_gate.py --phase final <project_dir>
 python scripts\rtl_style_check.py <rtl-file-under-review>
 python scripts\sim_log_gate.py <sim_log_file>
 python scripts\compile_log_gate.py <compile_log_file>
@@ -242,6 +247,10 @@ python scripts\project_artifact_gate.py <project_dir>
 python scripts\final_delivery_gate.py <project_dir>
 python scripts\run_sim_guarded.py --timeout-sec 30 --log sim\sim.log -- vvp sim\top.vvp
 ```
+
+For Design Mode projects, the `workflow_gate.py --phase ...` commands are the
+normal gate entries. The lower-level gate commands above are debug/regression
+tools unless a Codex audit explicitly asks for them.
 
 Known regression check:
 
@@ -420,3 +429,146 @@ Codex reviewed two L2 storage projects and found five recurring failures:
 - `references/workflow/contract-to-test-trace-gate.md` — verification matrix test-name cross-check
 - `CLAUDE.md` — this section
 - `SKILL_CHANGELOG.md` — iteration entry
+
+## 2026-06-05 Phase-Gate Distribution: Gates as Phase Exit Conditions
+
+Three regenerated storage projects still skipped or delayed workflow gates.
+Root cause: SKILL.md concentrated ~30 gate checks in Step 10 Finalize; agents
+treated gates as a final checklist instead of phase exit conditions.
+
+Fix: distribute critical gates to their natural phase exits so each phase is
+a stop-go checkpoint. An agent that skips a gate cannot proceed to the next
+phase because the gate is documented at the point of action, not at the end.
+
+### Phase gates added
+
+| Gate | Location | What it enforces |
+|------|----------|------------------|
+| **7b-EXIT: RTL Phase Gate** | After pre-synthesis check, before self-review | rtl_style_check clean, compile_log_gate pass, RSP1-RSP7 fixed, L2 RSP2 E-level, debug anti-patterns |
+| **9-EXIT: Simulation Phase Gate** | After simulation loop, before finalization | sim_log_gate pass, pre_integration_gate pass, per-module evidence (L2), contract-implementation matrix, scoreboard substance, transaction-shape scoreboard, dev-log residual risk classification |
+| **Step 10: Finalize** | Delivery gate (thin) | final_delivery_gate.py orchestrator, project_artifact_gate, project_preflight_gate, delegation provenance, runtime guard, maturity statement |
+
+### What moved out of Step 10
+
+- rtl_style_check, compile_log_gate, RSP checks, debug anti-patterns -> 7b-EXIT
+- sim_log_gate, pre_integration_gate, per-module evidence, contract-implementation matrix, scoreboard substance, transaction-shape scoreboard, dev-log classification, PRP/AXI/DMA checks -> 9-EXIT
+- Step 10 retained: final_delivery_gate.py orchestrator, project_artifact_gate, project_preflight_gate, delegation provenance, runtime guard, maturity statement
+
+### Design rationale
+
+- Agents that reach Step 9 and see "run sim_log_gate" as a Step 10 item will
+  often skip it and claim PASS. Moving it to 9-EXIT makes it a phase exit
+  condition that blocks finalization.
+- Each phase gate has a "If any FAIL: fix, re-run, re-check" instruction that
+  creates a local feedback loop instead of deferring failures to the end.
+- `final_delivery_gate.py` still runs ALL gates as a safety net; the phase
+  gates are the workflow-level enforcement, not a replacement.
+
+### Files modified
+
+- `SKILL.md` — 7b-EXIT, 9-EXIT, Step 10 thinned (480 lines)
+- `CLAUDE.md` — this section
+- `SKILL_CHANGELOG.md` — iteration entry
+## 2026-06-05 Codex Audit Follow-up: Phase Wrapper + RSP2 Checker
+
+Claude's first pass for the phase-gate iteration only changed
+SKILL.md/CLAUDE.md/SKILL_CHANGELOG.md. Codex completed the missing deterministic
+pieces:
+
+- `scripts/workflow_gate.py`: new phase wrapper for pre-rtl, post-rtl,
+  pre-integration, post-sim, and final.
+- `scripts/rtl_style_check.py`: RSP2 scalar control suffix handling. Legal
+  scalar controls include _we, _re, _push, _pop, _incr, _inc, _en, _load, and
+  related control suffixes. Multi-bit datapath/sideband assignments in FSM comb
+  still fail.
+- `references/rtl/rtl-structural-purity.md`: RSP2 wording aligned with checker.
+- `references/workflow/task-mode-routing.md`: phase-local command table added.
+- `README.md` / `README_CN.md`: latest-release notes updated.
+
+Do not sync globally or release until py_compile, skill_static_check, and the
+three storage-project regression gates have been run by Codex.
+
+## 2026-06-05 Phase State Lock: Predecessor Enforcement + Audit Trail
+
+Agents still skip predecessor phases and jump to later gates. Root cause: no
+cross-phase state memory; each `--phase` call runs independently.
+
+Fix: `workflow_gate.py` now writes `docs/workflow_state.json` on PASS. Later
+phases read the state file and require predecessor PASS stamps before running.
+
+### State file schema
+
+```json
+{
+  "schema_version": 1,
+  "level": "L2",
+  "phases": {
+    "pre-rtl": {"status": "PASS", "timestamp": "2026-06-05T...", "command": "...", "evidence": "..."},
+    "post-rtl": {"status": "FAIL", "timestamp": "...", "command": "...", "evidence": "..."}
+  }
+}
+```
+
+### Predecessor chain (level-aware)
+
+| Phase | L0 | L1 | L2 |
+|-------|----|----|-------|
+| pre-rtl | -- | -- | -- |
+| post-rtl | (optional) | pre-rtl | pre-rtl |
+| pre-integration | skip | skip; classify real integration as L2 | post-rtl |
+| post-sim | post-rtl | post-rtl | post-rtl + pre-integration once integration artifacts exist |
+| final | full chain | full chain | full chain |
+
+### Recovery
+
+`--force` skips predecessor check only for human-directed recovery. It is not
+a waiver for final PASS, and `final_delivery_gate.py` now independently checks
+the workflow state chain. Missing predecessor checks do not write state.
+
+### Codex audit follow-up
+
+Claude's first state-lock pass missed one bypass path: an executor could still
+run `final_delivery_gate.py` directly without `workflow_gate.py`. Codex added
+Step 0 workflow-state checking to `scripts/final_delivery_gate.py`, so direct
+final-gate calls fail when `docs/workflow_state.json` is absent, stale, or
+missing required predecessor PASS stamps.
+
+### Generality guard
+
+Hard gates enforce generic RTL/verif/delivery evidence, not project-specific
+microarchitecture. Protocol claims must remain labeled Normative / Project
+policy / Conservative pattern / Heuristic / Unverified.
+
+### Files modified
+
+- `scripts/workflow_gate.py` -- state lock, predecessor enforcement, --force, level-aware chain
+- `scripts/final_delivery_gate.py` -- workflow state chain safety net
+- `SKILL.md` -- phase gate table state lock note (487 lines)
+- `references/workflow/task-mode-routing.md` -- predecessor column + level scope
+- `README.md` / `README_CN.md` -- state lock in latest release
+- `SKILL_CHANGELOG.md` -- iteration entry
+- `CLAUDE.md` -- this section
+
+## 2026-06-05 Workflow Gate Entry Consolidation
+
+After adding workflow state locks, Codex reviewed the workflow wording and found
+remaining ambiguity: SKILL.md still allowed `project_preflight_gate.py` as an
+alternative to `workflow_gate.py --phase pre-rtl`, called final workflow gate a
+"Shortcut", and listed low-level gate scripts beside the phase wrapper.
+
+Policy update:
+
+- Design Mode normal gate entry is only:
+  `python scripts/workflow_gate.py --phase <phase> <project_dir>`.
+- Sibling scripts (`project_preflight_gate.py`, `final_delivery_gate.py`,
+  `rtl_style_check.py`, `compile_log_gate.py`, `sim_log_gate.py`,
+  `pre_integration_gate.py`) are wrapper internals or debug tools. Their direct
+  output is useful for diagnosis but is not phase evidence.
+- `workflow_gate.py --phase final` is the required final command.
+  `final_delivery_gate.py` is a direct-call safety net, not the normal final
+  entry.
+- Step 1.2 now says normal pre-RTL path is `workflow_gate.py --phase pre-rtl`;
+  `project_preflight_gate.py` is debug-only.
+
+This is a workflow simplification, not a new gate. Do not add new project
+microarchitecture constraints under this policy.

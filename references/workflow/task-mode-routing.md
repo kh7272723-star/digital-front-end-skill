@@ -25,6 +25,38 @@ Step 3: create docs/contract_implementation_matrix.md skeleton immediately after
 Step 9: use scripts/run_sim_guarded.py, not bare vvp.
 ```
 
+### Phase-local gate commands
+
+Use `workflow_gate.py` as the only normal gate entry during Design Mode. These
+commands are stop-go boundaries, not finalization-only checks. Each PASS writes
+`docs/workflow_state.json`; later phases require predecessor PASS. Sibling gate
+scripts are wrapper internals or debug tools. Their direct output is not phase
+evidence. `--force` is for human-directed recovery only; it is not a waiver for
+final PASS.
+
+| Boundary | Command | Predecessors (L1/L2) | If FAIL |
+|----------|---------|---------------------|---------|
+| After skeleton creation | `python scripts/workflow_gate.py --phase pre-rtl <project_dir>` | none | Do not write RTL |
+| After RTL + compile log | `python scripts/workflow_gate.py --phase post-rtl <project_dir>` | pre-rtl | Do not write TB or integrate |
+| Before L2 integration TB/sim | `python scripts/workflow_gate.py --phase pre-integration <project_dir>` | post-rtl (L2 only) | Do not create integration artifacts |
+| After each simulation loop | `python scripts/workflow_gate.py --phase post-sim <project_dir>` | post-rtl; +pre-integration if L2 integration | Do not finalize |
+| Final delivery | `python scripts/workflow_gate.py --phase final <project_dir>` | full chain | Do not claim PASS |
+
+**Level-specific scope:**
+- **L0:** pre-rtl predecessor not enforced. Single-module projects skip pre-integration.
+- **L1:** pre-rtl required. Pre-integration is not forced; classify real integration projects as L2.
+- **L2:** full chain enforced. Per-module evidence required before integration.
+
+`final_delivery_gate.py` is an aggregation safety net and independently checks
+`docs/workflow_state.json`. It is not the normal final entry. Direct final-gate
+calls without the applicable phase PASS stamps fail. If it fails, project status
+must be BLOCKED, FAIL, or BLOCKED_BY_GATE_DISPUTE with evidence; never plain
+PASS.
+
+Hard gates enforce generic RTL/verif/delivery evidence, not project-specific
+microarchitecture. Protocol-specific claims must remain labeled Normative /
+Project policy / Conservative pattern / Heuristic / Unverified.
+
 ## Review Mode
 
 Skip Steps 1-7 entirely. Start from Step 8 checklist and apply:

@@ -9,6 +9,7 @@ Usage:
         [--compile-log LOG ...] [--sim-log LOG ...] [--rtl-file FILE ...]
 """
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -49,6 +50,82 @@ def _run_script(script_name: str, args: list[str]) -> tuple[int, str]:
     if result.stderr:
         output += '\n' + result.stderr
     return result.returncode, output
+
+
+# ---------------------------------------------------------------------------
+# Step 0 -- workflow state lock
+# ---------------------------------------------------------------------------
+
+WORKFLOW_SCHEMA_VERSION = 1
+
+
+def _workflow_state_path(project_dir: str) -> str:
+    return os.path.join(project_dir, 'docs', 'workflow_state.json')
+
+
+def _load_workflow_state(project_dir: str) -> dict:
+    path = _workflow_state_path(project_dir)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {}
+
+
+def _required_workflow_phases(project_dir: str, level: str) -> list[str]:
+    if level == 'L0':
+        return ['post-rtl', 'post-sim']
+    phases = ['pre-rtl', 'post-rtl']
+    if level == 'L2':
+        phases.append('pre-integration')
+    phases.append('post-sim')
+    return phases
+
+
+def step0_workflow_state_gate(project_dir: str) -> list[str]:
+    """Reject final PASS if phase-local workflow gates were skipped."""
+    findings: list[str] = []
+    state_path = _workflow_state_path(project_dir)
+    state = _load_workflow_state(project_dir)
+    level = _detect_project_level(project_dir)
+
+    if not state:
+        first_phase = _required_workflow_phases(project_dir, level)[0]
+        return [
+            "WORKFLOW_STATE_GATE failed: missing or invalid docs/workflow_state.json",
+            "  workflow_state: NEXT_REQUIRED_COMMAND: "
+            f"python scripts/workflow_gate.py --phase {first_phase} {project_dir}",
+        ]
+
+    if state.get('schema_version') != WORKFLOW_SCHEMA_VERSION:
+        findings.append(
+            f"WORKFLOW_STATE_GATE failed: unsupported schema_version in {state_path}")
+
+    state_level = state.get('level')
+    if state_level and state_level != level:
+        findings.append(
+            "WORKFLOW_STATE_GATE failed: workflow_state level "
+            f"{state_level} is stale; detected {level}. Re-run phase gates.")
+
+    phases = state.get('phases', {})
+    required = _required_workflow_phases(project_dir, level)
+    for phase in required:
+        entry = phases.get(phase)
+        if not entry or entry.get('status') != 'PASS':
+            findings.append(
+                "WORKFLOW_STATE_GATE failed: missing predecessor PASS stamp "
+                f"for phase '{phase}'")
+            findings.append(
+                "  workflow_state: NEXT_REQUIRED_COMMAND: "
+                f"python scripts/workflow_gate.py --phase {phase} {project_dir}")
+            break
+
+    return findings
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +493,11 @@ def main() -> None:
         sys.exit(1)
 
     all_findings: list[str] = []
+
+    # Step 0 -- workflow state lock. This closes the bypass where an agent
+    # skips workflow_gate.py and runs final_delivery_gate.py directly.
+    findings = step0_workflow_state_gate(project_dir)
+    all_findings.extend(('  step0: ' + f) for f in findings)
 
     # Step 1 -- project_artifact_gate
     findings = step1_project_artifact_gate(project_dir)
