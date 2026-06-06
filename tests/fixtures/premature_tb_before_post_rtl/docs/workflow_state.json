@@ -1,0 +1,28 @@
+{
+  "level": "L1",
+  "phases": {
+    "post-rtl": {
+      "command": "python scripts/workflow_gate.py --phase post-rtl D:\\skill\u7ba1\u7406\\ic-design-skill\\digital-front-end-skill-ds\\tests\\fixtures\\premature_tb_before_post_rtl",
+      "evidence": "post-rtl gate: 1 finding(s) -- TB files found but post-rtl validates RTL only. TB generation belongs to Step 8b/9A/9B, after post-rtl PASS. Remove TB files from rtl/ scope or proceed to next phase if ",
+      "status": "FAIL",
+      "timestamp": "2026-06-06T05:45:51Z"
+    },
+    "pre-rtl": {
+      "command": "python scripts/workflow_gate.py --phase pre-rtl D:\\skill\u7ba1\u7406\\ic-design-skill\\digital-front-end-skill-ds\\tests\\fixtures\\premature_tb_before_post_rtl",
+      "evidence": "pre-rtl gate: all checks passed",
+      "snapshot": {
+        "docs/timing-contract.md": {
+          "mtime": 1780723607.1007714,
+          "size": 234
+        },
+        "docs/verification_matrix.md": {
+          "mtime": 1780723609.782406,
+          "size": 200
+        }
+      },
+      "status": "PASS",
+      "timestamp": "2026-06-06T05:41:15Z"
+    }
+  },
+  "schema_version": 1
+}

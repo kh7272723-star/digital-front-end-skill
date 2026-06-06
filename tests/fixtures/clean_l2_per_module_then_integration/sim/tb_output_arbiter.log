@@ -1,0 +1,8 @@
+RESET_RELEASED
+TEST_START T1: arbiter_reset
+TEST_PASS T1: arbiter_reset
+TEST_START T2: arbiter_grant
+PASS: grant matches request
+TEST_PASS T2: arbiter_grant
+ALL_TESTS_PASS
+SIMULATION_DONE

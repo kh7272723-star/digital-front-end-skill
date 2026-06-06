@@ -60,11 +60,12 @@ Given a digital front-end design request, the skill forces the agent through a s
 5. Write a cycle trace (pre-edge, combinational condition, active-edge update, next visible state)
 5a. Principle check — P1 Timing Contract + P2 FSM Safety (LITE mode for linear FSMs)
 6. Choose a design pattern (FSM, FIFO, pipeline, arbiter, etc.)
-7. Generate synthesizable RTL (Verilog-first, conservative defaults, bug-pattern scan, pitfall-aware)
+7. Generate synthesizable RTL only (no TB), then pass the post-rtl gate with RTL-only compile evidence
 8. Structural self-review (79-item checklist across 13 categories)
-8b. Functional verification (mandatory — golden reference methodology, 6 strategies)
 8c. Principle check — P3 Known Values + P5a Output Discipline (P5b Physical Impl for L2 only)
-9. Simulation loop with principle-driven debug (read icarus-common-pitfalls.md first, then lint → compile → simulate → Phase 4 principle review → fix → re-simulate)
+8b. Functional verification plan only (golden reference methodology, scoreboard plan, no TB generation)
+9A. L2 per-module TB + guarded simulation + sim_log_gate + module verification matrix
+9B. Integration TB + guarded simulation + principle-driven debug after pre-integration passes
 10. Synthesis feedback (Yosys: latch/loop/critical-path/cell-count checks)
 11. Review and iterate
 12. Verify timing against contract and trace

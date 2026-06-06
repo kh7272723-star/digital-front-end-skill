@@ -116,21 +116,23 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 ## Standard workflow
 
-**Phase Exit Gates:** the normal Design Mode gate entry is `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json`; later phases require predecessor PASS. Sibling gate scripts are wrapper internals or debug tools; their direct output is not phase evidence. `--force` is human-directed recovery only, not a waiver. L0 skips pre-rtl check; L2 requires per-module evidence before integration. Step 9 is split: 9A per-module verification (L2 mandatory), 9B integration verification.
+**Phase Exit Gates:** `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json` with artifact snapshot (mtime+size); later phases require predecessor PASS and detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
-| Phase | Command | Blocks |
-|-------|---------|--------|
-| Pre-RTL | `python scripts/workflow_gate.py --phase pre-rtl <project_dir>` | RTL generation (contract readiness gate) |
-| Post-RTL | `python scripts/workflow_gate.py --phase post-rtl <project_dir>` | TB/integration |
-| Pre-integration | `python scripts/workflow_gate.py --phase pre-integration <project_dir>` | integration TB/sim (L2 module evidence) |
-| Post-sim | `python scripts/workflow_gate.py --phase post-sim <project_dir>` | finalization |
-| Final | `python scripts/workflow_gate.py --phase final <project_dir>` | PASS claim |
+**Step boundaries:** 1-6 planning -> 7 RTL-only (no TB) -> 7b post-rtl gate (COMPILE_RTL_ONLY) -> 8 self-review -> 8c principle -> 8b verification PLAN -> 9A per-module TB+sim -> 9A-EXIT pre-integration gate -> 9B integration TB+sim -> 9-EXIT post-sim -> 10 final.
 
-If a gate fails: stop, fix, rerun. Do not continue on a text waiver.
+| Phase | Command | Scope |
+|-------|---------|-------|
+| Pre-RTL | `workflow_gate.py --phase pre-rtl <dir>` | Contract docs non-empty (blocks RTL) |
+| Post-RTL | `workflow_gate.py --phase post-rtl <dir>` | RTL-only: style + compile. TB out of scope. |
+| Pre-integration | `workflow_gate.py --phase pre-integration <dir>` | L2 per-module evidence; no integration TB before this |
+| Post-sim | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
+| Final | `workflow_gate.py --phase final <dir>` | All artifacts, gates, freshness (blocks PASS claim) |
+
+If a gate fails: stop, fix, rerun.
 
 ### 1. Parse the request
 
-Summarize the requested block and list open questions. If working in an existing project, inspect local conventions first. Classify the design using the three-tier complexity gate:
+Summarize the requested block and list open questions. Classify the design:
 
 | Level | Criteria | Principle review | Agent strategy |
 |:-----:|----------|:----------------:|----------------|
@@ -163,13 +165,11 @@ Delegation Decision:
 
 **L2 waiver (if no delegation):** reason, residual risk, compensation gates: per-module compile, RSP1-RSP7, boundary review, false-pass audit.
 
-Execution waits on frozen per-module contracts. **L2 Delegate: yes requires execution evidence** -- `docs/delegation_plan.md` and subagent role reports under `docs/subagents/` (architect, protocol_reviewer, axi_transaction_reviewer, rtl_structural_reviewer, verification_reviewer, integration_reviewer). Without all artifacts, `project_artifact_gate.py` rejects PASS. See `references/architecture/sub-agent-delegation.md` for full artifact schema.
+Execution waits on frozen per-module contracts. **L2 Delegate: yes requires execution evidence** -- `docs/delegation_plan.md` and subagent role reports under `docs/subagents/`. Without all artifacts, `project_artifact_gate.py` rejects PASS. See `references/architecture/sub-agent-delegation.md`.
 
 ### 1.2 Project Skeleton / Preflight Gate (mandatory for L1/L2 No-SPEC)
 
-Before any RTL, create the canonical project skeleton. Debug-only path:
-`python scripts/project_preflight_gate.py <project_dir>` (does not write
-workflow state).
+Before any RTL, create canonical project skeleton. Debug-only: `python scripts/project_preflight_gate.py <project_dir>` (does not write workflow state).
 
 - `docs/` directory with skeleton files: `dev_log.md`, `SPEC.md`, `interface-contracts.md`, `timing-contract.md`, `protocol_claim_ledger.md`, `verification_matrix.md`, `contract_implementation_matrix.md`
 - `rtl/` directory (L1+L2), `tb/` directory (L2), `sim/` directory
@@ -209,11 +209,11 @@ If Step 1.1 decided yes (delegate), do NOT start sub-agents until EVERY item is 
 
 If any item is unchecked, do NOT start sub-agents. See `references/architecture/sub-agent-delegation.md` for release record template.
 
-**No-SPEC L1/L2 deliverables:** If no project SPEC is provided, create canonical artifacts under `docs/` before RTL: `dev_log.md`, `SPEC.md`, `interface-contracts.md`, `timing-contract.md`, `protocol_claim_ledger.md`, `verification_matrix.md`, `contract_implementation_matrix.md`. `dev_log.md` is evidence chain only.
+**No-SPEC L1/L2 deliverables:** If no project SPEC, create canonical `docs/` artifacts before RTL: `dev_log.md`, `SPEC.md`, `interface-contracts.md`, `timing-contract.md`, `protocol_claim_ledger.md`, `verification_matrix.md`, `contract_implementation_matrix.md`. `dev_log.md` is evidence chain only.
 
-If the spec is underspecified, run `references/architecture/requirement-extraction-template.md` before Step 2. If more than 3 Required dimensions are unanswered, pause and ask.
+If underspecified, run `references/architecture/requirement-extraction-template.md` before Step 2. >3 Required dimensions unanswered -> pause and ask.
 
-For NVMe/DMA: define a global source byte cursor (never per-page reset), separate PRP cursors, non-uniform multi-page continuity test. See `references/bus/nvme-guidelines.md` section 14. For full systems (>3 sub-modules), produce system contract + decomposition + integration invariants before any RTL.
+For NVMe/DMA: global source byte cursor (never per-page reset), separate PRP cursors, non-uniform multi-page continuity test. See `references/bus/nvme-guidelines.md` section 14. Full systems (>3 sub-modules): system contract + decomposition + integration invariants before RTL.
 
 ### 1.7 SPEC Consistency Gate (mandatory for L1/L2, before Step 2)
 
@@ -294,7 +294,10 @@ verifies contract readiness: required docs exist and are non-empty. For L2:
 `docs/timing-contract.md`, `docs/verification_matrix.md`. If FAIL: fill the
 missing contracts, re-run. Do not write RTL until this gate passes.
 
-### 7. Generate RTL
+### 7. Generate RTL (RTL code only, no testbench)
+
+**This step produces RTL code only. Do NOT generate testbench files here.**
+TB generation belongs to Step 9A (per-module) and Step 9B (integration).
 
 **Before writing ANY code, read `references/rtl/rtl-coding-standards.md` and `references/rtl/rtl-structural-purity.md`.** This is a hard requirement (not optional). Pay particular attention to M-graded rules: C3 (`default_nettype none`), C5/C6/C7 (FSM/datapath separation), C9/C10 (two-process FSM), C14 (control symmetry), C16 (explicit bit widths), C19 (explicit else), C20 (group registers), and RSP1-RSP7 (structural purity).
 
@@ -314,7 +317,7 @@ for f in <module1>.v <module2>.v ...; do
 done
 ```
 
-A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to Step 8.
+A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to Step 7b.
 
 **Module boundary discipline (PH1):** Prefer registered outputs at module boundaries. Combinational outputs cause glitches during FSM transitions and complicate TB sampling. See `references/advanced/physical-awareness-guidelines.md` PH1.
 
@@ -327,16 +330,17 @@ A module that fails standalone compilation has undeclared dependencies, missing 
 
 Fix hazards per `nba-ordering-guide.md` Layer 3 before writing another line.
 
-### 7b. RTL phase exit (mandatory for L1/L2)
+### 7b. RTL phase exit -- post-rtl gate (mandatory for L1/L2)
 
-Normal path: `python scripts/workflow_gate.py --phase post-rtl <project_dir>`.
-This wrapper aggregates RTL structural checks and compile-log evidence and writes the post-rtl PASS stamp. Optional debug tools such as `pre_sim_check.sh`, `rtl_style_check.py`, `compile_log_gate.py`, yosys, and standalone `iverilog` may be run while fixing failures, but they do not replace the phase stamp.
+Ran by: `python scripts/workflow_gate.py --phase post-rtl <project_dir>`. Validates RTL-only: runs `rtl_style_check.py` on `rtl/*.v` files (NOT tb/ or sim/), checks an RTL-only compile log with `# COMPILE_RTL_ONLY` or `# COMPILE_STANDALONE` plus explicit compile-success evidence, and stamps post-rtl PASS. Integration compile logs (with TB) are rejected. Before the first post-rtl PASS, any TB or non-compile simulation artifact is a phase-order violation. After a prior post-rtl PASS, re-running post-rtl is allowed for RTL debug and still checks RTL-only evidence; later phases use snapshots to detect stale downstream evidence.
+
+Optional debug tools (`pre_sim_check.sh`, direct `rtl_style_check.py`, direct `compile_log_gate.py`, yosys, standalone `iverilog`) may be used while fixing failures but do not replace the phase stamp.
 
 ### 7b-EXIT. RTL Phase Gate (stop-go before self-review)
 
-Do NOT proceed to Step 8 until `scripts/workflow_gate.py --phase post-rtl <project_dir>` exits 0. Inside the wrapper: `rtl_style_check.py` must have no E-level findings, compile evidence must be a real `.log` (not a `.vvp` binary), and L2 RSP1-RSP4 remain hard gates. Simulation PASS is not a structural waiver.
+Do NOT proceed to Step 8 until `workflow_gate.py --phase post-rtl` exits 0. Inside: `rtl_style_check.py` on rtl/*.v only (no E-level), RTL-only compile log with `# COMPILE_RTL_ONLY`, L2 RSP1-RSP4 hard gates. Compile logs with TB files violate the RTL-only boundary.
 
-If any FAIL: fix RTL, re-run Step 7b, re-check this gate. Only clean exit proceeds to Step 8.
+If any FAIL: fix RTL, re-run Step 7 standalone compile, re-check this gate. Only clean exit proceeds to Step 8.
 
 ### 8. RTL self-review against skill constraints
 
@@ -408,9 +412,9 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 | **3** | **Constrain** | FSM guard (`!busy`, gating), enable qualification |
 | **4** | **Add** | Hardware as last resort -- document why 1-3 don't work |
 
-### 8b. Functional verification plan (mandatory)
+### 8b. Functional verification plan (plan only, no TB generation)
 
-**Steps 8 and 8c do NOT guarantee functional correctness.** Before generating TB (Step 9), produce the verification PLAN. Step 8c findings should inform test priorities.
+**This step produces the verification PLAN, not TB files.** TB is written in Step 9A (per-module) and Step 9B (integration). Steps 8 and 8c do NOT guarantee functional correctness. Produce the verification PLAN here -- Step 8c findings should inform test priorities.
 
 **Golden reference strategy** (see `references/verification/golden-reference-guide.md`): Computation -> known I/O pairs. Algorithm -> software reference model. Register block -> write-readback. Data movement -> end-to-end scoreboard. Control -> invariant checking. Pipeline -> latency verification.
 
@@ -427,32 +431,27 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 - Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
 - Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
 
-### 9A. Per-module verification (mandatory for L2, skip for L0/L1)
+### 9A. Per-module verification -- write TB + run sim (mandatory for L2, skip for L0/L1)
 
-L2 subsystems MUST verify each submodule independently before integration.
-Per-module bugs caught here are cheap; the same bugs at integration are expensive.
+L2 subsystems MUST verify each submodule independently before integration. **This step includes writing per-module TB files and running per-module simulation.**
 
 For each RTL submodule (not top/wrapper):
-1. Write a focused TB covering reset, normal operation, boundary, and backpressure.
-2. Run `scripts/run_sim_guarded.py` on the per-module TB.
-3. Run `scripts/sim_log_gate.py` on the per-module sim log.
-4. Run `scripts/rtl_style_check.py` on both the RTL and TB files.
-5. Record evidence in `docs/module_verification_matrix.md` and `docs/dev_log.md`.
+1. Write a focused TB (`tb/tb_<module>.v`) covering reset, normal operation, boundary, backpressure.
+2. Compile with `# COMPILE_STANDALONE` marker in the log.
+3. Run `scripts/run_sim_guarded.py` on the per-module TB.
+4. Run `scripts/sim_log_gate.py` on the per-module sim log.
+5. Run `scripts/rtl_style_check.py` on both RTL and TB files.
+6. Record evidence in `docs/module_verification_matrix.md` and `docs/dev_log.md`.
 
 Only after ALL sub-modules pass, proceed to the pre-integration gate.
 
 ### 9A-EXIT. Pre-integration Phase Gate (L2 stop-go before integration TB)
 
-Do NOT write or run integration TB until `python scripts/workflow_gate.py --phase pre-integration <project_dir>` exits 0. This gate requires:
-- `docs/module_verification_matrix.md` exists and covers every non-top sub-module
-- Each sub-module has PASS evidence or Accepted Limitation waiver
-- No integration TB/sim artifacts exist before per-module evidence
+Do NOT write or run integration TB until `workflow_gate.py --phase pre-integration <project_dir>` exits 0. Requires: `docs/module_verification_matrix.md` covers every non-top sub-module with PASS evidence or Accepted Limitation; no integration TB/sim artifacts before per-module evidence. If FAIL: complete missing per-module verification, re-run.
 
-If FAIL: complete missing per-module verification, re-run this gate.
+### 9B. Integration verification -- write integration TB + run sim
 
-### 9B. Integration verification
-
-Only after pre-integration gate passes, write and run integration TB.
+Only after pre-integration gate (9A-EXIT) passes. **Includes writing integration testbench and running integration simulation.**
 
 **1. Generate testbench and assertions.** Provide: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI: use `references/verification/axi-verification.md`. Before writing TB: read `references/verification/icarus-common-pitfalls.md` (15 Icarus-specific pitfalls) and use `references/verification/tb-examples.md` standard skeleton. TB must follow output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`.
 
@@ -468,19 +467,19 @@ Only after pre-integration gate passes, write and run integration TB.
 
 ### 9-EXIT. Simulation Phase Gate (stop-go before finalization)
 
-Do NOT proceed to Step 10 until `scripts/workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside this phase wrapper: actual simulation logs must pass `sim_log_gate.py`, and L2 pre-integration evidence is re-confirmed so integration simulation cannot become the first place where missing per-module verification is discovered. Final-delivery evidence such as contract/test matrix cross-references, scoreboard substance, delegation provenance, and residual-risk classification is checked in Step 10 by the final gate.
+Do NOT proceed to Step 10 until `workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside: sim logs pass `sim_log_gate.py`; L2 pre-integration evidence re-confirmed. Final-delivery checks (contract/test matrix, scoreboard substance, delegation provenance, residual-risk) run in Step 10.
 
-If any FAIL: fix, re-run Steps 7b-9, re-check this gate. Only clean exit proceeds to Step 10.
+If any FAIL: fix, re-run Steps 7b-9, re-check this gate.
 
 ### 10. Finalize (delivery gate)
 
-Required command: `python scripts/workflow_gate.py --phase final <project_dir>`. This requires the full predecessor chain (state lock). The underlying `final_delivery_gate.py` is a direct-call safety net: it also checks the workflow state chain, then orchestrates `project_artifact_gate` + `pre_integration_gate` + `rtl_style_check` + `compile_log_gate` + `sim_log_gate` + runtime guard. Exit 0 only when ALL pass.
+Required: `python scripts/workflow_gate.py --phase final <project_dir>`. Requires full predecessor chain (state lock). Underlying `final_delivery_gate.py` is a direct-call safety net: checks workflow state chain, orchestrates `project_artifact_gate` + `pre_integration_gate` + `rtl_style_check` + `compile_log_gate` + `sim_log_gate` + runtime guard. Exit 0 only when ALL pass.
 
-If this gate fails, `docs/dev_log.md` must not say `Status: PASS`. Allowed statuses: `BLOCKED`, `FAIL`, or `BLOCKED_BY_GATE_DISPUTE` with evidence.
+If this gate fails, `docs/dev_log.md` must not say `Status: PASS`. Allowed: `BLOCKED`, `FAIL`, `BLOCKED_BY_GATE_DISPUTE` with evidence.
 
-Additional checks: `project_artifact_gate` (delegation provenance, verification matrix, claim ledger, storage mover evidence), `project_preflight_gate` (skeleton), L2 delegation role reports (six provenance fields), no runaway VCD (>50MB), standard `.log` artifacts from `run_sim_guarded.py`. State maturity and residual risks via `references/verification/engineering-review-checklist.md`.
+Additional checks: delegation provenance, verification matrix, claim ledger, storage mover evidence, skeleton, L2 role reports, no runaway VCD (>50MB), standard `.log` from `run_sim_guarded.py`. State maturity and residual risks via `engineering-review-checklist.md`.
 
-Protocol-specific claims must remain labeled Normative / Project policy / Conservative pattern / Heuristic / Unverified. Hard gates enforce generic RTL/verif/delivery evidence, not project-specific microarchitecture.
+Protocol claims must remain labeled Normative / Project policy / Conservative pattern / Heuristic / Unverified. Hard gates enforce generic RTL/verif/delivery evidence.
 
 ## Debugging rules
 

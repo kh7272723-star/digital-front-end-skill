@@ -45,11 +45,12 @@
 5. 编写周期迹线（沿前状态、组合条件、有效沿更新、下一可见状态）
 5a. 原则检查 — P1 时序合同 + P2 FSM 安全（线性 FSM 用 LITE 模式）
 6. 选择设计模式（FSM、FIFO、流水线、仲裁器等）
-7. 生成可综合 RTL（Verilog 优先、保守默认值、bug pattern 扫描、pitfall 感知）
+7. 只生成可综合 RTL（不写 TB），并通过带 RTL-only compile evidence 的 post-rtl 门禁
 8. 结构自审（13 大类 79 项检查）
-8b. 功能验证（强制 — Golden Reference 方法论，6 种策略）
 8c. 原则检查 — P3 已知值 + P5a 输出纪律（P5b 物理实现仅 L2）
-9. 仿真闭环 + 原则驱动 debug（先读 icarus-common-pitfalls.md，再 lint → 编译 → 仿真 → Phase 4 原则审查 → 修复 → 重跑）
+8b. 功能验证计划（Golden Reference、scoreboard、false-pass audit；只写计划，不写 TB）
+9A. L2 逐模块 TB + guarded simulation + sim_log_gate + module verification matrix
+9B. pre-integration 通过后，再写集成 TB 并进行集成仿真与原则驱动 debug
 10. 综合反馈（Yosys：latch/loop/关键路径/cell count 检查）
 11. 审查迭代
 12. 验证时序对齐

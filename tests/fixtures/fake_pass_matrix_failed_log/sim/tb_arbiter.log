@@ -1,0 +1,6 @@
+RESET_RELEASED
+TEST_START T1: arbiter_reset
+TEST_FAIL T1: arbiter_reset
+FATAL: assertion failed at line 42
+ALL_TESTS_FAIL
+SIMULATION_DONE

@@ -1,5 +1,92 @@
 # Skill 迭代日志
 
+## 2026-06-06 - Regex Audit: instance matching 精准化 + CLAUDE.md 瘦身
+
+### 背景
+
+Codex 对上一轮 workflow gate hardening 继续审计，发现部分正则匹配仍有误判风险：
+
+1. `pre_integration_gate.py` 用通用 `word #(...) word (` 判断参数化实例，可能把参数化叶子模块 TB 误判为 integration TB。
+2. top/wrapper 识别只支持普通实例 `module inst (...)`，对 RTL 内部参数化实例支持不一致。
+3. `COMPILE_RTL_ONLY` marker 使用子串匹配，`NO_COMPILE_RTL_ONLY` 这类伪 marker 可能误过。
+4. `Accepted Limitation` 只要出现短语就算 waiver，没有真正要求同一行给出 reason。
+5. `CLAUDE.md` 积累了大量版本迭代记忆，和 `SKILL_CHANGELOG.md` 重复，并可能污染 skill 调用上下文。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| 实例识别 helper | `scripts/pre_integration_gate.py` | 新增 `_strip_verilog_comments()`、`_instantiates_module()`、`_find_instantiated_modules()`，统一支持普通实例与 `#(...)` 参数化实例，并限定为已知 RTL module 名称 |
+| integration TB 判定收窄 | `scripts/pre_integration_gate.py` | 移除 “module 名含 dma 即 integration” 的宽泛启发式；单模块 TB 只有实例化已知 top/wrapper 时才算 integration |
+| top/wrapper 参数化支持 | `scripts/pre_integration_gate.py` | `_find_top_modules()` 改用统一实例识别 helper，RTL 内部参数化子模块实例也能参与 top 判定 |
+| artifact gate top 识别同步 | `scripts/project_artifact_gate.py` | module evidence 检查同样跳过 top/wrapper，避免 final gate 把 `dma_top` 误判为 leaf module |
+| waiver reason 收紧 | `scripts/pre_integration_gate.py` | `Accepted Limitation` 必须在同一行带 reason 文本；裸短语不再自动通过 |
+| compile marker 行级匹配 | `scripts/workflow_gate.py` | marker 改为行级 `#? COMPILE_RTL_ONLY/COMPILE_STANDALONE`，不再接受 `NO_COMPILE_RTL_ONLY` 子串 |
+| L2 post-sim predecessor 简化 | `scripts/workflow_gate.py` | L2 的 `post-sim` 直接要求 `pre-integration` PASS，不再依赖文件名正则判断 integration artifact |
+| 回归补充 | `tests/run_workflow_gate_regression.py` | 新增 `invalid_marker_rejected`、`parameterized_leaf_tb_not_integration`、`l2_post_sim_requires_pre_integration` 三个 custom regression |
+| Claude 记忆瘦身 | `CLAUDE.md` | 仅保留当前不变量、开发规则和引用指针；详细历史保留在 changelog |
+
+### 验收
+
+| 命令 | 结果 |
+|------|------|
+| `python tests/run_workflow_gate_regression.py` | 10/10 PASS |
+| `python scripts/skill_static_check.py --root .` | PASS |
+| `python -m py_compile` changed Python scripts | PASS |
+
+---
+
+## 2026-06-06 - Workflow Gate Hardening: phase-order lock + compile evidence binding + regression runner
+
+### 背景
+
+Codex 审查三个存储项目后发现 agent 仍能绕过 workflow gate：
+1. 首次 post-rtl 之前已经出现 TB 或仿真产物时，旧脚本没有形成硬阻断
+2. post-rtl compile log 证据太弱，只有非空文本也可能被接受
+3. pre-integration 仍可能接受 matrix 里的文字 PASS，而不绑定真实 sim log
+4. workflow_state 只记录 phase PASS，不记录 artifact snapshot，后续修改不会让旧 PASS 失效
+5. fixture 缺少自动化 regression runner，无法稳定防回归
+
+### P0 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| post-rtl RTL-only boundary | `scripts/workflow_gate.py` `gate_post_rtl()` | 首次 post-rtl PASS 前若发现 `tb/*.v` 或非 compile sim artifact，直接 FAIL；已有 post-rtl PASS 后允许为 RTL debug 重跑，只检查 `rtl/*.v` 与 RTL-only compile evidence |
+| compile log marker 严格化 | `scripts/workflow_gate.py` `_check_compile_log_markers()` | post-rtl compile log 必须同时包含 `# COMPILE_RTL_ONLY`/`# COMPILE_STANDALONE` 与明确 success evidence；无 marker 或无 success 均 FAIL；移除目录启发式 fallback |
+| workflow snapshot freshness | `scripts/workflow_gate.py` `compute_phase_snapshot()` | phase PASS 记录 `sha256`/`mtime`/`size`；后续 phase 检查 predecessor snapshot，RTL/TB/log/matrix 修改会触发 stale |
+| pre-integration log binding | `scripts/pre_integration_gate.py` | matrix PASS 必须绑定真实 sim log，并用 `sim_log_gate.py` 语义验证；参数化 top 实例 `module #(...) inst (...)` 可识别为 integration TB |
+| final consistency | `scripts/final_delivery_gate.py`, `scripts/project_artifact_gate.py` | final gate 拒绝缺 phase、phase FAIL、stale predecessor，以及 dev_log 口头 PASS 与 workflow_state 不一致 |
+| regression runner | `tests/run_workflow_gate_regression.py` | 7 个 case：premature_tb、parameterized_integration_tb、fake_pass_matrix_failed_log、clean_l2、weak_compile_log、post_rtl_rerun_after_tb、success_no_marker_rejected |
+
+### 设计边界
+
+- 不改变 phase 名称
+- `--force` 在 regression runner 中使用是合理的：测试的是单个 gate 逻辑，不是 predecessor chain（chain 由集成测试覆盖）
+- compile log 检查不增加新依赖，但明确禁止 success-only fallback
+- post-rtl 后出现 per-module TB 是正常进展，不应使 post-rtl stale；只有 RTL 文件变化会 stale post-rtl snapshot
+
+### 验收
+
+| 命令 | 结果 |
+|------|------|
+| `python -m py_compile scripts/workflow_gate.py` | PASS |
+| `python tests/run_workflow_gate_regression.py` | 7/7 PASS |
+| `python scripts/skill_static_check.py --root .` | PASS |
+| `python scripts/pre_integration_gate.py "D:\skill管理\ic-design-skill\Descriptor-Based AXI DMA Mover"` | FAIL (expected: 7 sub-modules claim PASS without sim log references — gate correctly detects missing per-module evidence) |
+| `python scripts/final_delivery_gate.py "D:\skill管理\ic-design-skill\Descriptor-Based AXI DMA Mover"` | FAIL (expected: workflow_state missing post-sim PASS, dev_log PASS inconsistent, pre-integration evidence incomplete) |
+
+### 文件变更
+
+- `scripts/workflow_gate.py`：RTL-only post-rtl, compile marker+success hard gate, sha256/mtime/size snapshots
+- `scripts/pre_integration_gate.py`：parameterized top TB detection, matrix PASS -> sim log binding
+- `scripts/final_delivery_gate.py` / `scripts/project_artifact_gate.py`：workflow_state consistency and stale predecessor enforcement
+- `tests/fixtures/weak_compile_log_no_marker/`：新 fixture（5 文件）
+- `tests/run_workflow_gate_regression.py`：新 regression runner
+- `SKILL_CHANGELOG.md`：本条记录
+- `CLAUDE.md`：开发记忆
+
+---
+
 ## 2026-06-05 - Workflow Phase Restructuring: 工作流阶段重排 + pre-integration 严格化
 
 ### 背景

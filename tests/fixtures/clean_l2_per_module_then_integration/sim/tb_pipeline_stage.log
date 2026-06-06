@@ -1,0 +1,8 @@
+RESET_RELEASED
+TEST_START T1: pipeline_reset
+TEST_PASS T1: pipeline_reset
+TEST_START T2: pipeline_flow
+PASS: data passthrough verified
+TEST_PASS T2: pipeline_flow
+ALL_TESTS_PASS
+SIMULATION_DONE

@@ -87,8 +87,40 @@ def _required_workflow_phases(project_dir: str, level: str) -> list[str]:
     return phases
 
 
+def _compute_file_info(filepath: str) -> dict | None:
+    """Return {'mtime': float, 'size': int} for a file, or None."""
+    try:
+        st = os.stat(filepath)
+        return {"mtime": st.st_mtime, "size": st.st_size}
+    except OSError:
+        return None
+
+
+def _check_phase_snapshot_fresh(project_dir: str, phase: str,
+                                 entry: dict) -> list[str]:
+    """Check if a phase's stored snapshot matches the current filesystem.
+
+    Returns list of stale-file descriptions, empty if fresh.
+    """
+    stored = entry.get('snapshot')
+    if stored is None:
+        return []  # No snapshot stored (pre-hardening stamp)
+
+    stale = []
+    for relpath, stored_info in stored.items():
+        fpath = os.path.join(project_dir, relpath)
+        current = _compute_file_info(fpath)
+        if current is None:
+            stale.append(f"{relpath} (deleted)")
+            continue
+        if (stored_info.get('mtime') != current.get('mtime') or
+                stored_info.get('size') != current.get('size')):
+            stale.append(f"{relpath} (modified)")
+    return stale
+
+
 def step0_workflow_state_gate(project_dir: str) -> list[str]:
-    """Reject final PASS if phase-local workflow gates were skipped."""
+    """Reject final PASS if phase-local workflow gates were skipped or stale."""
     findings: list[str] = []
     state_path = _workflow_state_path(project_dir)
     state = _load_workflow_state(project_dir)
@@ -114,6 +146,10 @@ def step0_workflow_state_gate(project_dir: str) -> list[str]:
 
     phases = state.get('phases', {})
     required = _required_workflow_phases(project_dir, level)
+    any_fail = False
+    any_stale = False
+    earliest_stale = None
+
     for phase in required:
         entry = phases.get(phase)
         if not entry or entry.get('status') != 'PASS':
@@ -123,7 +159,34 @@ def step0_workflow_state_gate(project_dir: str) -> list[str]:
             findings.append(
                 "  workflow_state: NEXT_REQUIRED_COMMAND: "
                 f"python scripts/workflow_gate.py --phase {phase} {project_dir}")
+            any_fail = True
             break
+        if entry.get('status') == 'FAIL':
+            any_fail = True
+
+        # Freshness check: are the snapshotted files still current?
+        stale_files = _check_phase_snapshot_fresh(project_dir, phase, entry)
+        if stale_files:
+            any_stale = True
+            if earliest_stale is None:
+                earliest_stale = phase
+            findings.append(
+                f"WORKFLOW_STATE_GATE: phase '{phase}' snapshot stale "
+                f"({len(stale_files)} file(s) changed: "
+                f"{', '.join(stale_files[:3])}"
+                f"{'...' if len(stale_files) > 3 else ''})")
+
+    if any_stale and earliest_stale:
+        findings.append(
+            "  workflow_state: NEXT_REQUIRED_COMMAND: "
+            f"python scripts/workflow_gate.py --phase {earliest_stale} {project_dir}")
+
+    # If predecessor is missing (not stale), that's the actionable error.
+    # Stale findings are additional warnings but shouldn't override the
+    # missing-predecessor directive.
+    if any_fail:
+        # Keep only the FAIL findings (drop stale for now)
+        findings = [f for f in findings if 'snapshot stale' not in f]
 
     return findings
 

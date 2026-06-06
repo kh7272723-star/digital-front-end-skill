@@ -5,7 +5,10 @@ This script does not replace the detailed gates. It gives agents a single
 phase command so failures are caught before the workflow moves on.
 
 State lock: on PASS, writes docs/workflow_state.json under the project dir.
-Later phases require predecessor PASS stamps before they can run.
+Each phase stamp includes an artifact snapshot (sha256 + file mtime + size) so later
+phases can detect stale predecessors. Freshness is checked on entry:
+if a predecessor's snapshot doesn't match the current filesystem, the
+predecessor is stale and must be re-run.
 
 Usage:
     python scripts/workflow_gate.py --phase pre-rtl <project_dir>
@@ -19,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -108,12 +112,160 @@ def has_integration_artifacts(project: Path) -> bool:
         for p in sim_dir.iterdir():
             if p.suffix in (".vvp", ".log") and re.match(r"tb_|top_", p.stem, re.IGNORECASE):
                 return True
+            # Extensionless Icarus outputs
+            if "." not in p.name and re.match(r"tb_|top_", p.name, re.IGNORECASE):
+                return True
     tb_dir = project / "tb"
     if tb_dir.exists():
         for p in tb_dir.iterdir():
             if p.suffix in (".v", ".sv") and re.match(r"tb_.*top|top_", p.stem, re.IGNORECASE):
                 return True
     return False
+
+
+def has_tb_files(project: Path) -> bool:
+    """Check if the project has ANY TB files (per-module or integration)."""
+    tb_dir = project / "tb"
+    if tb_dir.exists():
+        if list(tb_dir.glob("*.v")) or list(tb_dir.glob("*.sv")):
+            return True
+    sim_dir = project / "sim"
+    if sim_dir.exists():
+        if list(sim_dir.glob("tb_*.v")) or list(sim_dir.glob("tb_*.sv")):
+            return True
+    return False
+
+
+def has_sim_artifacts(project: Path) -> bool:
+    """Check if the project has simulation artifacts beyond compile evidence."""
+    sim_dir = project / "sim"
+    if not sim_dir.exists():
+        return False
+    for p in sim_dir.iterdir():
+        if re.search(r"(compile|build|iverilog|vlog|verilator)", p.name, re.IGNORECASE):
+            continue
+        if p.suffix in (".vvp", ".vcd", ".fst"):
+            return True
+        if p.suffix == ".log":
+            return True
+        if "." not in p.name and re.match(r"tb_|top_", p.name, re.IGNORECASE):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+#  Artifact snapshot (freshness)
+# ---------------------------------------------------------------------------
+
+def _compute_file_snapshot(filepath: Path) -> dict | None:
+    """Return {'mtime': float, 'size': int, 'sha256': str} for a file, or None."""
+    try:
+        st = filepath.stat()
+        digest = hashlib.sha256(filepath.read_bytes()).hexdigest()
+        return {"mtime": st.st_mtime, "size": st.st_size, "sha256": digest}
+    except OSError:
+        return None
+
+
+def compute_phase_snapshot(project: Path, phase: str, level: str) -> dict:
+    """Compute artifact snapshot for a phase.
+
+    Returns {relpath: {'mtime': ..., 'size': ...}} for files relevant to
+    this phase. Later phases use this to detect stale predecessors.
+    """
+    snapshot: dict = {}
+
+    if phase == "pre-rtl":
+        # Snapshot contract docs
+        docs_dir = project / "docs"
+        if docs_dir.exists():
+            required = ["timing-contract.md", "verification_matrix.md"]
+            if _is_l2_or_higher(level):
+                required.extend([
+                    "interface-contracts.md",
+                    "contract_implementation_matrix.md",
+                    "protocol_claim_ledger.md",
+                ])
+            for fname in required:
+                fpath = docs_dir / fname
+                info = _compute_file_snapshot(fpath)
+                if info:
+                    snapshot[f"docs/{fname}"] = info
+
+    elif phase == "post-rtl":
+        # Snapshot all RTL files
+        rtl_dir = project / "rtl"
+        if rtl_dir.exists():
+            for verilog_file in sorted(rtl_dir.glob("*.v")):
+                rel = str(verilog_file.relative_to(project)).replace("\\", "/")
+                info = _compute_file_snapshot(verilog_file)
+                if info:
+                    snapshot[rel] = info
+            for sv_file in sorted(rtl_dir.glob("*.sv")):
+                rel = str(sv_file.relative_to(project)).replace("\\", "/")
+                info = _compute_file_snapshot(sv_file)
+                if info:
+                    snapshot[rel] = info
+
+    elif phase == "pre-integration":
+        # Snapshot RTL files + module verification matrix + per-module TB/logs
+        rtl_dir = project / "rtl"
+        if rtl_dir.exists():
+            for f in sorted(rtl_dir.glob("*.v")):
+                rel = str(f.relative_to(project)).replace("\\", "/")
+                info = _compute_file_snapshot(f)
+                if info:
+                    snapshot[rel] = info
+        matrix = project / "docs" / "module_verification_matrix.md"
+        info = _compute_file_snapshot(matrix)
+        if info:
+            snapshot["docs/module_verification_matrix.md"] = info
+        # Per-module TB and sim logs
+        for tb_dir_name in ("tb", "sim"):
+            d = project / tb_dir_name
+            if d.exists():
+                for f in sorted(d.iterdir()):
+                    if f.suffix in (".v", ".sv", ".log"):
+                        rel = str(f.relative_to(project)).replace("\\", "/")
+                        info = _compute_file_snapshot(f)
+                        if info:
+                            snapshot[rel] = info
+
+    elif phase == "post-sim":
+        # Snapshot all sim logs
+        sim_dir = project / "sim"
+        if sim_dir.exists():
+            for f in sorted(sim_dir.glob("*.log")):
+                rel = str(f.relative_to(project)).replace("\\", "/")
+                info = _compute_file_snapshot(f)
+                if info:
+                    snapshot[rel] = info
+        # Also snapshot module matrix (may have been updated)
+        matrix = project / "docs" / "module_verification_matrix.md"
+        info = _compute_file_snapshot(matrix)
+        if info:
+            snapshot["docs/module_verification_matrix.md"] = info
+
+    return snapshot
+
+
+def snapshots_match(stored: dict, current: dict) -> bool:
+    """Return True if stored snapshot matches current filesystem state.
+
+    Both must have the same keys, and each file's mtime and size must match.
+    Missing files in either direction = mismatch.
+    """
+    if set(stored.keys()) != set(current.keys()):
+        return False
+    for key, stored_info in stored.items():
+        cur_info = current.get(key)
+        if not cur_info:
+            return False
+        if (stored_info.get("mtime") != cur_info.get("mtime") or
+                stored_info.get("size") != cur_info.get("size") or
+                stored_info.get("sha256") != cur_info.get("sha256")):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -144,15 +296,25 @@ def save_state(project: Path, state: dict) -> None:
     path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def stamp_phase(state: dict, phase: str, status: str, evidence: str, cmd: str) -> None:
+def stamp_phase(state: dict, phase: str, status: str, evidence: str, cmd: str,
+                snapshot: dict | None = None) -> None:
     """Write a phase result into the state dict. Only PASS is authoritative."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    state.setdefault("phases", {})[phase] = {
+    entry = {
         "status": status,
         "timestamp": ts,
         "command": cmd,
         "evidence": evidence[:200],
     }
+    if snapshot is not None:
+        entry["snapshot"] = snapshot
+    state.setdefault("phases", {})[phase] = entry
+
+
+def get_phase_snapshot(state: dict, phase: str) -> dict | None:
+    """Return the stored snapshot for a phase, or None."""
+    entry = state.get("phases", {}).get(phase, {})
+    return entry.get("snapshot")
 
 
 # ---------------------------------------------------------------------------
@@ -174,16 +336,11 @@ def filter_required_predecessors(phase: str, level: str, project: Path) -> list[
     result = []
     for pred in all_req:
         if pred == "pre-rtl":
-            # L0: pre-rtl is recommended but not enforced
             if level == "L0":
                 continue
             result.append(pred)
         elif pred == "pre-integration":
-            # L2 final delivery must prove the pre-integration lock ran.
-            # Post-sim only needs it once integration artifacts exist.
-            if phase == "final" and _is_l2_or_higher(level):
-                result.append(pred)
-            elif _is_l2_or_higher(level) and has_integration_artifacts(project):
+            if phase in ("post-sim", "final") and _is_l2_or_higher(level):
                 result.append(pred)
         else:
             result.append(pred)
@@ -202,6 +359,39 @@ def check_predecessors(state: dict, phase: str, level: str, project: Path) -> li
     return missing
 
 
+def check_predecessor_freshness(state: dict, phase: str, level: str,
+                                 project: Path) -> list[str]:
+    """Check that all required predecessors have fresh (non-stale) snapshots.
+
+    Returns list of stale predecessor phase names. Empty = all fresh.
+    Each stale entry is formatted as "phase (reason)".
+
+    In addition to generic snapshot comparison, phase-specific checks detect
+    semantic staleness that snapshots alone cannot capture (e.g. TB files
+    appearing after a post-rtl PASS that only snapshotted rtl/).
+    """
+    required = filter_required_predecessors(phase, level, project)
+    phases_done = state.get("phases", {})
+    stale = []
+
+    for pred in required:
+        entry = phases_done.get(pred)
+        if not entry or entry.get("status") != "PASS":
+            continue  # Missing is handled by check_predecessors()
+        stored = entry.get("snapshot")
+        if stored is None:
+            # Predecessor has no snapshot (stamped before this hardening).
+            # Treat as fresh unless evidence of staleness from other signals.
+            pass
+        else:
+            current = compute_phase_snapshot(project, pred, state.get("level", "L1"))
+            if not snapshots_match(stored, current):
+                stale.append(f"{pred} (snapshot stale: files changed since stamp)")
+                continue
+
+    return stale
+
+
 def next_required_command(missing: list[str], project_dir: str) -> str:
     """Return the NEXT_REQUIRED_COMMAND line for the earliest missing phase."""
     earliest = missing[0]
@@ -215,18 +405,33 @@ def next_required_command(missing: list[str], project_dir: str) -> str:
 #  Discovery helpers
 # ---------------------------------------------------------------------------
 
-def discover_verilog(project: Path) -> list[str]:
+def discover_rtl_verilog(project: Path) -> list[str]:
+    """Discover only RTL Verilog files (not TB)."""
     files: list[Path] = []
-    for subdir in ("rtl", "tb"):
-        root = project / subdir
-        if root.exists():
-            files.extend(sorted(root.glob("*.v")))
-            files.extend(sorted(root.glob("*.sv")))
+    rtl_dir = project / "rtl"
+    if rtl_dir.exists():
+        files.extend(sorted(rtl_dir.glob("*.v")))
+        files.extend(sorted(rtl_dir.glob("*.sv")))
+    return [str(p) for p in files]
+
+
+def discover_tb_verilog(project: Path) -> list[str]:
+    """Discover TB Verilog files (canonical tb/ and non-canonical sim/tb_*)."""
+    files: list[Path] = []
+    tb_dir = project / "tb"
+    if tb_dir.exists():
+        files.extend(sorted(tb_dir.glob("*.v")))
+        files.extend(sorted(tb_dir.glob("*.sv")))
     sim_dir = project / "sim"
     if sim_dir.exists():
         files.extend(sorted(sim_dir.glob("tb_*.v")))
         files.extend(sorted(sim_dir.glob("tb_*.sv")))
     return [str(p) for p in files]
+
+
+def discover_all_verilog(project: Path) -> list[str]:
+    """Discover all Verilog files (RTL + TB). Used by post-sim and final."""
+    return discover_rtl_verilog(project) + discover_tb_verilog(project)
 
 
 def discover_compile_logs(project: Path) -> list[str]:
@@ -252,17 +457,57 @@ def discover_sim_logs(project: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+#  Compile log marker check
+# ---------------------------------------------------------------------------
+
+COMPILE_RTL_ONLY_MARKER = "COMPILE_RTL_ONLY"
+COMPILE_STANDALONE_MARKER = "COMPILE_STANDALONE"
+
+# Compile success patterns. A post-rtl compile log must include one of these
+# AND an explicit RTL-only marker; success text alone is not phase evidence.
+COMPILE_SUCCESS_PATTERNS = [
+    r'\bCOMPILE_PASS\b',
+    r'\bCOMPILE_SUCCESS\b',
+    r'\bALL_COMPILE_PASS\b',
+    r'\bcompilation\s+successful\b',
+    r'\bcompiled\s+successfully\b',
+    r'\bno\s+errors?\b',
+    r'\b0\s+errors?\b',
+]
+
+
+def _compile_log_has_rtl_marker(log_path: str) -> bool:
+    """Check if a compile log contains a RTL-only compile marker."""
+    try:
+        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+        return bool(re.search(
+            r'(?im)^\s*#?\s*(COMPILE_RTL_ONLY|COMPILE_STANDALONE)\b',
+            text))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _compile_log_has_success_evidence(log_path: str) -> bool:
+    """Check if a compile log contains compile success evidence patterns.
+
+    Does NOT use directory-based heuristics (no TB filename scanning).
+    """
+    try:
+        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except (OSError, UnicodeDecodeError):
+        return False
+    for pattern in COMPILE_SUCCESS_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 #  Per-phase gate logic
 # ---------------------------------------------------------------------------
 
 def _check_contract_readiness(project: Path, level: str) -> list[str]:
-    """Verify required contracts/plans exist and are non-empty before RTL.
-
-    For L0: only dev_log.md required (handled by preflight).
-    For L1: timing-contract.md, verification_matrix.md.
-    For L2: interface-contracts.md, timing-contract.md, contract_implementation_matrix.md,
-            protocol_claim_ledger.md, verification_matrix.md.
-    """
+    """Verify required contracts/plans exist and are non-empty before RTL."""
     if level == 'L0':
         return []
 
@@ -287,6 +532,40 @@ def _check_contract_readiness(project: Path, level: str) -> list[str]:
     return findings
 
 
+def _check_compile_log_markers(project: Path, compile_logs: list[str],
+                                level: str) -> list[str]:
+    """Check that compile logs for post-rtl have hard RTL-only evidence.
+
+    Each compile log used in post-rtl must have:
+    - Explicit COMPILE_RTL_ONLY or COMPILE_STANDALONE marker, AND
+    - Compile success evidence.
+
+    Logs missing either part are rejected.
+    Directory-based heuristics (TB filename scanning) are NOT used --
+    the log content must speak for itself.
+    """
+    findings = []
+    for log in compile_logs:
+        log_name = Path(log).name
+        has_marker = _compile_log_has_rtl_marker(log)
+        has_success = _compile_log_has_success_evidence(log)
+
+        if not has_marker:
+            findings.append(
+                f"compile log '{log_name}' lacks RTL-only marker "
+                f"('# COMPILE_RTL_ONLY' or '# COMPILE_STANDALONE'). "
+                f"post-rtl requires explicit RTL-only compile evidence. "
+                f"Add the marker before the compile command/output.")
+
+        if not has_success:
+            findings.append(
+                f"compile log '{log_name}' lacks compile success evidence "
+                f"(COMPILE_PASS/COMPILE_SUCCESS/ALL_COMPILE_PASS/"
+                f"'compilation successful'/'compiled successfully'/"
+                f"'no errors'/'0 errors').")
+    return findings
+
+
 def gate_pre_rtl(project: Path) -> list[str]:
     findings: list[str] = []
 
@@ -306,24 +585,50 @@ def gate_pre_rtl(project: Path) -> list[str]:
 
 def gate_post_rtl(project: Path) -> list[str]:
     findings: list[str] = []
-    files = discover_verilog(project)
-    if not files:
-        return ["no RTL/TB Verilog files found for post-rtl gate"]
-
     level = detect_level(project)
-    rc, out = run_script("rtl_style_check.py", ["--level", level] + files)
+
+    # 0. First post-rtl PASS must be before any TB/sim artifacts. If post-rtl
+    #    already passed, allow re-run for RTL debug even when old TB/logs exist.
+    state = load_state(project)
+    already_post_rtl_passed = (
+        state.get("phases", {}).get("post-rtl", {}).get("status") == "PASS")
+    if not already_post_rtl_passed:
+        if has_tb_files(project) or has_sim_artifacts(project):
+            findings.append(
+                "premature TB/sim artifacts found before first post-rtl PASS. "
+                "Step 7 is RTL-only; do not create tb/*.v or simulation "
+                "artifacts until post-rtl passes and Step 9A/9B begins.")
+            return findings
+
+    # 1. Discover RTL files ONLY (no TB)
+    rtl_files = discover_rtl_verilog(project)
+    if not rtl_files:
+        return ["no RTL Verilog files found under rtl/ for post-rtl gate"]
+
+    # 2. RTL style check (RTL files only)
+    rc, out = run_script("rtl_style_check.py", ["--level", level] + rtl_files)
     print_block("rtl_style_check", rc, out)
     if "[E]" in out:
         findings.append("rtl_style_check has E-level findings")
 
+    # 3. Compile log evidence (must be RTL-only)
     compile_logs = discover_compile_logs(project)
     if not compile_logs:
-        findings.append("no compile log found under sim/ for post-rtl gate")
-    for log in compile_logs:
-        rc, out = run_script("compile_log_gate.py", [log])
-        print_block(f"compile_log_gate {log}", rc, out)
-        if rc != 0:
-            findings.append(f"compile_log_gate failed: {log}")
+        findings.append(
+            "no compile log found under sim/ for post-rtl gate. "
+            "Run 'iverilog -g2012 -o /dev/null rtl/*.v > sim/compile_rtl.log 2>&1' "
+            "and ensure the log contains '# COMPILE_RTL_ONLY' marker.")
+    else:
+        # Check for RTL-only markers
+        marker_findings = _check_compile_log_markers(project, compile_logs, level)
+        findings.extend(marker_findings)
+
+        for log in compile_logs:
+            rc, out = run_script("compile_log_gate.py", [log])
+            print_block(f"compile_log_gate {log}", rc, out)
+            if rc != 0:
+                findings.append(f"compile_log_gate failed: {log}")
+
     return findings
 
 
@@ -343,6 +648,15 @@ def gate_post_sim(project: Path) -> list[str]:
         print_block(f"sim_log_gate {log}", rc, out)
         if rc != 0:
             findings.append(f"sim_log_gate failed: {log}")
+
+    # TB style check (completion-only, false-pass, sideband)
+    tb_files = discover_tb_verilog(project)
+    if tb_files:
+        level = detect_level(project)
+        rc, out = run_script("rtl_style_check.py", ["--level", level] + tb_files)
+        print_block("rtl_style_check (TB)", rc, out)
+        if "[E]" in out:
+            findings.append("rtl_style_check on TB has E-level findings")
 
     # L2: re-confirm pre-integration evidence is complete
     level = detect_level(project)
@@ -423,6 +737,15 @@ def main() -> int:
             print(f"- {next_required_command(missing, str(project))}")
             return 1
 
+        # Freshness check: are predecessor snapshots still valid?
+        stale = check_predecessor_freshness(state, phase, level, project)
+        if stale:
+            print("PHASE_WORKFLOW_GATE: FAIL")
+            print(f"- Stale predecessor phase(s): {', '.join(stale)}")
+            stale_phases = [s.split()[0] for s in stale]
+            print(f"- {next_required_command(stale_phases, str(project))}")
+            return 1
+
     # Run the phase gate
     gate_fn = PHASE_GATE_MAP[phase]
     findings = gate_fn(project)
@@ -438,12 +761,15 @@ def main() -> int:
         save_state(project, state)
         return 1
 
-    # PASS: stamp state
-    stamp_phase(state, phase, "PASS", summarize_evidence(phase, findings), cmd_str)
+    # PASS: stamp state with artifact snapshot
+    snapshot = compute_phase_snapshot(project, phase, level)
+    stamp_phase(state, phase, "PASS", summarize_evidence(phase, findings), cmd_str, snapshot)
     save_state(project, state)
 
     print("PHASE_WORKFLOW_GATE: PASS")
     print(f"- State saved to {state_file_path(project)}")
+    if snapshot:
+        print(f"- Snapshot: {len(snapshot)} file(s) recorded")
     return 0
 
 

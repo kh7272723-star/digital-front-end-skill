@@ -7,9 +7,17 @@ per-module evidence exists.
 
 Detection:
   - L2 project with >=2 rtl/*.v modules
-  - Integration TB exists: tb/tb_<top>.v or any TB instantiating top-level module
+  - Integration TB exists: tb/tb_<top>.v, parameterized instantiation of top
+    module, or any TB instantiating top-level module
   - Per-module TB or evidence missing for any leaf module
   - Integration sim artifact (log/vvp) exists without per-module evidence
+
+Hardened:
+  - Detects parameterized instantiation patterns (module #(...) inst (...))
+  - Validates matrix PASS evidence by running sim_log_gate on referenced logs
+  - Tightens waiver: only "Accepted Limitation" with explicit reason counts;
+    bare "waiver"/"trivial" words are no longer sufficient
+  - FAIL logs (ALL_TESTS_FAIL/TEST_FAIL/FATAL/timeout) cannot claim PASS
 
 Usage: python scripts/pre_integration_gate.py <project_dir>
 Exit code: 0 = clean, 1 = violations found, 2 = usage error.
@@ -18,6 +26,7 @@ import argparse
 import io
 import os
 import re
+import subprocess
 import sys
 
 
@@ -30,6 +39,21 @@ except (AttributeError, io.UnsupportedOperation):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
     except AttributeError:
         pass
+
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _run_sim_log_gate(log_path: str) -> tuple[int, str]:
+    """Run sim_log_gate.py on a log file. Returns (rc, output)."""
+    script = os.path.join(SCRIPT_DIR, 'sim_log_gate.py')
+    try:
+        result = subprocess.run(
+            [sys.executable, script, log_path],
+            capture_output=True, text=True, encoding='utf-8', errors='replace')
+        return result.returncode, result.stdout + '\n' + result.stderr
+    except (subprocess.SubprocessError, OSError) as e:
+        return 1, f"Error running sim_log_gate: {e}"
 
 
 def _read_file(path: str) -> str:
@@ -57,7 +81,6 @@ def _detect_level(proj_dir: str) -> str:
         rtl_files = [f for f in os.listdir(rtl_dir) if f.endswith(('.v', '.sv'))]
         if len(rtl_files) >= 3:
             return 'L2'
-        # Check for multi-protocol signals
         all_text = ''
         for fname in rtl_files:
             all_text += _read_file(os.path.join(rtl_dir, fname))
@@ -117,34 +140,78 @@ def _find_tb_files(proj_dir: str) -> list[str]:
     return tbs
 
 
-def _detect_integration_tb(tb_files: list[str], modules: dict[str, str]) -> list[str]:
+def _strip_verilog_comments(text: str) -> str:
+    """Remove Verilog comments before regex-based structure scans."""
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    text = re.sub(r'//.*', '', text)
+    return text
+
+
+def _instantiates_module(text: str, module_name: str) -> bool:
+    """Return True if text instantiates a specific RTL module.
+
+    Supports both:
+      module_name inst_name (...);
+      module_name #(...) inst_name (...);
+
+    The regex is intentionally anchored to a known module name. A generic
+    "word #(...) word (" pattern is too broad and misclassifies parameterized
+    leaf-module TBs as integration TBs.
+    """
+    clean = _strip_verilog_comments(text)
+    pattern = (
+        r'\b' + re.escape(module_name) +
+        r'\s*(?:#\s*\([^;]*?\)\s*)?'
+        r'[A-Za-z_]\w*\s*\('
+    )
+    return bool(re.search(pattern, clean, re.DOTALL))
+
+
+def _find_instantiated_modules(text: str, module_names: set[str]) -> set[str]:
+    """Return known RTL modules instantiated by text."""
+    return {m for m in module_names if _instantiates_module(text, m)}
+
+
+def _detect_integration_tb(tb_files: list[str], modules: dict[str, str],
+                           top_modules: set[str]) -> list[str]:
     """Return list of TB files that appear to be integration TBs.
 
-    An integration TB instantiates multiple RTL leaf modules or a top-level
-    module that itself instantiates other modules.
+    An integration TB:
+    1. Instantiates multiple RTL leaf modules, OR
+    2. Instantiates a top-level module that itself instantiates others, OR
+    3. Instantiates a parameterized top-level RTL module
     """
     integration_tbs = []
     module_names = set(modules.keys())
 
     for tb_path in tb_files:
         text = _read_file(tb_path)
-        # Count distinct module instantiations from RTL modules
-        instantiated = set()
-        for mod_name in module_names:
-            # Match instantiation: module_name instance_name (
-            if re.search(r'\b' + re.escape(mod_name) + r'\s+\w+\s*\(', text):
-                instantiated.add(mod_name)
 
+        instantiated = _find_instantiated_modules(text, module_names)
+
+        # Integration TB signals:
+        # A) Instantiates >= 2 distinct RTL modules
         if len(instantiated) >= 2:
             integration_tbs.append(tb_path)
-        elif len(instantiated) == 1:
-            # Single module instantiation could be per-module TB -- check if
-            # the instantiated module is a top-level that itself is multi-module
-            # (heuristic: if tb file is named tb_<top>.v and <top> is a module)
+            continue
+
+        # B) Single known top/wrapper module instantiation
+        if len(instantiated) == 1:
+            instantiated_mod = next(iter(instantiated))
+            if instantiated_mod in top_modules:
+                integration_tbs.append(tb_path)
+                continue
+
+        # C) Fallback: TB name exactly targets a top/wrapper-like module name.
+        if len(instantiated) == 1 and len(module_names) >= 3:
             tb_basename = os.path.basename(tb_path).replace('.v', '').replace('.sv', '')
             top_candidate = tb_basename.replace('tb_', '', 1)
-            if top_candidate in module_names and len(module_names) >= 3:
+            instantiated_mod = next(iter(instantiated))
+            if (instantiated_mod == top_candidate and
+                    re.search(r'(top|wrapper|integrat|subsystem|system)',
+                              instantiated_mod, re.IGNORECASE)):
                 integration_tbs.append(tb_path)
+                continue
 
     return integration_tbs
 
@@ -160,12 +227,29 @@ def _line_has_pass_marker(line: str) -> bool:
     return has_pass and not has_negative
 
 
-def _line_has_waiver(line: str) -> bool:
-    """Return True for explicit waivers/accepted limitations."""
-    return bool(re.search(
-        r'\b(waiver|waived|accepted\s+limitation|integration[-\s]?only|'
-        r'top[-\s]?level|trivial)\b',
+def _line_has_accepted_limitation(line: str) -> bool:
+    """Return True only for explicit Accepted Limitation with reason.
+
+    Tightened: bare 'waiver', 'trivial', or 'integration-only' are not
+    sufficient by themselves. Must include 'Accepted Limitation' with
+    an explanatory reason in the same context.
+    """
+    accepted = re.search(r'\bAccepted\s+Limitation\b(?P<tail>.*)$',
+                         line, re.IGNORECASE)
+    if accepted:
+        tail = re.sub(r'[`|\s]+', ' ', accepted.group('tail')).strip()
+        if len(tail) >= 8:
+            return True
+
+    # Allow explicit waivers with reason beyond just the word "waiver"
+    has_waiver_with_reason = bool(re.search(
+        r'\b(?:waiver|waived)\b.*\b(?:because|due\s+to|reason|since|'
+        r'residual\s+risk|integration\s*[-]?\s*only)\b',
         line, re.IGNORECASE))
+    if has_waiver_with_reason:
+        return True
+
+    return False
 
 
 def _has_module_evidence(proj_dir: str, module_name: str) -> bool:
@@ -177,7 +261,7 @@ def _has_module_evidence(proj_dir: str, module_name: str) -> bool:
 
     for line in matrix_text.splitlines():
         if re.search(r'\b' + re.escape(module_name) + r'\b', line, re.IGNORECASE):
-            if _line_has_pass_marker(line) or _line_has_waiver(line):
+            if _line_has_pass_marker(line) or _line_has_accepted_limitation(line):
                 return True
 
     return False
@@ -189,9 +273,8 @@ def _find_integration_sim_artifacts(proj_dir: str) -> list[str]:
     Detects:
     - .log and .vvp files (standard)
     - Extensionless Icarus outputs (e.g. sim/tb_nand_page_ctrl) that match
-      TB or top-module naming patterns.  Icarus 'iverilog -o sim/foo ...'
-      produces extensionless executables; these are sim artifacts, not build logs.
-    - Ignores ordinary compile/build logs (compile.log, build.log, etc.)
+      TB or top-module naming patterns.
+    - Ignores ordinary compile/build logs.
     """
     artifacts = []
     sim_dir = os.path.join(proj_dir, 'sim')
@@ -202,15 +285,11 @@ def _find_integration_sim_artifacts(proj_dir: str) -> list[str]:
         fpath = os.path.join(sim_dir, fname)
         if not os.path.isfile(fpath):
             continue
-        # Skip ordinary compile/build logs
         if re.search(r'(compile|build|iverilog|vlog|verilator)', fname, re.IGNORECASE):
             continue
-        # Standard artifacts: .log, .vvp
         if fname.endswith(('.log', '.vvp')):
             artifacts.append(fpath)
             continue
-        # Extensionless Icarus outputs: file has no extension and matches
-        # TB or top-module naming patterns (tb_*, top_*, integration_*)
         if '.' not in fname and re.search(r'^(tb_|top_|integration_)', fname, re.IGNORECASE):
             artifacts.append(fpath)
     return artifacts
@@ -233,7 +312,7 @@ def _find_top_modules(proj_dir: str, modules: dict[str, str]) -> set[str]:
         for other_mod in module_names:
             if other_mod == mod_name:
                 continue
-            if re.search(r'\b' + re.escape(other_mod) + r'\s+\w+\s*\(', text):
+            if _instantiates_module(text, other_mod):
                 instantiated.add(other_mod)
         wrapper_named = bool(re.search(
             r'(top|wrapper|integrat|subsystem|system)', mod_name, re.IGNORECASE))
@@ -249,7 +328,10 @@ def _check_module_verification_matrix(proj_dir: str, modules: dict[str, str],
                                        top_modules: set[str]) -> list[str]:
     """Check that module_verification_matrix.md covers all non-top sub-modules.
 
-    Each sub-module must have explicit PASS/proof evidence or waiver.
+    Each sub-module must have:
+    1. Explicit PASS/proof evidence OR Accepted Limitation waiver
+    2. If PASS is claimed, the referenced sim log must pass sim_log_gate
+    3. FAIL/FATAL/timeout logs cannot be claimed as PASS
     """
     findings = []
     matrix_path = os.path.join(proj_dir, 'docs', 'module_verification_matrix.md')
@@ -265,35 +347,106 @@ def _check_module_verification_matrix(proj_dir: str, modules: dict[str, str],
     # Sub-modules = all modules except top/wrapper
     sub_modules = {m for m in modules if m not in top_modules}
     if not sub_modules:
-        return findings  # Only top modules -- nothing to check
+        return findings
 
-    # Check each sub-module in the matrix
     for mod_name in sorted(sub_modules):
         mod_found = False
         has_pass = False
-        has_waiver = False
+        has_accepted_limitation = False
+        evidence_logs = []
 
         for line in matrix_text.splitlines():
             if not re.search(r'\b' + re.escape(mod_name) + r'\b', line, re.IGNORECASE):
                 continue
             mod_found = True
-            # Check for explicit PASS/proof marker. A bare log path is not PASS.
             if _line_has_pass_marker(line):
                 has_pass = True
-            # Check for waiver
-            if _line_has_waiver(line):
-                has_waiver = True
+            if _line_has_accepted_limitation(line):
+                has_accepted_limitation = True
+            # Extract evidence log paths
+            for m in re.finditer(
+                    r'((?:sim|logs|formal|out|build)[/\\][^|\s,;]+?\.log)',
+                    line, re.IGNORECASE):
+                evidence_logs.append(m.group(1).strip('`"\''))
 
         if not mod_found:
             findings.append(
                 f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' not listed in "
                 f"docs/module_verification_matrix.md. Add a row with TB, sim log, "
                 f"and PASS evidence or Accepted Limitation waiver.")
-        elif not has_pass and not has_waiver:
+            continue
+
+        if has_accepted_limitation:
+            continue  # Accepted Limitation is OK
+
+        if not has_pass:
             findings.append(
                 f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' in matrix but "
-                f"lacks PASS evidence or waiver. Record sim log path with PASS "
-                f"marker, or add Accepted Limitation with reason.")
+                f"lacks PASS evidence or Accepted Limitation waiver. "
+                f"Record sim log path with PASS marker, or add Accepted Limitation "
+                f"with reason.")
+            continue
+
+        # Validate PASS evidence: referenced sim logs must pass sim_log_gate
+        if not evidence_logs:
+            findings.append(
+                f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' claims PASS but "
+                f"has no sim log references in matrix. Add log path(s) with "
+                f"ALL_TESTS_PASS and SIMULATION_DONE markers.")
+            continue
+
+        any_log_pass = False
+        for rel_path in evidence_logs:
+            full_path = os.path.normpath(os.path.join(proj_dir, rel_path))
+            try:
+                inside_project = (
+                    os.path.commonpath([
+                        os.path.abspath(proj_dir),
+                        os.path.abspath(full_path),
+                    ]) == os.path.abspath(proj_dir)
+                )
+            except ValueError:
+                inside_project = False
+            if not inside_project:
+                findings.append(
+                    f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' evidence "
+                    f"path escapes project: {rel_path}")
+                continue
+            if not os.path.isfile(full_path):
+                findings.append(
+                    f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' evidence "
+                    f"log not found: {rel_path}")
+                continue
+
+            # Run sim_log_gate on the referenced log
+            rc, out = _run_sim_log_gate(full_path)
+            if rc == 0:
+                any_log_pass = True
+            else:
+                # Check if the log explicitly has FAIL/FATAL/timeout evidence
+                log_text = _read_file(full_path)
+                has_fail_evidence = bool(re.search(
+                    r'\b(ALL_TESTS_FAIL|TEST_FAIL|FATAL|TIMEOUT)\b',
+                    log_text, re.IGNORECASE))
+                if has_fail_evidence:
+                    findings.append(
+                        f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' claims "
+                        f"PASS but sim log '{os.path.basename(full_path)}' contains "
+                        f"FAIL/FATAL/timeout evidence. PASS claim is not valid "
+                        f"when sim log shows failures.")
+                else:
+                    findings.append(
+                        f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' claims "
+                        f"PASS but sim log '{os.path.basename(full_path)}' does "
+                        f"not pass sim_log_gate. Fix sim issues or add "
+                        f"Accepted Limitation with reason.")
+
+        if not any_log_pass:
+            # No valid log found
+            findings.append(
+                f"PRE_INTEGRATION_STRICT: Sub-module '{mod_name}' has no sim log "
+                f"that passes sim_log_gate. All referenced logs either missing or "
+                f"failed gate check.")
 
     return findings
 
@@ -304,6 +457,7 @@ def check_pre_integration(proj_dir: str) -> list[str]:
     For L2 projects with >= 2 RTL modules:
     1. Strict: require module_verification_matrix.md with per-module PASS
        evidence for all non-top sub-modules (even without integration TB).
+       PASS evidence must pass sim_log_gate on referenced logs.
     2. Existing: reject integration TB/sim artifacts before per-module evidence.
     """
     findings = []
@@ -323,9 +477,9 @@ def check_pre_integration(proj_dir: str) -> list[str]:
     # --- Existing gate: integration TB/sim artifacts before per-module evidence ---
     tb_files = _find_tb_files(proj_dir)
     if not tb_files:
-        return findings  # No TB files yet -- strict gate already checked above
+        return findings
 
-    integration_tbs = _detect_integration_tb(tb_files, modules)
+    integration_tbs = _detect_integration_tb(tb_files, modules, top_modules)
 
     # Check which modules lack per-module evidence
     top_modules = _find_top_modules(proj_dir, modules)
@@ -336,7 +490,7 @@ def check_pre_integration(proj_dir: str) -> list[str]:
             missing_evidence.append(mod_name)
 
     if not missing_evidence:
-        return findings  # All modules have evidence
+        return findings
 
     # If integration TB exists but modules lack evidence, reject
     if integration_tbs:
@@ -352,7 +506,6 @@ def check_pre_integration(proj_dir: str) -> list[str]:
     # Check for integration sim artifacts (logs/vvp/extensionless) without per-module evidence
     sim_artifacts = _find_integration_sim_artifacts(proj_dir)
     if sim_artifacts and missing_evidence:
-        # Check if any sim artifact looks like an integration sim
         for artifact in sim_artifacts:
             fname = os.path.basename(artifact)
             # Skip per-module logs/vvp (tb_<module>.log/vvp pattern)

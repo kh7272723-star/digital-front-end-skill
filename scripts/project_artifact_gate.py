@@ -29,6 +29,7 @@ Usage: python scripts/project_artifact_gate.py <project_dir>
 """
 import argparse
 import io
+import json
 import os
 import re
 import sys
@@ -60,6 +61,34 @@ def _detect_user_spec(text: str) -> bool:
         r'\bexternal\s+spec\b|'
         r'\bcustomer\s+spec\b',
         text, re.IGNORECASE))
+
+
+def _strip_verilog_comments(text: str) -> str:
+    """Remove Verilog comments before regex-based structure scans."""
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    text = re.sub(r'//.*', '', text)
+    return text
+
+
+def _instantiates_module(text: str, module_name: str) -> bool:
+    """Return True if text instantiates a specific RTL module.
+
+    Supports ordinary and parameterized instantiations:
+      module_name inst_name (...);
+      module_name #(...) inst_name (...);
+    """
+    clean = _strip_verilog_comments(text)
+    pattern = (
+        r'\b' + re.escape(module_name) +
+        r'\s*(?:#\s*\([^;]*?\)\s*)?'
+        r'[A-Za-z_]\w*\s*\('
+    )
+    return bool(re.search(pattern, clean, re.DOTALL))
+
+
+def _find_instantiated_modules(text: str, module_names: set[str]) -> set[str]:
+    """Return known RTL modules instantiated by text."""
+    return {m for m in module_names if _instantiates_module(text, m)}
 
 
 def _infer_level_from_artifacts(proj_dir: str) -> str:
@@ -105,11 +134,8 @@ def _infer_level_from_artifacts(proj_dir: str) -> str:
                     all_rtl_text, re.MULTILINE | re.DOTALL):
                 parent = body_m.group(1)
                 body = body_m.group(2)
-                instantiated = {
-                    mod for mod in module_set
-                    if mod != parent and
-                    re.search(r'\b' + re.escape(mod) + r'\s+\w+\s*\(', body)
-                }
+                instantiated = _find_instantiated_modules(
+                    body, {mod for mod in module_set if mod != parent})
                 if len(instantiated) >= 2:
                     print(
                         f"Inferred level: L2 (module '{parent}' instantiates "
@@ -497,6 +523,36 @@ def _parse_rtl_modules(proj_dir: str) -> dict[str, int]:
     return modules
 
 
+def _parse_rtl_module_sources(proj_dir: str) -> dict[str, str]:
+    """Return module name -> containing RTL file text for rtl/*.v files."""
+    modules = {}
+    rtl_dir = os.path.join(proj_dir, 'rtl')
+    if not os.path.isdir(rtl_dir):
+        return modules
+    for fname in os.listdir(rtl_dir):
+        if not fname.endswith(('.v', '.sv')):
+            continue
+        fpath = os.path.join(rtl_dir, fname)
+        text = _read_file(fpath)
+        for m in re.finditer(r'^\s*module\s+([A-Za-z_]\w*)\b', text, re.MULTILINE):
+            modules[m.group(1)] = text
+    return modules
+
+
+def _find_top_modules(module_sources: dict[str, str]) -> set[str]:
+    """Identify top/wrapper modules that instantiate other RTL modules."""
+    module_names = set(module_sources.keys())
+    top_modules: set[str] = set()
+    for mod_name, text in module_sources.items():
+        instantiated = _find_instantiated_modules(
+            text, {m for m in module_names if m != mod_name})
+        wrapper_named = bool(re.search(
+            r'(top|wrapper|integrat|subsystem|system)', mod_name, re.IGNORECASE))
+        if len(instantiated) >= 2 or (instantiated and wrapper_named):
+            top_modules.add(mod_name)
+    return top_modules
+
+
 def _log_has_pass_evidence(text: str) -> bool:
     return bool(
         ('ALL_TESTS_PASS' in text and 'SIMULATION_DONE' in text) or
@@ -530,8 +586,11 @@ def check_module_verification_evidence(proj_dir: str, level: str) -> list[str]:
     modules = _parse_rtl_modules(proj_dir)
     if not modules:
         return findings
+    top_modules = _find_top_modules(_parse_rtl_module_sources(proj_dir))
 
     for module_name, line_count in sorted(modules.items()):
+        if module_name in top_modules:
+            continue
         rows = [
             line for line in matrix_text.splitlines()
             if re.search(r'\b' + re.escape(module_name) + r'\b', line)
@@ -1300,6 +1359,52 @@ def check_tbd_docs(proj_dir: str) -> list[str]:
     return findings
 
 
+def check_workflow_state_consistency(proj_dir: str) -> list[str]:
+    """Check that PASS claims in dev_log are consistent with workflow_state.
+
+    If workflow_state.json exists and shows FAIL or missing phases, a
+    Status: PASS in dev_log is invalid.
+    """
+    findings = []
+    state_path = os.path.join(proj_dir, 'docs', 'workflow_state.json')
+    if not os.path.isfile(state_path):
+        return findings  # No state file to cross-check
+
+    try:
+        with open(state_path, 'r', encoding='utf-8', errors='replace') as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return findings
+
+    phases = state.get('phases', {})
+    if not phases:
+        return findings
+
+    # Check if any phase has FAIL status
+    failed_phases = [p for p, e in phases.items() if e.get('status') == 'FAIL']
+    if not failed_phases:
+        return findings
+
+    # Check if dev_log claims PASS despite phase failures
+    dev_log = os.path.join(proj_dir, 'docs', 'dev_log.md')
+    if not os.path.isfile(dev_log):
+        dev_log = os.path.join(proj_dir, 'dev_log.md')
+
+    if os.path.isfile(dev_log):
+        with open(dev_log, 'r', encoding='utf-8', errors='replace') as f:
+            dev_text = f.read()
+        if re.search(r'Status:\s*(PASS|COMPLETE)', dev_text, re.IGNORECASE):
+            findings.append(
+                f"WORKFLOW_STATE_INCONSISTENCY: dev_log claims Status: PASS "
+                f"but workflow_state.json shows FAIL for phase(s): "
+                f"{', '.join(failed_phases)}. "
+                f"Re-run failed phase gates before claiming PASS. "
+                f"Allowed statuses when gates fail: BLOCKED, FAIL, "
+                f"BLOCKED_BY_GATE_DISPUTE.")
+
+    return findings
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Project artifact gate: verify required documents and evidence cross-check.")
@@ -1315,6 +1420,7 @@ def main():
     print(f"Detected level: {level}, user-spec: {has_user_spec}")
 
     findings = check_artifacts(proj_dir, level, has_user_spec)
+    findings.extend(check_workflow_state_consistency(proj_dir))
     findings.extend(check_evidence_cross_ref(proj_dir))
     findings.extend(check_verification_matrix_evidence(proj_dir))
     findings.extend(check_module_verification_evidence(proj_dir, level))

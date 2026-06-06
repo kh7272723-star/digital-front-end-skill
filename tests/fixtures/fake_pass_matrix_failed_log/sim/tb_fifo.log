@@ -1,0 +1,6 @@
+RESET_RELEASED
+TEST_START T1: fifo_reset
+TEST_FAIL T1: fifo_reset
+Error: unexpected data at read
+ALL_TESTS_FAIL
+SIMULATION_DONE
