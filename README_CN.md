@@ -2,16 +2,17 @@
 
 一个面向数字前端 RTL 设计的领域专用 AI Agent Skill。它将通用 LLM 转变为严格遵循工程规范的数字前端设计助手，把权威工程知识（IEEE 标准、Arm AMBA 规范、综合/CDC 方法论）提炼为紧凑、可机器执行的规则，并强制执行「合同优先」工作流：先写时序合同，再写周期迹线，最后才写 RTL。
 
-## 最新版本：v2026.06.05
+## 最新版本：v2026.06.07
 
-本版本重点加强“证据绑定”的 RTL 交付流程，尤其针对 L2 存储、DMA、NVMe 类子系统。核心变化是：最终 PASS 声明必须绑定到可执行证据，不能只依赖文档描述或开发日志。
+本版本重点加强 RTL 后的工作流导航：L2 项目必须从 RTL-only 交付进入逐模块仿真，再进入集成仿真；门禁 PASS 输出会直接提示下一步、下一条应执行命令以及禁止的下一步动作。
 
 主要更新：
 
 - 工作流门禁前移到具体阶段出口：`pre-rtl`、`post-rtl`、`pre-integration`、`post-sim`、`final`。
 - 新增 `scripts/workflow_gate.py`，让 agent 每个阶段只需执行一个 wrapper 命令，降低长上下文 L2 项目漏跑脚本的概率。**状态锁：** 每次 PASS 写入 `docs/workflow_state.json`；后续阶段要求前置阶段 PASS 验签。`--force` 仅用于人工指示的恢复场景，不是 waiver。
 - `workflow_gate.py` 现在是 Design Mode 唯一正常门禁入口；其他 gate 脚本是 wrapper 内部实现或 debug 工具，直接输出不算阶段证据。
-- **工作流重排：** pre-rtl 门禁改为合同就绪检查（非仅骨架）。Step 9 拆分为 9A（逐模块验证，L2 强制）和 9B（集成验证）。Step 8 重排为：自审 (8) -> 原则审查 (8c) -> 验证计划 (8b)。L2 pre-integration 门禁现在即使没有集成 TB 也要求 `module_verification_matrix.md` 存在且覆盖完整。
+- **工作流导航强化：** 逐模块验证升级为独立 Step 9，不再是 9A 子步骤。Step 10 是集成验证，Step 11 是最终交付。门禁 PASS 输出会打印 `NEXT_WORKFLOW_STEP`、`NEXT_REQUIRED_ACTION`，以及 L2 场景下的 `FORBIDDEN_NEXT_ACTION`。
+- **module-sim/pre-integration 门禁语义明确：** L2 项目只有在 `workflow_gate.py --phase pre-integration <dir>` PASS 后才允许写集成 TB；`--phase module-sim` 可作为同一门禁的语义化别名。
 - 新增/强化 L1/L2 fail-closed 门禁：`project_preflight_gate.py`、`project_artifact_gate.py`、`pre_integration_gate.py`、`final_delivery_gate.py`。
 - `final_delivery_gate.py` 也会复核 workflow state chain；直接绕过 `workflow_gate.py` 跑 final gate 会被拒绝。
 - `final_delivery_gate.py` 失败时禁止普通 `Status: PASS`；只能写 `BLOCKED`、`FAIL` 或带证据的 `BLOCKED_BY_GATE_DISPUTE`。
@@ -35,7 +36,7 @@
 
 这个 Skill 通过编码资深 RTL 工程师内化的工程纪律来解决这些问题。
 
-## 工作流（12 步 + 三档闸门）
+## 工作流（三档闸门 + 阶段导航）
 
 1. 解析需求并三档分类（L0：简单 / L1：叶子模块 / L2：子系统 — L0 自动跳过早期检查点）
 2. 建立时序合同（时钟、复位、握手、延迟、停顿、冲刷、边界行为）
@@ -49,11 +50,11 @@
 8. 结构自审（13 大类 79 项检查）
 8c. 原则检查 — P3 已知值 + P5a 输出纪律（P5b 物理实现仅 L2）
 8b. 功能验证计划（Golden Reference、scoreboard、false-pass audit；只写计划，不写 TB）
-9A. L2 逐模块 TB + guarded simulation + sim_log_gate + module verification matrix
-9B. pre-integration 通过后，再写集成 TB 并进行集成仿真与原则驱动 debug
-10. 综合反馈（Yosys：latch/loop/关键路径/cell count 检查）
-11. 审查迭代
-12. 验证时序对齐
+9. L2 逐模块 TB + guarded simulation + sim_log_gate + module verification matrix
+9-EXIT. module-sim/pre-integration 门禁；PASS 前仍禁止集成 TB
+10. pre-integration 通过后，再写集成 TB 并进行集成仿真与原则驱动 debug
+10-EXIT. post-sim 门禁
+11. final delivery 门禁；PASS 后才允许声明交付成功
 
 ## 目录结构
 

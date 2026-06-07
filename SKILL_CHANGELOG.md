@@ -1,5 +1,31 @@
 # Skill 迭代日志
 
+## 2026-06-07 - Workflow Navigation Hardening：9A 独立化 + 门禁 PASS 下一步导航
+
+### 背景
+
+多轮 L2 存储类项目复盘显示，agent 虽然能被最终门禁检出问题，但仍会在 RTL 后直接生成集成 TB，跳过逐模块仿真。根因不是 `pre_integration_gate.py` 检不出来，而是主流程里“9A/9B”仍然像同一验证阶段的子步骤，模型在长上下文中会把它压缩成“写 TB + 跑集成仿真”。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| 9A 独立化 | `SKILL.md` | 逐模块验证升级为 Step 9；集成验证改为 Step 10；最终交付改为 Step 11 |
+| module-sim 语义化 | `SKILL.md`, `scripts/workflow_gate.py` | `pre-integration` 文档命名为 module-sim/pre-integration；新增 `--phase module-sim` 作为兼容别名，状态仍记录 canonical `pre-integration` |
+| PASS 下一步导航 | `scripts/workflow_gate.py` | 每个 phase PASS 后输出 `NEXT_WORKFLOW_STEP`、`NEXT_REQUIRED_ACTION`；L2 post-rtl 额外输出 `FORBIDDEN_NEXT_ACTION`，禁止集成 TB 先行 |
+| 集成 TB 后移 | `SKILL.md`, `README.md`, `README_CN.md` | 集成 TB 生成语句只保留在 Step 10，并明确 Step 9-EXIT PASS 前禁止生成 |
+| 回归补强 | `tests/run_workflow_gate_regression.py` | 新增 post-rtl 导航、pre-integration 导航、module-sim alias、post-rtl 后直接集成 TB 被拒绝四个 case |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| `python tests/run_workflow_gate_regression.py` | PASS，覆盖原有和新增 workflow-order cases |
+| `python scripts/skill_static_check.py --root .` | PASS |
+| `python -m py_compile scripts/workflow_gate.py tests/run_workflow_gate_regression.py` | PASS |
+
+---
+
 ## 2026-06-06 - Regex Audit: instance matching 精准化 + CLAUDE.md 瘦身
 
 ### 背景

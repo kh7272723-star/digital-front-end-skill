@@ -2,9 +2,9 @@
 
 A domain-specific AI Agent Skill that turns a general-purpose LLM into a disciplined digital front-end RTL design assistant. It distills authoritative engineering knowledge (IEEE standards, Arm AMBA specifications, synthesis/CDC methodology) into compact, machine-enforceable rules, and enforces a contract-first workflow: timing contract before cycle trace, cycle trace before RTL.
 
-## Latest release: v2026.06.05
+## Latest release: v2026.06.07
 
-This release hardens the skill around evidence-bound RTL delivery, especially for L2 storage and DMA/NVMe-style subsystems. The main change is that final claims now have to bind to executable evidence, not just documentation text.
+This release hardens workflow navigation after RTL: L2 projects are routed from RTL-only delivery into per-module simulation before integration simulation, with gate PASS output now printing the next workflow step and forbidden next actions.
 
 Key updates:
 
@@ -17,11 +17,13 @@ Key updates:
 - `workflow_gate.py` is now the only normal Design Mode gate entry. Sibling
   gate scripts are wrapper internals or debug tools; direct outputs from them
   do not count as phase evidence.
-- **Workflow restructured:** pre-rtl gate now checks contract readiness (not
-  just skeleton). Step 9 split into 9A (per-module verification, L2 mandatory)
-  and 9B (integration verification). Step 8 reordered: self-review (8) ->
-  principle review (8c) -> verification plan (8b). L2 pre-integration gate
-  now requires `module_verification_matrix.md` even without integration TB.
+- **Workflow navigation hardened:** per-module verification is now Step 9
+  rather than a 9A sub-step. Step 10 is integration verification, and Step 11
+  is final delivery. Gate PASS output prints `NEXT_WORKFLOW_STEP`,
+  `NEXT_REQUIRED_ACTION`, and L2 `FORBIDDEN_NEXT_ACTION` hints.
+- **Module-sim/pre-integration gate clarified:** L2 integration TB is only
+  allowed after `workflow_gate.py --phase pre-integration <dir>` passes
+  (`--phase module-sim` is accepted as an alias).
 - Fail-closed project gates for L1/L2 deliverables: `project_preflight_gate.py`, `project_artifact_gate.py`, `pre_integration_gate.py`, and `final_delivery_gate.py`.
 - `final_delivery_gate.py` now checks the workflow state chain too, so direct
   final-gate bypasses of `workflow_gate.py` are rejected.
@@ -50,7 +52,7 @@ This skill fixes those problems by encoding the engineering discipline that expe
 
 ## What it does
 
-Given a digital front-end design request, the skill forces the agent through a structured 12-step workflow with **three-tier complexity gating** (L0/L1/L2) and **distributed principle checkpoints** (2a/5a/8c):
+Given a digital front-end design request, the skill forces the agent through a structured workflow with **three-tier complexity gating** (L0/L1/L2) and **distributed principle checkpoints** (2a/5a/8c):
 
 1. Parse and classify the request (L0: trivial, L1: leaf, L2: subsystem — auto-skip checkpoints for L0)
 2. Build a timing contract (clock, reset, handshake, latency, stall, flush, boundary)
@@ -64,11 +66,11 @@ Given a digital front-end design request, the skill forces the agent through a s
 8. Structural self-review (79-item checklist across 13 categories)
 8c. Principle check — P3 Known Values + P5a Output Discipline (P5b Physical Impl for L2 only)
 8b. Functional verification plan only (golden reference methodology, scoreboard plan, no TB generation)
-9A. L2 per-module TB + guarded simulation + sim_log_gate + module verification matrix
-9B. Integration TB + guarded simulation + principle-driven debug after pre-integration passes
-10. Synthesis feedback (Yosys: latch/loop/critical-path/cell-count checks)
-11. Review and iterate
-12. Verify timing against contract and trace
+9. L2 per-module TB + guarded simulation + sim_log_gate + module verification matrix
+9-EXIT. Module-sim/pre-integration gate; integration TB is still forbidden before PASS
+10. Integration TB + guarded simulation + principle-driven debug after pre-integration passes
+10-EXIT. Post-sim gate
+11. Final delivery gate before claiming PASS
 
 For large systems (DMA engines, bus bridges, multi-channel controllers), the skill refuses to emit monolithic RTL. Instead it produces a system contract, submodule decomposition, interface contracts, integration invariants, and a staged implementation sequence.
 

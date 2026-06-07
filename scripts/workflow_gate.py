@@ -13,6 +13,7 @@ predecessor is stale and must be re-run.
 Usage:
     python scripts/workflow_gate.py --phase pre-rtl <project_dir>
     python scripts/workflow_gate.py --phase post-rtl <project_dir>
+    python scripts/workflow_gate.py --phase module-sim <project_dir>
     python scripts/workflow_gate.py --phase pre-integration <project_dir>
     python scripts/workflow_gate.py --phase post-sim <project_dir>
     python scripts/workflow_gate.py --phase final <project_dir>
@@ -46,6 +47,8 @@ except (AttributeError, io.UnsupportedOperation):
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PHASE_ORDER = ["pre-rtl", "post-rtl", "pre-integration", "post-sim", "final"]
+PHASE_ALIASES = {"module-sim": "pre-integration"}
+CLI_PHASE_CHOICES = PHASE_ORDER + sorted(PHASE_ALIASES)
 SCHEMA_VERSION = 1
 
 
@@ -401,6 +404,59 @@ def next_required_command(missing: list[str], project_dir: str) -> str:
     )
 
 
+def phase_pass_guidance(phase: str, level: str, project_dir: str) -> list[str]:
+    """Return workflow navigation lines printed after a phase PASS.
+
+    These lines deliberately use stable labels so an agent can treat gate output
+    as a next-step checklist instead of only a verdict.
+    """
+    is_l2 = _is_l2_or_higher(level)
+    if phase == "pre-rtl":
+        return [
+            "CURRENT_STEP_COMPLETED: Steps 1-6 planning / pre-rtl contract gate",
+            "NEXT_WORKFLOW_STEP: Step 7 RTL-only implementation",
+            "NEXT_REQUIRED_ACTION: generate synthesizable RTL only; do not write TB or simulation artifacts",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-rtl {project_dir}",
+        ]
+    if phase == "post-rtl":
+        if is_l2:
+            return [
+                "CURRENT_STEP_COMPLETED: Step 7b post-rtl RTL-only gate",
+                "NEXT_WORKFLOW_STEP: Step 8 no-TB review, then Step 9 L2 per-module verification",
+                "NEXT_REQUIRED_ACTION: complete Step 8/8c/8b without TB; first TB-producing step is Step 9 per-module TB + sim",
+                "FORBIDDEN_NEXT_ACTION: do not create or run integration TB before pre-integration/module-sim gate PASS",
+                f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase pre-integration {project_dir}",
+            ]
+        return [
+            "CURRENT_STEP_COMPLETED: Step 7b post-rtl RTL-only gate",
+            "NEXT_WORKFLOW_STEP: Step 8 no-TB review, then Step 10 functional/integration verification as applicable",
+            "NEXT_REQUIRED_ACTION: complete review and verification plan before writing TB",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-sim {project_dir}",
+        ]
+    if phase == "pre-integration":
+        return [
+            "CURRENT_STEP_COMPLETED: Step 9-EXIT module-sim / pre-integration gate",
+            "NEXT_WORKFLOW_STEP: Step 10 integration verification",
+            "INTEGRATION_TB_ALLOWED: yes",
+            "NEXT_REQUIRED_ACTION: write integration TB/assertions, run guarded sim, then perform false-pass audit",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-sim {project_dir}",
+        ]
+    if phase == "post-sim":
+        return [
+            "CURRENT_STEP_COMPLETED: Step 10-EXIT post-sim gate",
+            "NEXT_WORKFLOW_STEP: Step 11 final delivery gate",
+            "NEXT_REQUIRED_ACTION: run final workflow gate before claiming PASS",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase final {project_dir}",
+        ]
+    if phase == "final":
+        return [
+            "CURRENT_STEP_COMPLETED: Step 11 final delivery gate",
+            "NEXT_WORKFLOW_STEP: delivery may be claimed",
+            "DELIVERY_CLAIM_ALLOWED: yes",
+        ]
+    return []
+
+
 # ---------------------------------------------------------------------------
 #  Discovery helpers
 # ---------------------------------------------------------------------------
@@ -597,7 +653,7 @@ def gate_post_rtl(project: Path) -> list[str]:
             findings.append(
                 "premature TB/sim artifacts found before first post-rtl PASS. "
                 "Step 7 is RTL-only; do not create tb/*.v or simulation "
-                "artifacts until post-rtl passes and Step 9A/9B begins.")
+                "artifacts until post-rtl passes and Step 9/10 begins.")
             return findings
 
     # 1. Discover RTL files ONLY (no TB)
@@ -704,7 +760,7 @@ def main() -> int:
     parser.add_argument(
         "--phase",
         required=True,
-        choices=PHASE_ORDER,
+        choices=CLI_PHASE_CHOICES,
     )
     parser.add_argument(
         "--force",
@@ -715,7 +771,8 @@ def main() -> int:
     args = parser.parse_args()
 
     project = Path(args.project_dir).resolve()
-    phase = args.phase
+    requested_phase = args.phase
+    phase = PHASE_ALIASES.get(requested_phase, requested_phase)
 
     if not project.exists():
         print("PHASE_WORKFLOW_GATE: FAIL")
@@ -770,6 +827,9 @@ def main() -> int:
     print(f"- State saved to {state_file_path(project)}")
     if snapshot:
         print(f"- Snapshot: {len(snapshot)} file(s) recorded")
+    print(f"PROJECT_LEVEL: {level}")
+    for line in phase_pass_guidance(phase, level, str(project)):
+        print(line)
     return 0
 
 
