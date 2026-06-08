@@ -58,6 +58,7 @@ Before writing `Status: PASS`, the dev log must confirm:
 - [ ] `rtl_style_check.py` clean (all findings waived in writing)
 - [ ] `sim_log_gate.py` PASS on actual simulation log
 - [ ] `project_artifact_gate.py` PASS on project directory
+- [ ] `artifact_budget_gate.py` PASS on project directory
 - [ ] If L2 + Delegate yes: all subagent role reports exist under `docs/subagents/`
 - [ ] No-SPEC L1/L2: all required artifacts present under `docs/`
 

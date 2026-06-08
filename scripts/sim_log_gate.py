@@ -5,6 +5,8 @@ Exit 0 only when ALL conditions are true:
   - log contains SIMULATION_DONE
   - log does not contain TIMEOUT, FAIL, FATAL, mismatch, unknown, xxxx,
     or x/z evidence outside benign explanatory text
+  - log does not contain contradictory PASS evidence such as WLAST=0
+    transaction-shape summaries or unexplained duplicate completions
 
 Exit 1 with clear findings otherwise.
 
@@ -48,6 +50,10 @@ XZ_PATTERN = re.compile(
 
 PASS_PATTERN = re.compile(r'ALL_TESTS_PASS', re.IGNORECASE)
 DONE_PATTERN = re.compile(r'SIMULATION_DONE', re.IGNORECASE)
+EXPECTED_MULTI_COMPLETION_PATTERN = re.compile(
+    r'EXPECTED_CPL|expected[_\s-]*(?:completion|cpl)s?\s*[:=]?\s*\d+|'
+    r'multi[-\s]?completion|completion\s+ordering|ordering',
+    re.IGNORECASE)
 
 
 def is_benign_failure_line(line: str) -> bool:
@@ -131,6 +137,47 @@ def check_log(text: str) -> list[str]:
             continue
         findings.append(f"X/Z value detected: {token!r}")
         break  # one is enough
+
+    findings.extend(check_semantic_contradictions(text))
+
+    return findings
+
+
+def check_semantic_contradictions(text: str) -> list[str]:
+    """Reject PASS logs whose own summaries contradict the expected behavior.
+
+    This is intentionally semantic and conservative: it targets compact
+    transaction-shape summaries commonly printed by storage/DMA TBs, where a
+    PASS can be meaningless if the summary says WLAST never asserted or a
+    single command produced duplicate completions.
+    """
+    findings: list[str] = []
+
+    for line_no, line in enumerate(text.splitlines(), 1):
+        if not re.search(r'\bShape\b\s*:', line, re.IGNORECASE):
+            continue
+        m = re.search(r'\bWLAST\s*=\s*([01xXzZ]+)\b', line)
+        if not m:
+            continue
+        value = m.group(1).lower()
+        if value == '0':
+            findings.append(
+                f"REJECT: line {line_no} reports transaction shape WLAST=0 "
+                "while log claims PASS")
+        elif re.search(r'[xz]', value):
+            findings.append(
+                f"REJECT: line {line_no} reports transaction shape WLAST={m.group(1)} "
+                "while log claims PASS")
+
+    cpl_indices = [
+        int(m.group(1))
+        for m in re.finditer(r'^\s*CPL\[(\d+)\]', text, re.MULTILINE)
+    ]
+    if cpl_indices and max(cpl_indices) > 1:
+        if not EXPECTED_MULTI_COMPLETION_PATTERN.search(text):
+            findings.append(
+                f"REJECT: CPL[{max(cpl_indices)}] appears but the log has no "
+                "expected multi-completion marker; possible duplicate completion false-pass")
 
     return findings
 

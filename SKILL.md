@@ -116,7 +116,7 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 ## Standard workflow
 
-**Phase Exit Gates:** `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json` with artifact snapshot (mtime+size); later phases require predecessor PASS and detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
+**Phase Exit Gates:** `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases require predecessor PASS and detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
 **Step boundaries:** 1-6 planning -> 7 RTL-only (no TB) -> 7b post-rtl gate (COMPILE_RTL_ONLY) -> 8 self-review -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
 
@@ -126,7 +126,7 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 | Post-RTL | `workflow_gate.py --phase post-rtl <dir>` | RTL-only: style + compile. TB out of scope. |
 | Module-sim / Pre-integration | `workflow_gate.py --phase pre-integration <dir>` | L2 per-module evidence; no integration TB before this |
 | Post-sim | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
-| Final | `workflow_gate.py --phase final <dir>` | All artifacts, gates, freshness (blocks PASS claim) |
+| Final | `workflow_gate.py --phase final <dir>` | Artifacts, budget, gates, freshness (blocks PASS claim) |
 
 If a gate fails: stop, fix, rerun. If a gate passes: read the `NEXT_WORKFLOW_STEP`, `NEXT_REQUIRED_ACTION`, and any `FORBIDDEN_NEXT_ACTION` lines before doing more work.
 
@@ -174,7 +174,7 @@ Before any RTL, create canonical project skeleton. Debug-only: `python scripts/p
 - `docs/` directory with skeleton files: `dev_log.md`, `SPEC.md`, `interface-contracts.md`, `timing-contract.md`, `protocol_claim_ledger.md`, `verification_matrix.md`, `contract_implementation_matrix.md`
 - `rtl/` directory (L1+L2), `tb/` directory (L2), `sim/` directory
 - Skeleton files may be empty placeholders initially; filled during Steps 2-6
-- `dev_log.md` is the evidence chain -- start it at Step 1 and fill as you go
+- `dev_log.md` is the evidence chain -- start it at Step 1 and fill as you go; avoid duplicate summaries, archive folders, or build outputs as deliverables
 
 This preflight is fail-closed: missing skeleton -> BLOCKED. The **pre-rtl
 phase gate** (after Steps 2-6) requires contracts to be non-empty.
@@ -473,11 +473,11 @@ If any FAIL: fix, re-run Steps 7b-10, re-check this gate.
 
 ### 11. Finalize (delivery gate)
 
-Required: `python scripts/workflow_gate.py --phase final <project_dir>`. Requires full predecessor chain (state lock). Underlying `final_delivery_gate.py` is a direct-call safety net: checks workflow state chain, orchestrates `project_artifact_gate` + `pre_integration_gate` + `rtl_style_check` + `compile_log_gate` + `sim_log_gate` + runtime guard. Exit 0 only when ALL pass.
+Required: `python scripts/workflow_gate.py --phase final <project_dir>`. Requires full predecessor chain (state lock). Underlying `final_delivery_gate.py` is a direct-call safety net: checks workflow state chain, orchestrates `project_artifact_gate` + `artifact_budget_gate` + `pre_integration_gate` + `rtl_style_check` + `compile_log_gate` + `sim_log_gate` + runtime guard. Exit 0 only when ALL pass.
 
 If this gate fails, `docs/dev_log.md` must not say `Status: PASS`. Allowed: `BLOCKED`, `FAIL`, `BLOCKED_BY_GATE_DISPUTE` with evidence.
 
-Additional checks: delegation provenance, verification matrix, claim ledger, storage mover evidence, skeleton, L2 role reports, no runaway VCD (>50MB), standard `.log` from `run_sim_guarded.py`. State maturity and residual risks via `engineering-review-checklist.md`.
+Additional checks: delegation provenance, verification matrix, claim ledger, storage mover evidence, skeleton, L2 role reports, artifact budget (no `tb_archive/`, final `.vvp`, duplicate sim logs, or project-local `scripts/run_sim.py`), no runaway VCD (>50MB), standard `.log` from `run_sim_guarded.py`. State maturity and residual risks via `engineering-review-checklist.md`.
 
 Protocol claims must remain labeled Normative / Project policy / Conservative pattern / Heuristic / Unverified. Hard gates enforce generic RTL/verif/delivery evidence.
 

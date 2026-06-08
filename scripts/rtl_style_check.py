@@ -887,6 +887,86 @@ def check_tb_fake_false_pass_audit(lines):
             break
 
 
+def check_tb_empty_if_comparisons(lines):
+    """TB_EMPTY_IF1: reject empty if-statements that look like checks."""
+    code_text = '\n'.join(strip_comments(lines))
+    if not _looks_like_testbench(code_text):
+        return
+
+    for i, raw in enumerate(lines, 1):
+        code = _strip_line_comment(raw).strip()
+        if not code:
+            continue
+        if re.search(r'\bif\s*\([^)]*(?:==|===|!=|!==)[^)]*\)\s*;\s*$', code):
+            warn('E', 'TB_EMPTY_IF1', i,
+                 "empty if-statement contains a comparison but has no action; "
+                 "this is cosmetic scoreboard evidence. Increment an error "
+                 "counter, call $fatal, or use a real check task.")
+
+
+def check_tb_wlast_boolean_only(lines):
+    """TB_WLAST_BOOL1: catch WLAST checks that only reject X/Z values."""
+    code_text = '\n'.join(strip_comments(lines))
+    if not _looks_like_testbench(code_text):
+        return
+    if not re.search(r'\b(wlast|m_axi_wlast|axi_wlast)\b', code_text, re.IGNORECASE):
+        return
+    has_exact_wlast = re.search(
+        r'\b(?:m_axi_)?wlast\b\s*(?:==|===|!=|!==)\s*'
+        r'(?:expected_\w*last\w*|exp_\w*last\w*|\w*_expected_wlast)\b|'
+        r'\b(?:expected_\w*last\w*|exp_\w*last\w*|\w*_expected_wlast)\b'
+        r'\s*(?:==|===|!=|!==)\s*\b(?:m_axi_)?wlast\b|'
+        r'\bcheck_\w+\s*\([^;)]*(?:wlast|m_axi_wlast)[^;)]*expected',
+        code_text, re.IGNORECASE)
+    if has_exact_wlast:
+        return
+
+    for i, raw in enumerate(lines, 1):
+        code = _strip_line_comment(raw)
+        if re.search(
+                r'\b(?:m_axi_)?wlast\b[^;\n]*!==\s*1\'b1[^;\n]*&&'
+                r'[^;\n]*\b(?:m_axi_)?wlast\b[^;\n]*!==\s*1\'b0',
+                code, re.IGNORECASE):
+            warn('E', 'TB_WLAST_BOOL1', i,
+                 "WLAST check only proves the signal is 0 or 1; it does not "
+                 "prove WLAST asserted on the expected final beat. Compare "
+                 "against an expected beat index or expected_wlast signal.")
+
+
+def check_tb_completion_count_exact(lines):
+    """TB_CPL_COUNT1: completion count must be exact when a counter is used."""
+    code_text = '\n'.join(strip_comments(lines))
+    if not _looks_like_testbench(code_text):
+        return
+    if not re.search(r'\b(cpl_count|completion_count|done_count)\b', code_text):
+        return
+
+    has_min_only = re.search(
+        r'\b(cpl_count|completion_count|done_count)\b\s*<\s*(?:\d+\'d)?1\b',
+        code_text)
+    has_exact = re.search(
+        r'\b(cpl_count|completion_count|done_count)\b\s*(?:==|===|!=|!==)\s*'
+        r'(?:expected_\w+|[A-Za-z_]\w*expected\w*|\d+\'d\d+|\d+)\b',
+        code_text, re.IGNORECASE)
+    has_expected_counter = re.search(
+        r'\bexpected_(?:cpl|completion|done)_count\b|'
+        r'\b(?:cpl|completion|done)_expected\b',
+        code_text, re.IGNORECASE)
+
+    if has_min_only and not (has_exact or has_expected_counter):
+        line_no = 1
+        for i, raw in enumerate(lines, 1):
+            if re.search(
+                    r'\b(cpl_count|completion_count|done_count)\b\s*<\s*(?:\d+\'d)?1\b',
+                    _strip_line_comment(raw)):
+                line_no = i
+                break
+        warn('E', 'TB_CPL_COUNT1', line_no,
+             "completion counter is checked only as '< 1'. This permits "
+             "duplicate completions to pass. Check the exact expected count "
+             "and reject over-completion.")
+
+
 def check_tb_xz_coverage(lines):
     """TB_XZ1: DMA/protocol TB must actively fail on X/Z in observed signals."""
     code_text = '\n'.join(strip_comments(lines))
@@ -1567,6 +1647,9 @@ def check_file(filepath):
     check_start_same_cycle_old_q(lines)
     check_multi_driver(lines)
     check_tb_fake_false_pass_audit(lines)
+    check_tb_empty_if_comparisons(lines)
+    check_tb_wlast_boolean_only(lines)
+    check_tb_completion_count_exact(lines)
     check_tb_xz_coverage(lines)
     check_tb_sideband_trace(lines)
     check_parameter_hardcode(lines)

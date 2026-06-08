@@ -25,6 +25,7 @@ appropriate mode before entering the standard pipeline.
 
 Step 3: create docs/contract_implementation_matrix.md skeleton immediately after contract freeze.
 Step 9A/9B: use scripts/run_sim_guarded.py, not bare vvp.
+Final: artifact_budget_gate must pass; logs are evidence, .vvp/build/archive files are not.
 Pre-RTL gate: after contracts frozen, before any RTL generation.
 ```
 

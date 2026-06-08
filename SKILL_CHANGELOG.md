@@ -1,5 +1,33 @@
 # Skill 迭代日志
 
+## 2026-06-08 - Artifact Budget + False-Evidence Semantics Hardening
+
+### 背景
+
+新一轮 Descriptor-Based AXI DMA Mover 复盘显示，代码以外副产物开始膨胀：`tb_archive/`、`.vvp`、重复 sim log、项目局部 `scripts/run_sim.py` 会增加审计成本，并让 agent 混淆“构建产物”和“交付证据”。同时，TB 中出现了装饰性比较：`if (awaddr !== expected) ;` 看似检查，实际没有 error/fatal；sim log 也可能一边打印 `ALL_TESTS_PASS`，一边给出 `WLAST=0` 或重复 completion 的矛盾摘要。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Artifact Budget Gate | `scripts/artifact_budget_gate.py`（新） | final 交付拒绝 `tb_archive/`、`.vvp`、重复 `sim_*.log`/`sim_tb_*.log`、项目局部 `scripts/run_sim.py` |
+| final 聚合接入 | `scripts/final_delivery_gate.py` | Step 1a 调用 artifact-budget 门禁，`workflow_gate.py --phase final` 自动覆盖 |
+| sim 语义矛盾检查 | `scripts/sim_log_gate.py` | 拒绝 `Shape: ... WLAST=0`、`WLAST=X/Z`、无 expected multi-completion 标记却出现 `CPL[2]` |
+| TB 假比较检查 | `scripts/rtl_style_check.py` | E 级拒绝空 `if (...) ;`、WLAST 只做 0/1 合法性检查、completion count 只检查 `< 1` |
+| 主流程说明 | `SKILL.md`, `README.md`, `README_CN.md` | final gate 明确包含 artifact budget；README 说明最小必要交付与证据语义加固 |
+| 回归补强 | `tests/run_artifact_evidence_regression.py` | 覆盖 artifact budget、WLAST=0 PASS log、duplicate CPL、TB empty-if/weak WLAST/weak completion count |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| `python tests/run_artifact_evidence_regression.py` | PASS，覆盖本轮新增 evidence/artifact cases |
+| `python tests/run_workflow_gate_regression.py` | PASS，确认既有 phase-order/workflow cases 未回退 |
+| `python scripts/skill_static_check.py --root .` | PASS |
+| `python -m py_compile scripts/artifact_budget_gate.py scripts/final_delivery_gate.py scripts/rtl_style_check.py scripts/sim_log_gate.py tests/run_artifact_evidence_regression.py` | PASS |
+
+---
+
 ## 2026-06-07 - Workflow Navigation Hardening：9A 独立化 + 门禁 PASS 下一步导航
 
 ### 背景

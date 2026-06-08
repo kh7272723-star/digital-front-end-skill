@@ -2,12 +2,16 @@
 
 一个面向数字前端 RTL 设计的领域专用 AI Agent Skill。它将通用 LLM 转变为严格遵循工程规范的数字前端设计助手，把权威工程知识（IEEE 标准、Arm AMBA 规范、综合/CDC 方法论）提炼为紧凑、可机器执行的规则，并强制执行「合同优先」工作流：先写时序合同，再写周期迹线，最后才写 RTL。
 
-## 最新版本：v2026.06.07
+## 最新版本：v2026.06.08
 
-本版本重点加强 RTL 后的工作流导航：L2 项目必须从 RTL-only 交付进入逐模块仿真，再进入集成仿真；门禁 PASS 输出会直接提示下一步、下一条应执行命令以及禁止的下一步动作。
+本版本在阶段化工作流之上继续加强「交付物预算」和「假证据」门禁：最终交付会拒绝膨胀、重复、含糊的非代码副产物；仿真和 testbench 证据不再只看 PASS 标记，也会检查日志内部是否自相矛盾。
 
 主要更新：
 
+- 新增 `scripts/artifact_budget_gate.py`：拒绝 `tb_archive/`、最终交付中的 `.vvp` 构建产物、重复仿真日志、项目局部 `scripts/run_sim.py`；除非明确写为带原因/风险的 Accepted Limitation。
+- `final_delivery_gate.py` 已接入 artifact-budget 门禁，因此正常执行 `workflow_gate.py --phase final <dir>` 时会自动检查交付物是否足够精简、可审计。
+- `sim_log_gate.py` 会拒绝自相矛盾的 PASS 日志，例如 transaction-shape 摘要里 `WLAST=0`，或未声明 expected multi-completion 却出现 `CPL[2]`。
+- `rtl_style_check.py` 会拒绝装饰性 TB 比较：空语句 `if (...) ;`、只检查 WLAST 是否为 0/1 而不检查期望 final beat、只用 `< 1` 判断 completion count。
 - 工作流门禁前移到具体阶段出口：`pre-rtl`、`post-rtl`、`pre-integration`、`post-sim`、`final`。
 - 新增 `scripts/workflow_gate.py`，让 agent 每个阶段只需执行一个 wrapper 命令，降低长上下文 L2 项目漏跑脚本的概率。**状态锁：** 每次 PASS 写入 `docs/workflow_state.json`；后续阶段要求前置阶段 PASS 验签。`--force` 仅用于人工指示的恢复场景，不是 waiver。
 - `workflow_gate.py` 现在是 Design Mode 唯一正常门禁入口；其他 gate 脚本是 wrapper 内部实现或 debug 工具，直接输出不算阶段证据。

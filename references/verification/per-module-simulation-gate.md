@@ -43,6 +43,10 @@ python scripts/run_sim_guarded.py --timeout-sec 30 --log sim/tb_<module>.log -- 
 python scripts/sim_log_gate.py sim/tb_<module>.log
 ```
 
+The `.vvp` file is a temporary build product. After the guarded log is captured,
+remove `.vvp` files or keep them outside the final delivery tree; final artifact
+budget checks accept logs, not compiled simulator binaries.
+
 For modules with formal-only evidence, record the formal command and passing log path in the matrix.
 
 ## `docs/module_verification_matrix.md`

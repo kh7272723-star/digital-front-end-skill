@@ -1,8 +1,8 @@
 """Final delivery gate: orchestrates all gating scripts for project delivery.
 
-Orchestrates project_artifact_gate, pre_integration_gate, rtl_style_check,
-compile_log_gate, and sim_log_gate into a single pipeline. Exit 0 only when
-ALL components pass.
+Orchestrates project_artifact_gate, artifact_budget_gate, pre_integration_gate,
+rtl_style_check, compile_log_gate, and sim_log_gate into a single pipeline.
+Exit 0 only when ALL components pass.
 
 Usage:
     python scripts/final_delivery_gate.py <project_dir>
@@ -205,6 +205,19 @@ def step1_project_artifact_gate(project_dir: str) -> list[str]:
             stripped = line.strip()
             if stripped.startswith('- ') or stripped.startswith('[REJECT]'):
                 findings.append(f"  artifact: {stripped}")
+    return findings
+
+
+def step1a_artifact_budget_gate(project_dir: str) -> list[str]:
+    """Run artifact_budget_gate.py. Return list of findings (empty = PASS)."""
+    findings: list[str] = []
+    rc, output = _run_script('artifact_budget_gate.py', [project_dir])
+    if rc != 0:
+        findings.append("ARTIFACT_BUDGET_GATE failed")
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('- ') or stripped.startswith('[REJECT]'):
+                findings.append(f"  artifact_budget: {stripped}")
     return findings
 
 
@@ -565,6 +578,10 @@ def main() -> None:
     # Step 1 -- project_artifact_gate
     findings = step1_project_artifact_gate(project_dir)
     all_findings.extend(('  step1: ' + f) for f in findings)
+
+    # Step 1a -- artifact budget / canonical delivery hygiene
+    findings = step1a_artifact_budget_gate(project_dir)
+    all_findings.extend(('  step1a: ' + f) for f in findings)
 
     # Step 1b -- pre-integration lock (L2 only)
     findings = step1b_pre_integration_gate(project_dir)

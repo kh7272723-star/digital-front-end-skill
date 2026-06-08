@@ -2,12 +2,24 @@
 
 A domain-specific AI Agent Skill that turns a general-purpose LLM into a disciplined digital front-end RTL design assistant. It distills authoritative engineering knowledge (IEEE standards, Arm AMBA specifications, synthesis/CDC methodology) into compact, machine-enforceable rules, and enforces a contract-first workflow: timing contract before cycle trace, cycle trace before RTL.
 
-## Latest release: v2026.06.07
+## Latest release: v2026.06.08
 
-This release hardens workflow navigation after RTL: L2 projects are routed from RTL-only delivery into per-module simulation before integration simulation, with gate PASS output now printing the next workflow step and forbidden next actions.
+This release adds artifact-budget and false-evidence hardening on top of the phase workflow. Final delivery now rejects bloated or ambiguous non-code artifacts, and simulation/testbench evidence is checked for semantic contradictions instead of only PASS markers.
 
 Key updates:
 
+- New `scripts/artifact_budget_gate.py` rejects `tb_archive/`, final `.vvp`
+  build products, duplicate simulation logs, and project-local
+  `scripts/run_sim.py` unless explicitly waived as an Accepted Limitation.
+- `final_delivery_gate.py` now includes the artifact-budget gate, so the
+  normal `workflow_gate.py --phase final <dir>` path automatically enforces
+  compact deliverables.
+- `sim_log_gate.py` now rejects contradictory PASS logs such as
+  transaction-shape summaries with `WLAST=0` and unexplained duplicate
+  completions like `CPL[2]`.
+- `rtl_style_check.py` now rejects cosmetic TB comparisons: empty
+  `if (...) ;` scoreboards, WLAST checks that only reject X/Z, and completion
+  counters checked only as `< 1`.
 - Phase-local workflow gates now appear at the point where they matter:
   `pre-rtl`, `post-rtl`, `pre-integration`, `post-sim`, and `final`.
 - New `scripts/workflow_gate.py` wrapper gives agents one command per phase,

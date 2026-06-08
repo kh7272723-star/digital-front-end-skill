@@ -612,11 +612,13 @@ When simulation tools are available:
 - [ ] If testbench is non-compliant: apply fallback classification (PASS-like/FAIL-like pattern matching)
 - [ ] Simulation completes within timeout (no hang); timeout uses `$fatal` or `error_cnt++` + `TESTS_FAILED`
 - [ ] **`scripts/sim_log_gate.py` PASS** on the actual simulation log file
+- [ ] **Log semantics audit:** no PASS log summary contradicts expected behavior (for example `WLAST=0` in a transaction-shape line or unexplained duplicate `CPL[2]`)
 - [ ] **Full log audit (Step 8b) completed before claiming PASS:** scan for `exp`/`expected`/`mismatch`/`xxxx` not guarded by error tracking → re-classify as FALSE_PASS if found
 - [ ] **L1/L2: global error counter.** Testbench uses a single `total_error_cnt` (or equivalent) gating `ALL_TESTS_PASS`, not per-test local counters that can be independently zero while others show errors
 - [ ] **DMA/NVMe: dual scoreboard.** Testbench has both payload scoreboard (data comparison) AND transaction-shape scoreboard (AWADDR, AWLEN, WLAST, WSTRB, BRESP, completion ordering)
 - [ ] **At least one backpressure/stall test.** Not all channels permanently ready. At least one test with WREADY=0 for ≥2 cycles or NVM multi-cycle response
 - [ ] **L1/L2 No-SPEC: `scripts/project_artifact_gate.py` PASS** on the project directory
+- [ ] **Final artifact budget:** `scripts/artifact_budget_gate.py <project_dir>` PASS; no `tb_archive/`, final `.vvp`, duplicate logs, or project-local `scripts/run_sim.py`
 - [ ] All directed tests pass (with verified error tracking, not just $display)
 - [ ] If any test fails: bug pattern matched, fix applied, re-simulation passed (max 3 iterations)
 - [ ] If 3 iterations exhausted: residual issues reported with evidence
