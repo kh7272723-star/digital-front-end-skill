@@ -8,6 +8,12 @@ This release adds artifact-budget and false-evidence hardening on top of the pha
 
 Key updates:
 
+- `workflow_gate.py` now writes a compact `docs/workflow_cursor.md` on every
+  phase run, giving the agent a persistent current phase, next required command,
+  and forbidden next action without adding generic planning-file overhead.
+- Final workflow-state freshness now checks sha256 content hashes, not only
+  mtime/size, so contract or verification edits force the relevant predecessor
+  gate to be re-run.
 - New `scripts/artifact_budget_gate.py` rejects `tb_archive/`, final `.vvp`
   build products, duplicate simulation logs, and project-local
   `scripts/run_sim.py` unless explicitly waived as an Accepted Limitation.

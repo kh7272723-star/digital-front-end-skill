@@ -8,6 +8,8 @@
 
 主要更新：
 
+- `workflow_gate.py` 每次阶段门禁都会写入精简的 `docs/workflow_cursor.md`，记录当前阶段、下一条必跑命令、禁止动作；借鉴文件化 planning，但不引入通用三件套负担。
+- final workflow-state freshness 现在复核 sha256 内容哈希，而不只看 mtime/size；合同或验证证据被改动后，必须回到对应前置阶段重跑门禁。
 - 新增 `scripts/artifact_budget_gate.py`：拒绝 `tb_archive/`、最终交付中的 `.vvp` 构建产物、重复仿真日志、项目局部 `scripts/run_sim.py`；除非明确写为带原因/风险的 Accepted Limitation。
 - `final_delivery_gate.py` 已接入 artifact-budget 门禁，因此正常执行 `workflow_gate.py --phase final <dir>` 时会自动检查交付物是否足够精简、可审计。
 - `sim_log_gate.py` 会拒绝自相矛盾的 PASS 日志，例如 transaction-shape 摘要里 `WLAST=0`，或未声明 expected multi-completion 却出现 `CPL[2]`。

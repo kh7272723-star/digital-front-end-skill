@@ -116,7 +116,7 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 ## Standard workflow
 
-**Phase Exit Gates:** `scripts/workflow_gate.py` only. Each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases require predecessor PASS and detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
+**Phase Exit Gates:** `scripts/workflow_gate.py` only. Each run writes `docs/workflow_cursor.md`; each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases and final detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
 **Step boundaries:** 1-6 planning -> 7 RTL-only (no TB) -> 7b post-rtl gate (COMPILE_RTL_ONLY) -> 8 self-review -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
 
@@ -473,7 +473,7 @@ If any FAIL: fix, re-run Steps 7b-10, re-check this gate.
 
 ### 11. Finalize (delivery gate)
 
-Required: `python scripts/workflow_gate.py --phase final <project_dir>`. Requires full predecessor chain (state lock). Underlying `final_delivery_gate.py` is a direct-call safety net: checks workflow state chain, orchestrates `project_artifact_gate` + `artifact_budget_gate` + `pre_integration_gate` + `rtl_style_check` + `compile_log_gate` + `sim_log_gate` + runtime guard. Exit 0 only when ALL pass.
+Required: `python scripts/workflow_gate.py --phase final <project_dir>`. Requires full predecessor chain (state lock) and fresh sha256 snapshots. Underlying `final_delivery_gate.py` is a direct-call safety net: checks workflow state chain, orchestrates `project_artifact_gate` + `artifact_budget_gate` + `pre_integration_gate` + `rtl_style_check` + `compile_log_gate` + `sim_log_gate` + runtime guard. Exit 0 only when ALL pass.
 
 If this gate fails, `docs/dev_log.md` must not say `Status: PASS`. Allowed: `BLOCKED`, `FAIL`, `BLOCKED_BY_GATE_DISPUTE` with evidence.
 

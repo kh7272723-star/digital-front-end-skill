@@ -97,6 +97,29 @@ def _run_workflow_gate(project_dir: str, phase: str, force: bool = True
     return result.returncode, output
 
 
+def _run_final_delivery_gate(project_dir: str) -> tuple[int, str]:
+    """Run final_delivery_gate.py and return (returncode, combined_output)."""
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "final_delivery_gate.py"),
+        project_dir,
+    ]
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    output = result.stdout
+    if result.stderr:
+        output += "\n" + result.stderr
+    return result.returncode, output
+
+
 def _clear_sim_dir(project_dir: str) -> None:
     """Remove sim artifacts from a copied fixture."""
     sim_dir = Path(project_dir) / "sim"
@@ -228,6 +251,25 @@ def run_invalid_marker_rejected(verbose: bool = False) -> tuple[bool, str]:
             return False, "negated compile marker should FAIL"
         if "lacks RTL-only marker" not in output:
             return False, "missing RTL-only marker finding"
+        return True, "OK"
+
+
+def run_bom_marker_accepted(verbose: bool = False) -> tuple[bool, str]:
+    """A UTF-8 BOM before COMPILE_RTL_ONLY must not hide the marker."""
+    fixture = FIXTURES_DIR / "weak_compile_log_no_marker"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        proj_dir = os.path.join(tmpdir, "bom_marker")
+        shutil.copytree(str(fixture), proj_dir)
+        log_path = Path(proj_dir) / "sim" / "compile.log"
+        log_path.write_text(
+            "\ufeff# COMPILE_RTL_ONLY\nCOMPILE_PASS\n0 errors\n",
+            encoding="utf-8",
+        )
+        rc, output = _run_workflow_gate(proj_dir, "post-rtl", force=True)
+        if verbose:
+            print(output)
+        if rc != 0:
+            return False, "BOM-prefixed RTL-only marker should PASS"
         return True, "OK"
 
 
@@ -489,6 +531,96 @@ endmodule
         return True, "OK"
 
 
+def run_workflow_cursor_written(verbose: bool = False) -> tuple[bool, str]:
+    """workflow_gate PASS must write a compact cursor with next-step guidance."""
+    fixture = FIXTURES_DIR / "clean_l2_per_module_then_integration"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        proj_dir = os.path.join(tmpdir, "workflow_cursor_written")
+        shutil.copytree(str(fixture), proj_dir)
+        _clear_sim_dir(proj_dir)
+        _add_rtl_only_compile_log(proj_dir)
+
+        rc, output = _run_workflow_gate(proj_dir, "post-rtl", force=True)
+        if verbose:
+            print(output)
+        if rc != 0:
+            return False, "post-rtl should PASS before cursor check"
+        cursor = Path(proj_dir) / "docs" / "workflow_cursor.md"
+        if not cursor.exists():
+            return False, "workflow_cursor.md was not written"
+        text = cursor.read_text(encoding="utf-8")
+        required = [
+            "Gate status: PASS",
+            "Current phase: post-rtl",
+            "Next workflow step: Step 8 no-TB review, then Step 9 L2 per-module verification",
+            "Forbidden next action: do not create or run integration TB",
+            "Contract lock: pre-rtl PASS snapshots contract docs by sha256",
+        ]
+        for token in required:
+            if token not in text:
+                return False, f"workflow_cursor.md missing token: {token}"
+        if "Cursor saved to" not in output:
+            return False, "gate output did not report cursor path"
+        return True, "OK"
+
+
+def run_final_gate_rejects_hash_drift(verbose: bool = False
+                                      ) -> tuple[bool, str]:
+    """final_delivery_gate must reject stale contract snapshots by sha256."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        proj = Path(tmpdir) / "hash_drift"
+        docs = proj / "docs"
+        docs.mkdir(parents=True)
+        contract = docs / "timing-contract.md"
+        contract.write_text("contract-v1\n", encoding="utf-8")
+        st = contract.stat()
+        state = {
+            "schema_version": 1,
+            "level": "L1",
+            "phases": {
+                "pre-rtl": {
+                    "status": "PASS",
+                    "timestamp": "2026-06-08T00:00:00Z",
+                    "command": "fixture",
+                    "evidence": "fixture",
+                    "snapshot": {
+                        "docs/timing-contract.md": {
+                            "mtime": st.st_mtime,
+                            "size": st.st_size,
+                            "sha256": "0" * 64,
+                        }
+                    },
+                },
+                "post-rtl": {
+                    "status": "PASS",
+                    "timestamp": "2026-06-08T00:00:00Z",
+                    "command": "fixture",
+                    "evidence": "fixture",
+                    "snapshot": {},
+                },
+                "post-sim": {
+                    "status": "PASS",
+                    "timestamp": "2026-06-08T00:00:00Z",
+                    "command": "fixture",
+                    "evidence": "fixture",
+                    "snapshot": {},
+                },
+            },
+        }
+        (docs / "workflow_state.json").write_text(
+            json.dumps(state, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        rc, output = _run_final_delivery_gate(str(proj))
+        if verbose:
+            print(output)
+        if rc == 0:
+            return False, "final gate should FAIL on contract hash drift"
+        if "content hash changed" not in output:
+            return False, "final gate did not report content hash drift"
+        return True, "OK"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Workflow gate regression runner")
@@ -510,6 +642,7 @@ def main() -> int:
         ("post_rtl_rerun_after_tb", run_post_rtl_rerun_after_tb),
         ("success_no_marker_rejected", run_success_no_marker_rejected),
         ("invalid_marker_rejected", run_invalid_marker_rejected),
+        ("bom_marker_accepted", run_bom_marker_accepted),
         ("parameterized_leaf_tb_not_integration",
          run_parameterized_leaf_tb_not_integration),
         ("l2_post_sim_requires_pre_integration",
@@ -522,6 +655,8 @@ def main() -> int:
          run_module_sim_alias_matches_pre_integration),
         ("l2_direct_integration_tb_after_post_rtl_fails",
          run_l2_direct_integration_tb_after_post_rtl_fails),
+        ("workflow_cursor_written", run_workflow_cursor_written),
+        ("final_gate_rejects_hash_drift", run_final_gate_rejects_hash_drift),
     ]
     for name, fn in special_cases:
         ok, msg = fn(verbose=args.verbose)

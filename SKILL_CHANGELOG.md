@@ -1,5 +1,33 @@
 # Skill 迭代日志
 
+## 2026-06-08 - Lightweight Workflow Cursor + Contract Hash Freshness
+
+### 背景
+
+评估 `OthmanAdi/planning-with-files` 后，确认其“文件化当前状态、决策前重读、session recovery、hash attestation”对本 skill 有借鉴意义，但通用三件套 `task_plan.md/findings.md/progress.md` 会加重 RTL 项目的非代码副产物负担。因此本轮只吸收机制：用一个脚本生成的 cursor 文件承载当前阶段与下一步，用已有 workflow_state 的 sha256 snapshot 作为合同锁。
+
+### 改动
+
+| 改动 | 位置 | 说明 |
+|------|------|------|
+| Workflow Cursor | `scripts/workflow_gate.py` | 每次 phase PASS/FAIL 都写 `docs/workflow_cursor.md`，记录 current phase、status、next command、forbidden action、blocking findings |
+| PASS 输出补强 | `scripts/workflow_gate.py` | gate 输出新增 cursor 路径，方便 agent 在长上下文后回看 |
+| Hash freshness final 复核 | `scripts/final_delivery_gate.py` | workflow_state snapshot 若含 sha256，final gate 按内容哈希判断 stale，不再只依赖 mtime/size |
+| Windows BOM marker 兼容 | `scripts/workflow_gate.py` | `COMPILE_RTL_ONLY`/`COMPILE_STANDALONE` 行首带 UTF-8 BOM 时仍能识别 |
+| 文档同步 | `SKILL.md`, `README.md`, `README_CN.md` | 标明 cursor 是生成状态摘要，final gate 要求 fresh sha256 snapshots |
+| 回归补强 | `tests/run_workflow_gate_regression.py` | 新增 `workflow_cursor_written`、`final_gate_rejects_hash_drift`、`bom_marker_accepted` cases |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| `python tests/run_workflow_gate_regression.py` | PASS，覆盖 cursor 写入和 final hash drift 检测 |
+| `python tests/run_artifact_evidence_regression.py` | PASS，确认上一轮 artifact/evidence hardening 未回退 |
+| `python scripts/skill_static_check.py --root .` | PASS |
+| `python -m py_compile scripts/workflow_gate.py scripts/final_delivery_gate.py tests/run_workflow_gate_regression.py` | PASS |
+
+---
+
 ## 2026-06-08 - Artifact Budget + False-Evidence Semantics Hardening
 
 ### 背景

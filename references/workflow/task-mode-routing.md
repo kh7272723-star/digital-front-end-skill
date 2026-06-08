@@ -37,6 +37,8 @@ commands are stop-go boundaries, not finalization-only checks. Each PASS writes
 scripts are wrapper internals or debug tools. Their direct output is not phase
 evidence. `--force` is for human-directed recovery only; it is not a waiver for
 final PASS.
+Each run also writes `docs/workflow_cursor.md`, a compact recovery pointer for
+current phase, next command, and forbidden next action.
 
 | Boundary | Command | Predecessors (L1/L2) | If FAIL |
 |----------|---------|---------------------|---------|

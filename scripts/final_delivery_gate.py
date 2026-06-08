@@ -9,6 +9,7 @@ Usage:
         [--compile-log LOG ...] [--sim-log LOG ...] [--rtl-file FILE ...]
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -88,10 +89,12 @@ def _required_workflow_phases(project_dir: str, level: str) -> list[str]:
 
 
 def _compute_file_info(filepath: str) -> dict | None:
-    """Return {'mtime': float, 'size': int} for a file, or None."""
+    """Return {'mtime': float, 'size': int, 'sha256': str} for a file, or None."""
     try:
         st = os.stat(filepath)
-        return {"mtime": st.st_mtime, "size": st.st_size}
+        with open(filepath, 'rb') as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        return {"mtime": st.st_mtime, "size": st.st_size, "sha256": digest}
     except OSError:
         return None
 
@@ -112,6 +115,10 @@ def _check_phase_snapshot_fresh(project_dir: str, phase: str,
         current = _compute_file_info(fpath)
         if current is None:
             stale.append(f"{relpath} (deleted)")
+            continue
+        stored_sha = stored_info.get('sha256')
+        if stored_sha and stored_sha != current.get('sha256'):
+            stale.append(f"{relpath} (content hash changed)")
             continue
         if (stored_info.get('mtime') != current.get('mtime') or
                 stored_info.get('size') != current.get('size')):
