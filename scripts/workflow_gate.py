@@ -529,6 +529,89 @@ def phase_pass_guidance(phase: str, level: str, project_dir: str) -> list[str]:
     return []
 
 
+def phase_fail_guidance(phase: str, level: str, project_dir: str,
+                        findings: list[str]) -> list[str]:
+    """Return workflow navigation lines printed after a phase FAIL.
+
+    Each FAIL output tells the agent exactly what to fix and what NOT to do,
+    reducing the probability of skip-to-next-phase errors.
+    """
+    is_l2 = _is_l2_or_higher(level)
+    guidance = [
+        f"GATE_STATUS: FAIL ({len(findings)} finding(s))",
+    ]
+
+    if phase == "pre-rtl":
+        guidance.extend([
+            "NEXT_REQUIRED_ACTION: fix missing/empty contract docs listed above",
+            "NEXT_REQUIRED_ACTION: fill SPEC.md, timing-contract.md, verification_matrix.md",
+        ])
+        if is_l2:
+            guidance.append(
+                "NEXT_REQUIRED_ACTION: L2 also requires interface-contracts.md, "
+                "contract_implementation_matrix.md, protocol_claim_ledger.md")
+        guidance.append(
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase pre-rtl {project_dir}")
+        guidance.append(
+            "FORBIDDEN_NEXT_ACTION: do not write RTL until pre-rtl gate PASS")
+
+    elif phase == "post-rtl":
+        guidance.extend([
+            "NEXT_REQUIRED_ACTION: fix RTL style issues and compile errors listed above",
+            "NEXT_REQUIRED_ACTION: ensure compile log has # COMPILE_RTL_ONLY or # COMPILE_STANDALONE marker",
+            "NEXT_REQUIRED_ACTION: ensure compile log has explicit success evidence",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-rtl {project_dir}",
+        ])
+        if is_l2:
+            guidance.append(
+                "FORBIDDEN_NEXT_ACTION: do not create TB files or integration sim "
+                "artifacts before post-rtl PASS")
+        guidance.append(
+            "FORBIDDEN_NEXT_ACTION: do not proceed to self-review or TB generation "
+            "until post-rtl gate PASS")
+
+    elif phase == "pre-integration":
+        guidance.extend([
+            "NEXT_REQUIRED_ACTION: complete per-module TB and simulation for every "
+            "non-top sub-module",
+            "NEXT_REQUIRED_ACTION: record evidence in docs/module_verification_matrix.md",
+            "NEXT_REQUIRED_ACTION: each module needs TB + sim log with ALL_TESTS_PASS "
+            "and SIMULATION_DONE, or Accepted Limitation with evidence binding",
+        ])
+        if is_l2:
+            guidance.append(
+                f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py "
+                f"--phase pre-integration {project_dir}")
+            guidance.append(
+                "FORBIDDEN_NEXT_ACTION: do not write or run integration TB "
+                "until pre-integration gate PASS")
+
+    elif phase == "post-sim":
+        guidance.extend([
+            "NEXT_REQUIRED_ACTION: fix simulation failures listed above",
+            "NEXT_REQUIRED_ACTION: re-run failing sims after RTL/TB fixes",
+            "NEXT_REQUIRED_ACTION: run false-pass audit on sim logs",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-sim {project_dir}",
+            "FORBIDDEN_NEXT_ACTION: do not claim delivery or run final gate "
+            "until post-sim gate PASS",
+        ])
+
+    elif phase == "final":
+        guidance.extend([
+            "NEXT_REQUIRED_ACTION: fix all delivery-blocking findings listed above",
+            "NEXT_REQUIRED_ACTION: ensure all predecessor phases have PASS stamps",
+            "NEXT_REQUIRED_ACTION: ensure artifact budget is clean (no tb_archive/ "
+            "duplicate logs, .vvp without .log)",
+            "NEXT_REQUIRED_ACTION: ensure verification_matrix PASS claims have "
+            "evidence binding (test name, log token, checker name, or waiver)",
+            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase final {project_dir}",
+            "FORBIDDEN_NEXT_ACTION: do not claim Status: PASS in dev_log "
+            "until final gate PASS",
+        ])
+
+    return guidance
+
+
 # ---------------------------------------------------------------------------
 #  Discovery helpers
 # ---------------------------------------------------------------------------
@@ -904,8 +987,12 @@ def main() -> int:
             print(f"- {finding}")
         stamp_phase(state, phase, "FAIL", summarize_evidence(phase, findings), cmd_str)
         save_state(project, state)
-        write_workflow_cursor(project, phase, "FAIL", level, cmd_str, findings, [])
+        fail_guidance = phase_fail_guidance(phase, level, str(project), findings)
+        write_workflow_cursor(project, phase, "FAIL", level, cmd_str, findings,
+                              fail_guidance)
         print(f"- Cursor saved to {cursor_file_path(project)}")
+        for line in fail_guidance:
+            print(line)
         return 1
 
     # PASS: stamp state with artifact snapshot

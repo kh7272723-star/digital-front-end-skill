@@ -394,10 +394,14 @@ def check_verification_matrix_evidence(proj_dir: str) -> list[str]:
     appears in TB source or sim logs. Catches matrix rows that remain Pending
     while the dev log claims PASS.
 
-    Strengthened: matrix entries must bind to actual TB tasks/markers and sim
-    log markers.  Mere mentions inside docs are not evidence.  If a matrix item
-    is planned but not run, require NOT_RUN or WAIVED and prevent final PASS
-    unless accepted limitation is explicit.
+    Hardened P1: each matrix row claiming PASS must bind to at least one of:
+      - test name (T1, test_wr_burst, etc.) found in TB or sim log
+      - log token (sim/*.log reference)
+      - checker/assertion name (check_*, assert_*)
+      - explicit Accepted Limitation with evidence binding
+
+    Rows with plain "PASS" text but no evidence binding are rejected as
+    "coverage claim without evidence".
     """
     findings = []
     docs_dir = os.path.join(proj_dir, 'docs')
@@ -413,6 +417,10 @@ def check_verification_matrix_evidence(proj_dir: str) -> list[str]:
     matrix_text = doc_texts['verification_matrix.md']
     if not any(doc_texts.values()):
         return findings  # missing docs are reported elsewhere
+
+    # Collect evidence content for cross-referencing
+    tb_content, tb_warnings = _collect_tb_content(proj_dir)
+    combined_content, _ = _collect_tb_and_sim_content(proj_dir)
 
     if matrix_text and _project_claims_pass(proj_dir):
         for i, line in enumerate(matrix_text.splitlines(), 1):
@@ -440,6 +448,43 @@ def check_verification_matrix_evidence(proj_dir: str) -> list[str]:
                     "while project claims PASS. Mark as Accepted Limitation or WAIVED "
                     "if intentional.")
                 continue
+
+            # P1 hardening: rows claiming PASS must have evidence binding
+            row_text = ' '.join(cells)
+            has_pass_claim = bool(re.search(
+                r'\b(PASS|ALL_TESTS_PASS|PASSED|SUCCESS)\b',
+                row_text, re.IGNORECASE))
+            if not has_pass_claim:
+                continue
+
+            # Check for evidence binding in the row
+            has_test_name = bool(re.search(
+                r'\b(?:T\d+[A-Za-z]?|[FBDCE]\d+[A-Za-z]?|test_\w+|TEST_\w+)\b',
+                row_text, re.IGNORECASE))
+            has_log_token = bool(re.search(
+                r'\b(?:sim[/\\][^|\s,;]+\.log|logs[/\\][^|\s,;]+\.log|'
+                r'sim_log_gate|ALL_TESTS_PASS|SIMULATION_DONE)\b',
+                row_text, re.IGNORECASE))
+            has_checker_name = bool(re.search(
+                r'\b(?:check_\w+|assert_\w+|scoreboard|expected_\w+|exp_\w+)\b',
+                row_text, re.IGNORECASE))
+            has_accepted_limitation = bool(re.search(
+                r'\bAccepted\s+Limitation\b', row_text, re.IGNORECASE))
+
+            if not (has_test_name or has_log_token or has_checker_name or
+                    has_accepted_limitation):
+                # The row says PASS but has no evidence binding
+                # Check if it's a header row (first column is #, Item, Test, etc.)
+                first_cell = cells[0].lower() if cells else ''
+                if first_cell in ('#', 'no.', 'item', 'test', 'id', 'category',
+                                  'feature', 'check', ''):
+                    continue
+                findings.append(
+                    f"verification_matrix.md line {i}: claims PASS but has no "
+                    f"evidence binding (missing: test name, log token, checker "
+                    f"name, or Accepted Limitation). "
+                    f"Add at minimum one of: T<number>, sim/*.log path, "
+                    f"check_<name>, or Accepted Limitation with reason.")
 
     # Extract test references:
     # - table row IDs like | T1 |, | F01 |, | P04 |
@@ -472,9 +517,6 @@ def check_verification_matrix_evidence(proj_dir: str) -> list[str]:
     if not test_names:
         return findings
 
-    # Collect TB source and sim logs separately for evidence classification
-    tb_content, tb_warnings = _collect_tb_content(proj_dir)
-    combined_content, _ = _collect_tb_and_sim_content(proj_dir)
     findings.extend(tb_warnings)
 
     for name in sorted(test_names):
@@ -601,12 +643,28 @@ def check_module_verification_evidence(proj_dir: str, level: str) -> list[str]:
             continue
 
         row_text = '\n'.join(rows)
-        has_waiver = bool(re.search(
-            r'\b(waiver|waived|integration[-\s]?only|top[-\s]?level|'
-            r'top\s+wrapper|trivial)\b',
-            row_text, re.IGNORECASE))
-        if has_waiver:
-            continue
+        # Unified waiver semantics: must have Accepted Limitation with evidence binding
+        # (specific test name, log token, scoreboard ref, or concrete reason with scope)
+        has_accepted_limitation = bool(re.search(
+            r'\bAccepted\s+Limitation\b', row_text, re.IGNORECASE))
+        if has_accepted_limitation:
+            # Check for evidence binding (same standard as pre_integration_gate)
+            has_binding = bool(re.search(
+                r'\b(?:T\d+[A-Za-z]?|test_\w+|check_\w+|'
+                r'sim[/\\][^|\s,;]+\.log|tb[/\\][^|\s,;]+\.v|'
+                r'covered\s+by\s+(?:integration|module)\s+test|'
+                r'verified\s+(?:at|in|by)\s+(?:integration|test|TB)\s+\w+|'
+                r'because|due\s+to|reason|since|scope|limited\s+to|'
+                r'compensated\s+by|mitigated\s+by)\b',
+                row_text, re.IGNORECASE))
+            if has_binding:
+                continue  # Valid Accepted Limitation
+            # Accepted Limitation without evidence binding -> not sufficient
+            findings.append(
+                f"Module '{module_name}' has 'Accepted Limitation' but lacks "
+                "evidence binding (test name, log token, scoreboard ref, or "
+                "concrete reason). Add T<number>, test_<name>, sim/*.log path, "
+                "or specific scope explanation.")
 
         paths = []
         for row in rows:

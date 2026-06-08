@@ -228,25 +228,54 @@ def _line_has_pass_marker(line: str) -> bool:
 
 
 def _line_has_accepted_limitation(line: str) -> bool:
-    """Return True only for explicit Accepted Limitation with reason.
+    """Return True only for explicit Accepted Limitation with evidence binding.
 
-    Tightened: bare 'waiver', 'trivial', or 'integration-only' are not
-    sufficient by themselves. Must include 'Accepted Limitation' with
-    an explanatory reason in the same context.
+    Unified waiver semantics (shared with project_artifact_gate and
+    final_delivery_gate):
+
+    Accepted Limitation MUST bind to at least one of:
+      - Specific test name (e.g. T5, test_wr_burst_check)
+      - Log token (e.g. sim/tb_burst_planner.log)
+      - Scoreboard evidence reference (e.g. check_alloc_b_count)
+      - Explicit waiver reason with concrete scope
+
+    Bare words like 'waiver', 'trivial', 'top-level', 'integration-only'
+    without evidence binding are NOT sufficient for pre-integration PASS.
+    'verified at integration' must name WHICH integration test.
     """
+    # Must have Accepted Limitation marker
     accepted = re.search(r'\bAccepted\s+Limitation\b(?P<tail>.*)$',
                          line, re.IGNORECASE)
-    if accepted:
-        tail = re.sub(r'[`|\s]+', ' ', accepted.group('tail')).strip()
-        if len(tail) >= 8:
-            return True
+    if not accepted:
+        return False
 
-    # Allow explicit waivers with reason beyond just the word "waiver"
-    has_waiver_with_reason = bool(re.search(
-        r'\b(?:waiver|waived)\b.*\b(?:because|due\s+to|reason|since|'
-        r'residual\s+risk|integration\s*[-]?\s*only)\b',
-        line, re.IGNORECASE))
-    if has_waiver_with_reason:
+    tail = re.sub(r'[`|\s]+', ' ', accepted.group('tail')).strip()
+
+    # Must have evidence binding: test name, log token, scoreboard ref,
+    # or concrete waiver reason with scope explanation
+    has_evidence_binding = bool(re.search(
+        r'\b(?:T\d+[A-Za-z]?|test_\w+|check_\w+|'
+        r'sim[/\\][^|\s,;]+\.log|tb[/\\][^|\s,;]+\.v|'
+        r'covered\s+by\s+(?:integration|module)\s+test|'
+        r'verified\s+(?:at|in|by)\s+(?:integration|test|TB)\s+\w+)',
+        tail, re.IGNORECASE))
+
+    if has_evidence_binding:
+        return True
+
+    # "verified at integration" alone without naming which test -> not sufficient
+    if re.search(r'verified\s+at\s+integration', tail, re.IGNORECASE):
+        if not re.search(r'\b(?:T\d+|test_\w+|check_\w+|tb_\w+\.\w+)',
+                         tail, re.IGNORECASE):
+            return False  # Too vague
+
+    # Has reason text of sufficient length AND concrete scope
+    has_concrete_scope = bool(re.search(
+        r'\b(?:because|due\s+to|reason|since|scope|limited\s+to|'
+        r'applies\s+only\s+to|does\s+not\s+affect|'
+        r'compensated\s+by|mitigated\s+by)\b',
+        tail, re.IGNORECASE))
+    if len(tail) >= 12 and has_concrete_scope:
         return True
 
     return False

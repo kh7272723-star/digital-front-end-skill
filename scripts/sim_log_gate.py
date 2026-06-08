@@ -139,7 +139,64 @@ def check_log(text: str) -> list[str]:
         break  # one is enough
 
     findings.extend(check_semantic_contradictions(text))
+    findings.extend(check_cpl_zero_byte_success(text))
 
+    return findings
+
+
+def check_cpl_zero_byte_success(text: str) -> list[str]:
+    """SIM_CPL_ZERO1: reject PASS logs with successful completion but bytes=0.
+
+    For DMA/mover projects, a completion entry showing status=0 (success) and
+    bytes=0 is a strong false-pass indicator unless the test is explicitly a
+    zero-byte transfer test.  A successfully completed DMA transfer must have
+    moved non-zero bytes (except for intentional zero-length descriptor tests).
+    """
+    findings: list[str] = []
+
+    # Look for completion summary patterns like:
+    #   CPL[0]: status=0, bytes=0
+    #   Completion: status=00, bytes_written=00000000
+    #   cpl_status=0 cpl_bytes=0
+    # Match (status=0, bytes=0) or (bytes=0, status=0) in any order.
+    zero_byte_success = re.findall(
+        r'CPL\[\d+\][^;\n]*'
+        r'(?:status\s*=\s*0[^;\n]*bytes\s*=\s*0|'
+        r'bytes\s*=\s*0[^;\n]*status\s*=\s*0)',
+        text, re.IGNORECASE)
+
+    if not zero_byte_success:
+        zero_byte_success = re.findall(
+            r'(?:cpl_status|cpl_status_o|status_o)\s*[=:]\s*0[^;\n]*'
+            r'(?:cpl_bytes|cpl_byte|bytes_written)\s*[=:]\s*0|'
+            r'(?:cpl_bytes|cpl_byte|bytes_written)\s*[=:]\s*0[^;\n]*'
+            r'(?:cpl_status|cpl_status_o|status_o)\s*[=:]\s*0|'
+            r'(?:completion|done)\s*:[^;\n]*'
+            r'(?:status\s*[=:]\s*0[^;\n]*bytes\s*[=:]\s*0|'
+            r'bytes\s*[=:]\s*0[^;\n]*status\s*[=:]\s*0)',
+            text, re.IGNORECASE)
+
+    if not zero_byte_success:
+        return findings
+
+    has_zero_byte_test = bool(re.search(
+        r'\b(zero[-\s]?(?:byte|length|transfer)|'
+        r'0[-\s]?byte\s+(?:transfer|test|descriptor)|'
+        r'empty\s+(?:transfer|descriptor)|'
+        r'null\s+descriptor)\b',
+        text, re.IGNORECASE))
+
+    if has_zero_byte_test:
+        return findings
+
+    findings.append(
+        "SIM_CPL_ZERO1: completion with status=0 (success) and bytes=0 "
+        "found in PASS log, but no zero-byte transfer test is declared. "
+        "A DMA mover reporting successful completion with zero bytes moved "
+        "indicates cpl_bytes is not being populated correctly, or the TB "
+        "is not checking completion bytes. "
+        "Either: fix cpl_bytes RTL wiring, add cpl_bytes comparison in TB, "
+        "or declare an explicit zero-byte transfer test if intentional.")
     return findings
 
 

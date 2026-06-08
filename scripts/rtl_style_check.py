@@ -769,7 +769,13 @@ def check_tb_capture_without_expected(lines):
 
 
 def check_tb_status_unchecked(lines):
-    """TB_STATUS1: detect cpl_status/cpl_status_o connected but never compared."""
+    """TB_STATUS1: detect cpl_status/cpl_status_o connected but never compared.
+
+    Supports simple data-flow recognition: if cpl_status is captured into an
+    array (e.g. cpl_statuses[idx] <= cpl_status_o) and that array element is
+    later compared, the check is considered satisfied.  Previously this pattern
+    was missed, causing false positives for indirect status checking.
+    """
     code_text = '\n'.join(strip_comments(lines))
     if not _looks_like_testbench(code_text):
         return
@@ -777,20 +783,61 @@ def check_tb_status_unchecked(lines):
     has_status_decl = re.search(r'\b(cpl_status|cpl_status_o|status_o)\b', code_text)
     if not has_status_decl:
         return
-    # Check if it's ever compared or error-checked
-    has_status_check = re.search(
+
+    # Direct check: cpl_status compared inline
+    has_direct_check = re.search(
         r'\bcpl_status\w*\s*(?:!==?|==)\s*\d+\'[bh]\d+|'
         r'status\w*\s*(?:!==?|==)\s*\d+\'[bh]0+\b|'
         r'\bcheck.*status|status.*error|status_err',
         code_text)
-    if not has_status_check:
-        for i, raw in enumerate(lines, 1):
-            code = raw.split('//')[0]
-            if re.search(r'\b(cpl_status|cpl_status_o)\b', code) and \
-               not re.search(r'(check|error|assert|TEST_FAIL|test_err|!==|==)', code):
-                warn('W', 'TB_STATUS1', i,
-                     "cpl_status is connected but never compared/checked in testbench; "
-                     "completion errors silently pass. Add status verification.")
+
+    if has_direct_check:
+        return
+
+    # Indirect check: cpl_status captured into array, then array compared later
+    # Pattern: cpl_statuses[idx] <= cpl_status_o  (capture)
+    #          ...later...
+    #          if (cpl_statuses[i] !== 0) or check_status(cpl_statuses[i])
+    has_array_capture = re.search(
+        r'(\w+)\s*\[[^\]]+\]\s*<=\s*(?:cpl_status|cpl_status_o|status_o)\b',
+        code_text, re.IGNORECASE)
+    if has_array_capture:
+        array_name = has_array_capture.group(1)
+        # Check if the array is later compared
+        has_array_compare = re.search(
+            rf'\b{re.escape(array_name)}\s*\[[^\]]+\]\s*(?:!==?|==)\s*\d+\'[bh]',
+            code_text, re.IGNORECASE)
+        has_array_check_task = re.search(
+            rf'check_\w+\s*\([^;]*{re.escape(array_name)}\s*\[',
+            code_text, re.IGNORECASE)
+        if has_array_compare or has_array_check_task:
+            return  # Indirect check via array is valid
+
+    # Also detect simple alias: wire cpl_s = cpl_status_o; ... if (cpl_s !== 0)
+    # Look for alias assignment then comparison of alias
+    has_alias = re.search(
+        r'(?:wire|reg|logic)?\s*(\w+)\s*=\s*(?:cpl_status|cpl_status_o|status_o)\s*;',
+        code_text, re.IGNORECASE)
+    if has_alias:
+        alias_name = has_alias.group(1)
+        has_alias_compare = re.search(
+            rf'\b{re.escape(alias_name)}\s*(?:!==?|==)\s*\d+\'[bh]',
+            code_text, re.IGNORECASE)
+        if has_alias_compare:
+            return  # Indirect check via alias is valid
+
+    # No check found at all
+    for i, raw in enumerate(lines, 1):
+        code = raw.split('//')[0]
+        if re.search(r'\b(cpl_status|cpl_status_o)\b', code) and \
+           not re.search(r'(check|error|assert|TEST_FAIL|test_err|!==|==)', code):
+            warn('W', 'TB_STATUS1', i,
+                 "cpl_status is connected but never compared/checked in testbench "
+                 "(no direct comparison, array-capture-then-compare, or alias-compare "
+                 "pattern found); completion errors silently pass. "
+                 "Add status verification via direct check, captured array comparison, "
+                 "or named check task.")
+            break
 
 
 def _lhs_assignments_in_always_block(block):
@@ -1081,52 +1128,439 @@ def check_tb_timeout_finish_only(lines):
                  "Use $fatal or increment error counter and print TESTS_FAILED.")
 
 
+def _detect_tb_tier(lines, code_text):
+    """Determine if a TB is top/integration or leaf/per-module tier.
+
+    Returns 'top' if the TB connects to a completion interface or multiple AXI
+    master channels (indicating full mover/integration testing).
+    Returns 'leaf' if the TB connects to a single module's output contract.
+    Returns None if neither pattern is detected.
+    """
+    # Top/integration signals: completion interface
+    has_cpl_interface = bool(re.search(
+        r'\b(cpl_bytes_o|cpl_status_o|cpl_valid_o|cpl_done_o)\b',
+        code_text, re.IGNORECASE))
+
+    # Top/integration: multiple AXI master channels (both AW and AR present as DUT ports)
+    has_aw_master = bool(re.search(
+        r'\b(m_axi_awvalid|awvalid_o|aw_valid_o)\b', code_text, re.IGNORECASE))
+    has_ar_master = bool(re.search(
+        r'\b(m_axi_arvalid|arvalid_o|ar_valid_o)\b', code_text, re.IGNORECASE))
+
+    # Top/integration: instantiates a top/wrapper/mover module
+    dut_is_top = False
+    for raw in lines:
+        code = _strip_line_comment(raw)
+        m = re.search(
+            r'\b((?:dma|nvme|nand|mover|storage)\w*(?:_top|_wrapper|_mover|_sys)\w*|'
+            r'\w*(?:_top|_wrapper|_mover|_sys))\b\s+'
+            r'(?:#\s*\([^;]*?\)\s*)?\w+\s*\(',
+            code, re.IGNORECASE)
+        if m:
+            dut_is_top = True
+            break
+
+    # Leaf module signals: burst planner, descriptor frontend, data FIFO
+    has_burst_planner = bool(re.search(
+        r'\b(alloc_b_count_o|rd_cmd_\w+_o|wr_cmd_\w+_o)\b',
+        code_text, re.IGNORECASE))
+    has_desc_frontend = bool(re.search(
+        r'\b(desc_\w+_o|desc_data_o|desc_valid_o)\b',
+        code_text, re.IGNORECASE))
+    has_data_fifo = bool(re.search(
+        r'\b(fifo_wdata_o|fifo_rdata_o|dfifo_data_o|'
+        r'rdata_o|wdata_o|full_o|empty_o)\b',
+        code_text, re.IGNORECASE))
+
+    if has_cpl_interface or (has_aw_master and has_ar_master) or dut_is_top:
+        return 'top'
+    if has_burst_planner or has_desc_frontend or has_data_fifo:
+        return 'leaf'
+    # Fallback: if TB has AXI signals but no completion interface,
+    # check if it's a single-module TB by counting distinct module instances
+    if has_aw_master:
+        # Single AXI master + no completion -> likely leaf
+        module_instances = set()
+        for raw in lines:
+            code = _strip_line_comment(raw)
+            m = re.search(r'\b(\w+)\s+(?:#\s*\([^;]*?\)\s*)?(\w+)\s*\(', code)
+            if m:
+                module_instances.add(m.group(1))
+        if len(module_instances) <= 1:
+            return 'leaf'
+    return None
+
+
+def _detect_connected_axi_signals(code_text):
+    """Return set of AXI transaction-shape signal families actually wired in this TB.
+
+    Only detects signals that are connected (DUT ports, wire declarations), not
+    mere mentions in comments.
+    """
+    connected = set()
+    signal_map = {
+        'AWADDR': r'\b(?:m_axi_awaddr|awaddr_o|aw_addr_o)\b',
+        'AWLEN': r'\b(?:m_axi_awlen|awlen_o|aw_len_o)\b',
+        'WSTRB': r'\b(?:m_axi_wstrb|wstrb_o|w_strb_o)\b',
+        'WLAST': r'\b(?:m_axi_wlast|wlast_o)\b',
+        'BRESP': r'\b(?:m_axi_bresp|bresp_i)\b',
+        'RRESP': r'\b(?:m_axi_rresp|rresp_i)\b',
+        'CPL_BYTES': r'\b(?:cpl_bytes_o|cpl_byte_cnt_o|bytes_written_o|total_bytes_o)\b',
+        'CPL_STATUS': r'\b(?:cpl_status_o|completion_status_o)\b',
+    }
+    for sig_name, pattern in signal_map.items():
+        if re.search(pattern, code_text, re.IGNORECASE):
+            connected.add(sig_name)
+    return connected
+
+
+def _check_top_tb_shape(lines, code_text):
+    """Check that a top/integration AXI mover TB verifies all connected
+    transaction-shape signals.
+
+    Returns list of missing signal names (empty = all checked)."""
+    connected = _detect_connected_axi_signals(code_text)
+    if not connected:
+        return []
+
+    check_patterns = {
+        'AWADDR': (
+            r'(?:m_axi_awaddr|aw_addr|awaddr)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_awaddr|exp_awaddr|awaddr.*expected|check_\w+.*awaddr)'),
+        'AWLEN': (
+            r'(?:m_axi_awlen|aw_len|awlen)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_awlen|exp_awlen|awlen.*expected|check_\w+.*awlen)'),
+        'WSTRB': (
+            r'(?:m_axi_wstrb|wstrb)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_wstrb|exp_wstrb|wstrb.*expected|check_\w+.*wstrb)'),
+        'WLAST': (
+            r'(?:m_axi_wlast|wlast)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_wlast|exp_wlast|wlast.*expected|check_\w+.*wlast)'),
+        'BRESP': (
+            r'(?:m_axi_bresp|bresp)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_bresp|exp_bresp|bresp.*expected|check_\w+.*bresp)'),
+        'RRESP': (
+            r'(?:m_axi_rresp|rresp)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_rresp|exp_rresp|rresp.*expected|check_\w+.*rresp)'),
+        'CPL_BYTES': (
+            r'(?:cpl_bytes|cpl_byte_cnt|bytes_written|total_bytes)\w*\s*(?:==|===|!=|!==)|'
+            r'(?:expected_cpl_bytes|exp_cpl_bytes|cpl_bytes.*expected|check_\w+.*cpl_bytes)'),
+        'CPL_STATUS': (
+            r'(?:cpl_status|completion_status)\w*\s*(?:==|===|!=|!==)|'
+            r'(?:expected_cpl_status|exp_cpl_status|cpl_status.*expected|check_\w+.*cpl_status)'),
+    }
+
+    missing = []
+    for sig_name in sorted(connected):
+        pat = check_patterns.get(sig_name)
+        if pat and not re.search(pat, code_text, re.IGNORECASE):
+            missing.append(sig_name)
+    return missing
+
+
+def _check_leaf_tb_contract(lines, code_text):
+    """Check that a leaf/per-module TB verifies its module-specific output contract.
+
+    Returns list of findings (empty = all checked)."""
+    findings = []
+
+    # Burst planner: must check alloc_b_count and rd/wr command shape
+    has_alloc_b_count = bool(re.search(
+        r'\b(alloc_b_count_o|alloc_b_count)\b', code_text, re.IGNORECASE))
+    if has_alloc_b_count:
+        has_count_check = re.search(
+            r'(?:alloc_b_count|alloc_b_cnt)\w*\s*(?:==|===|!=|!==)|'
+            r'(?:expected_wr_bursts|exp_wr_bursts|expected_rd_bursts)|'
+            r'check_\w+.*(?:alloc_b_count|burst_count)',
+            code_text, re.IGNORECASE)
+        if not has_count_check:
+            findings.append(
+                'alloc_b_count_o connected but not compared against expected burst count')
+
+    has_rd_cmd = bool(re.search(r'\brd_cmd_\w+_o\b', code_text, re.IGNORECASE))
+    has_wr_cmd = bool(re.search(r'\bwr_cmd_\w+_o\b', code_text, re.IGNORECASE))
+    if has_rd_cmd:
+        has_rd_check = re.search(
+            r'(?:rd_cmd_\w+)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_rd|exp_rd)|check_\w+.*rd_cmd',
+            code_text, re.IGNORECASE)
+        if not has_rd_check:
+            findings.append(
+                'rd_cmd_*_o connected but read command shape not verified')
+    if has_wr_cmd:
+        has_wr_check = re.search(
+            r'(?:wr_cmd_\w+)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_wr|exp_wr)|check_\w+.*wr_cmd',
+            code_text, re.IGNORECASE)
+        if not has_wr_check:
+            findings.append(
+                'wr_cmd_*_o connected but write command shape not verified')
+
+    # Descriptor frontend: must check desc fields (excludes _ready_o
+    # backpressure signals; only data-bearing desc outputs are checked).
+    has_desc = bool(re.search(
+        r'\b(desc_\w+_(?!ready_o\b)\w*_o|desc_data_o|desc_valid_o)\b',
+        code_text, re.IGNORECASE))
+    if has_desc:
+        has_desc_check = re.search(
+            r'(?:desc_\w+)\s*(?:==|===|!=|!==)|'
+            r'(?:expected_desc|exp_desc)|'
+            r'check_\w+.*desc|'
+            r'(?:field_mismatch|shape_mismatch)_cnt|'
+            r'\w*accept\w*\s*\([^)]*\b(?:expected|desc|field)',
+            code_text, re.IGNORECASE)
+        if not has_desc_check:
+            findings.append(
+                'desc_*_o connected but descriptor fields not verified')
+
+    # Data FIFO: must check data integrity.
+    # Recognises both prefixed (fifo_rdata_o) and bare (rdata_o) port names
+    # when the TB instantiates a FIFO-style DUT.
+    has_fifo_data = bool(re.search(
+        r'\b(fifo_wdata_o|fifo_rdata_o|dfifo_data_o|fifo_data_o|'
+        r'rdata_o|wdata_o)\b',
+        code_text, re.IGNORECASE))
+    if has_fifo_data:
+        has_data_check = re.search(
+            r'(?:fifo.*data|dfifo_data|r?data_o)\w*\s*(?:==|===|!=|!==)|'
+            r'(?:expected_data|exp_data|scoreboard|data.*check|'
+            r'data_mismatch_cnt)|'
+            r'check_\w+.*(?:fifo|data)',
+            code_text, re.IGNORECASE)
+        if not has_data_check:
+            findings.append(
+                'FIFO data output connected but data integrity not verified')
+
+    return findings
+
+
+def _check_generic_fifo_integrity(lines, code_text):
+    """Lightweight FIFO data-integrity check for TBs that instantiate a FIFO
+    but were not classified as top or leaf tier.
+
+    Detects FIFO-like DUTs (full/empty/rdata/wdata interface) and verifies
+    the TB has at least one data-integrity mechanism (mismatch counter,
+    data comparison, scoreboard).
+    """
+    # Only trigger if TB instantiates a FIFO-style DUT with data ports
+    has_fifo_dut = bool(re.search(
+        r'\b(?:r?data_o|wdata_i|full_o|empty_o)\b',
+        code_text, re.IGNORECASE))
+    if not has_fifo_dut:
+        return
+
+    has_integrity = bool(re.search(
+        r'(?:data_mismatch|mismatch_cnt|expected_data|exp_data|'
+        r'scoreboard|data.*check|check_\w+.*data|'
+        r'r?data_o?\s*(?:==|===|!=|!==))',
+        code_text, re.IGNORECASE))
+    if not has_integrity:
+        warn('W', 'TB_COMPLETION_ONLY1', 1,
+             "FIFO-style TB has no detectable data-integrity check "
+             "(mismatch counter, expected-data comparison, or scoreboard). "
+             "Add data comparison or mismatch tracking to verify FIFO correctness.")
+
+
 def check_tb_completion_only(lines):
-    """TB_COMPLETION_ONLY1: DMA/NVMe TB that checks completion status/bytes
-    but never compares AWADDR/AWLEN/WSTRB/WLAST/BRESP."""
+    """TB_COMPLETION_ONLY1: detect completion-only TBs for DMA/mover projects.
+
+    Split into two tiers based on what the TB actually connects to:
+
+    Top/integration AXI mover TB (has completion interface or multiple AXI channels):
+        Must check AWADDR, AWLEN, WSTRB, WLAST, BRESP, RRESP, cpl_bytes, cpl_status
+        for every such signal connected to the DUT. Missing any = E-level.
+
+    Leaf/per-module TB (single module, no completion interface):
+        Must check the module's specific output contract signals
+        (alloc_b_count, rd/wr cmd shape, desc fields, FIFO data).
+        Does NOT require full transaction-shape scoreboard.
+
+    No longer triggers on filename/module-name keyword matching (dma/axi/nvme).
+    Only triggers when AXI or completion signals are actually wired.
+    """
     code_text = '\n'.join(strip_comments(lines))
     if not _looks_like_testbench(code_text):
         return
-    # Must be a DMA/NVMe context
-    if not re.search(r'(axi|nvme|dma|m_axi|awaddr|awlen|wstrb|wlast|bresp)', code_text, re.IGNORECASE):
+
+    tier = _detect_tb_tier(lines, code_text)
+    if tier is None:
+        # Fallback: check for generic FIFO data integrity when the TB
+        # instantiates a FIFO-like DUT but no tier could be determined.
+        _check_generic_fifo_integrity(lines, code_text)
         return
 
-    # Check for transaction-shape comparisons
-    has_awaddr = re.search(
-        r'(?:m_axi_awaddr|aw_addr|awaddr)\s*(?:==|===|!=|!==)|'
-        r'check_\w+.*(?:awaddr|aw_addr)',
+    if tier == 'top':
+        missing = _check_top_tb_shape(lines, code_text)
+        if missing:
+            warn('E', 'TB_COMPLETION_ONLY1', 1,
+                 f"Top/integration AXI mover TB checks completion but never "
+                 f"compares transaction-shape fields: {', '.join(missing)}. "
+                 f"Beat count alone can false-pass. Add transaction-shape scoreboard "
+                 f"for each connected signal.")
+        return
+
+    if tier == 'leaf':
+        findings = _check_leaf_tb_contract(lines, code_text)
+        for finding in findings:
+            warn('W', 'TB_COMPLETION_ONLY1', 1,
+                 f"Leaf per-module TB output contract gap: {finding}. "
+                 f"Add contract-to-test checks for module output signals.")
+        return
+
+
+def check_tb_burst_planner(lines):
+    """TB_BURST_PLANNER1 (W-level): detect burst-planner TBs that don't verify
+    alloc_b_count, rd/wr cmd shape, 4KB boundary split, or final short burst.
+
+    Triggered when a TB connects to alloc_b_count_o, rd_cmd_*_o, or wr_cmd_*_o
+    from a burst planner module.  Checks that the TB verifies:
+      - read/write burst counts (expected_rd_bursts / expected_wr_bursts)
+      - alloc_b_count_o == expected_wr_bursts
+      - 4KB boundary split (multi-burst test with partial first/last beats)
+      - final short burst (last burst AWLEN < max)
+      - read/write ready independent misalignment
+    """
+    code_text = '\n'.join(strip_comments(lines))
+    if not _looks_like_testbench(code_text):
+        return
+
+    has_alloc_b = bool(re.search(
+        r'\b(alloc_b_count_o|alloc_b_count)\b', code_text, re.IGNORECASE))
+    has_rd_cmd = bool(re.search(r'\brd_cmd_\w+_o\b', code_text, re.IGNORECASE))
+    has_wr_cmd = bool(re.search(r'\bwr_cmd_\w+_o\b', code_text, re.IGNORECASE))
+
+    if not (has_alloc_b or has_rd_cmd or has_wr_cmd):
+        return
+
+    findings = []
+
+    # 1. alloc_b_count must be compared against expected write burst count
+    if has_alloc_b:
+        has_alloc_check = re.search(
+            r'(?:alloc_b_count|alloc_b_cnt)\w*\s*(?:==|===|!=|!==)|'
+            r'(?:expected_wr_bursts|exp_wr_bursts|expected_rd_bursts|exp_rd_bursts)|'
+            r'check_\w+.*(?:alloc_b_count|burst_count)',
+            code_text, re.IGNORECASE)
+        if not has_alloc_check:
+            findings.append(
+                "alloc_b_count_o not compared against expected burst count")
+
+    # 2. Read/write burst counts must be independently checked
+    if has_rd_cmd and has_wr_cmd:
+        has_rd_burst_check = re.search(
+            r'(?:expected_rd_bursts|exp_rd_bursts|rd_burst_count|num_rd_bursts)'
+            r'\s*(?:==|===|!=|!==)',
+            code_text, re.IGNORECASE)
+        has_wr_burst_check = re.search(
+            r'(?:expected_wr_bursts|exp_wr_bursts|wr_burst_count|num_wr_bursts)'
+            r'\s*(?:==|===|!=|!==)',
+            code_text, re.IGNORECASE)
+        if not has_rd_burst_check and not has_wr_burst_check:
+            findings.append(
+                "rd_cmd and wr_cmd connected but neither read nor write burst "
+                "count is independently verified")
+
+    # 3. 4KB boundary split test coverage
+    has_4kb_test = re.search(
+        r'\b(4096|4\s*[Kk][Bb]|four\s*[Kk]|boundary.*split|split.*boundary|'
+        r'cross.*boundary|boundary.*cross)',
         code_text, re.IGNORECASE)
-    has_awlen = re.search(
-        r'(?:m_axi_awlen|aw_len|awlen)\s*(?:==|===|!=|!==)|'
-        r'check_\w+.*(?:awlen|aw_len)',
+    has_multi_burst = re.search(
+        r'\b(NLB|nlp|num_bursts?|multi_burst|burst_count|num_beats)\s*[=>]+\s*'
+        r'(?:[2-9]|\d{2,})',
         code_text, re.IGNORECASE)
-    has_wstrb = re.search(
-        r'(?:m_axi_wstrb|wstrb)\s*(?:==|===|!=|!==)|'
-        r'check_\w+.*wstrb',
+    if has_multi_burst and not has_4kb_test:
+        findings.append(
+            "multi-burst transfer tested but no 4KB boundary split coverage; "
+            "add a test that crosses a 4KB boundary")
+
+    # 4. Final short burst test
+    has_short_last = re.search(
+        r'\b(short.*last|last.*short|final.*short|short.*final|'
+        r'partial.*burst|burst.*partial|remaining.*beats?)\b',
         code_text, re.IGNORECASE)
-    has_wlast = re.search(
-        r'(?:m_axi_wlast|wlast)\s*(?:==|===|!=|!==)|'
-        r'check_\w+.*wlast',
+    # If total_bytes not divisible by max_burst_bytes, there must be a short final burst
+    has_non_aligned = re.search(
+        r'\b(total_bytes|transfer_size|byte_count)\b[^;]*\b(?:%\s*(?:max_burst|4096)|'
+        r'\[\s*(?:max_burst|4096)\s*-\s*1\s*:\s*0\s*\]\s*!=\s*0)',
         code_text, re.IGNORECASE)
-    has_bresp = re.search(
-        r'(?:m_axi_bresp|bresp)\s*(?:==|===|!=|!==)|'
-        r'check_\w+.*bresp',
+    if has_non_aligned and not has_short_last:
+        findings.append(
+            "non-aligned transfer but no short final burst test; "
+            "last burst may have fewer beats than AWLEN implies")
+
+    # 5. Read/write ready independent misalignment
+    has_rd_ready = bool(re.search(
+        r'\b(rready|r_ready|rd_ready)\b.*\b(?:0|deassert|low|stall)\b',
+        code_text, re.IGNORECASE))
+    has_wr_ready = bool(re.search(
+        r'\b(wready|w_ready|wr_ready)\b.*\b(?:0|deassert|low|stall)\b',
+        code_text, re.IGNORECASE))
+    if has_rd_cmd and has_wr_cmd:
+        if has_rd_ready and not has_wr_ready:
+            findings.append(
+                "read ready backpressure tested but write ready backpressure "
+                "not independently tested; read/write channels may be coupled")
+
+    for finding in findings:
+        warn('W', 'TB_BURST_PLANNER1', 1,
+             f"Burst planner TB gap: {finding}. "
+             f"Add burst-level scoreboard checks for the burst planner module.")
+
+
+def check_tb_cpl_bytes(lines):
+    """TB_CPL_BYTES1 (E-level for top/integration, W-level for leaf):
+    detect DMA/mover TBs where cpl_bytes is connected but never compared,
+    or compared only for non-zero without checking the exact value.
+
+    For top/integration TBs: cpl_bytes must be explicitly compared against
+    the expected transfer size.  A check that only verifies cpl_bytes > 0
+    is insufficient for PASS.
+    """
+    code_text = '\n'.join(strip_comments(lines))
+    if not _looks_like_testbench(code_text):
+        return
+
+    has_cpl_bytes = bool(re.search(
+        r'\b(cpl_bytes_o|cpl_byte_cnt_o|bytes_written_o|total_bytes_o|'
+        r'cpl_bytes\b|cpl_byte_cnt\b)',
+        code_text, re.IGNORECASE))
+    if not has_cpl_bytes:
+        return
+
+    # Determine tier
+    tier = _detect_tb_tier(lines, code_text)
+
+    # Check for exact comparison (not just cpl_bytes > 0 or cpl_bytes != 0)
+    has_exact_check = re.search(
+        r'(?:cpl_bytes|cpl_byte_cnt|bytes_written|total_bytes)\w*\s*(?:==|===)\s*'
+        r'(?:expected_\w+|exp_\w+|\w*expected\w*|\d+\'d\d+)',
+        code_text, re.IGNORECASE)
+    has_check_task = re.search(
+        r'check_\w+\s*\([^;]*(?:cpl_bytes|cpl_byte_cnt|bytes_written)',
+        code_text, re.IGNORECASE)
+    has_inexact_check = re.search(
+        r'(?:cpl_bytes|cpl_byte_cnt|bytes_written|total_bytes)\w*\s*(?:>|>=|!=|!==)\s*0\b',
         code_text, re.IGNORECASE)
 
-    if has_awaddr and has_awlen and has_wstrb and has_wlast and has_bresp:
-        return  # all checked
+    if has_exact_check or has_check_task:
+        return  # Sufficient: exact comparison exists
 
-    missing = []
-    if not has_awaddr: missing.append('AWADDR')
-    if not has_awlen: missing.append('AWLEN')
-    if not has_wstrb: missing.append('WSTRB')
-    if not has_wlast: missing.append('WLAST')
-    if not has_bresp: missing.append('BRESP')
+    if has_inexact_check:
+        level = 'E' if tier == 'top' else 'W'
+        warn(level, 'TB_CPL_BYTES1', 1,
+             "cpl_bytes is compared only as non-zero (>0/!=0) without exact "
+             "value check. A completion that reports partial bytes can false-pass. "
+             "Compare cpl_bytes against expected transfer size "
+             "(e.g. cpl_bytes == expected_bytes).")
+        return
 
-    warn('E', 'TB_COMPLETION_ONLY1', 1,
-         f"DMA/NVMe testbench checks completion but never compares "
-         f"transaction-shape fields: {', '.join(missing)}. "
-         f"Beat count alone can false-pass. Add transaction-shape scoreboard.")
+    # No check at all
+    level = 'E' if tier == 'top' else 'W'
+    warn(level, 'TB_CPL_BYTES1', 1,
+         "cpl_bytes/completion bytes is connected but never compared in TB. "
+         "Successful completions with bytes=0 can false-pass. "
+         "Add explicit cpl_bytes comparison against expected transfer size.")
 
 
 def check_parameter_hardcode(lines):
@@ -1665,6 +2099,8 @@ def check_file(filepath):
     check_tb_unbounded_wait(lines)
     check_tb_timeout_finish_only(lines)
     check_tb_completion_only(lines)
+    check_tb_burst_planner(lines)
+    check_tb_cpl_bytes(lines)
     check_tb_capture_without_expected(lines)
     check_tb_status_unchecked(lines)
     check_c17_arr1(lines)

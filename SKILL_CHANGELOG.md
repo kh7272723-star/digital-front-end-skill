@@ -1,5 +1,46 @@
 # Skill 迭代日志
 
+## 2026-06-08 - Gate Semantic Precision: 门禁语义精准化 (P0/P1/P2)
+
+### 背景
+
+新一轮 Descriptor-Based AXI DMA Mover 项目复盘确认：门禁能发现问题，但语义和作用域还不够精准。真问题（cpl_bytes 恒0、RRESP error path 未测试、burst planner 少算、matrix 声称覆盖过多但证据不足）和误报（TB_COMPLETION_ONLY1 关键词误触发、TB_STATUS1 数组/别名漏识别、WSTRB evidence 保守识别）混在一起。
+
+核心矛盾：规则不是不够多，而是"命中位置、作用域、后续动作提示"不够硬。
+
+### 改动
+
+| 优先级 | 改动 | 位置 | 说明 |
+|:---:|------|------|------|
+| **P0** | TB_COMPLETION_ONLY1 作用域拆分 | `rtl_style_check.py` | 按 TB 实际连接的信号分为两档：top/integration TB（有 completion interface 或多 AXI master）→ 必须检查 AWADDR/AWLEN/WSTRB/WLAST/BRESP/RRESP/cpl_bytes/cpl_status；leaf/per-module TB（单模块输出契约）→ 只检查该模块特定信号（alloc_b_count/rd_cmd/wr_cmd/desc fields/FIFO data）。不再按文件名/module 名关键词触发。 |
+| **P0** | TB_BURST_PLANNER1 新门禁 | `rtl_style_check.py` | 检测 alloc_b_count_o、rd_cmd_*、wr_cmd_* 连接但未验证的 TB：要求检查 burst 数、alloc_b_count==expected_wr_bursts、4KB boundary split、final short burst、rd/wr ready 独立错位。W 级。 |
+| **P0** | TB_CPL_BYTES1 + SIM_CPL_ZERO1 新门禁 | `rtl_style_check.py` + `sim_log_gate.py` | rtl_style: cpl_bytes 连接但从未比较、或仅 >0 比较→ 缺精确值检查（E 级 top / W 级 leaf）。sim_log: 日志中成功 completion status=0 bytes=0 且无 zero-byte 测试声明 → FAIL。 |
+| **P1** | Waiver/evidence 语义统一 | `pre_integration_gate.py` + `project_artifact_gate.py` | Accepted Limitation 必须绑定证据：test name (T5, test_*)、log token (sim/*.log)、scoreboard ref (check_*)、或具体 scope 说明。"verified at integration" 单独不充分——必须指明 which test。三个 gate 使用一致逻辑。 |
+| **P1** | TB_STATUS1 数组/别名识别 | `rtl_style_check.py` | 支持简单数据流识别：cpl_status_o → cpl_statuses[idx] capture → later compare 模式；wire alias → compare 模式。不再误报间接检查写法。 |
+| **P1** | Verification matrix PASS 证据绑定 | `project_artifact_gate.py` | 矩阵行声称 PASS 但无 test name/log token/checker name/Accepted Limitation → "coverage claim without evidence" FAIL。纯文本 PASS 不再是有效证据。 |
+| **P2** | 门禁 FAIL 导航输出 | `workflow_gate.py` | 新增 `phase_fail_guidance()`：每个 phase FAIL 后输出 GATE_STATUS、NEXT_REQUIRED_ACTION（多条）、NEXT_REQUIRED_COMMAND、FORBIDDEN_NEXT_ACTION。写入 workflow_cursor.md。降低 agent 跳步概率。 |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| `python tests/run_workflow_gate_regression.py` | 17/17 PASS |
+| `python tests/run_artifact_evidence_regression.py` | PASS |
+| `python scripts/skill_static_check.py --root .` | PASS |
+| `python -m py_compile` changed scripts (5 files) | PASS |
+| `rtl_style_check.py --level L2` on DMA mover top TB | 预期 FAIL：TB_COMPLETION_ONLY1(E) CPL_BYTES+CPL_STATUS + TB_CPL_BYTES1(E) + TB_STATUS1(W) |
+| `rtl_style_check.py --level L2` on DMA burst planner TB | 预期 W-level only：TB_COMPLETION_ONLY1(W) desc fields |
+
+### 文件变更
+
+- `scripts/rtl_style_check.py`：TB_COMPLETION_ONLY1 重构（两档）+ TB_BURST_PLANNER1 新 checker + TB_CPL_BYTES1 新 checker + TB_STATUS1 数组/别名识别
+- `scripts/sim_log_gate.py`：SIM_CPL_ZERO1 新 checker（成功 completion bytes=0 检测）
+- `scripts/pre_integration_gate.py`：`_line_has_accepted_limitation()` 证据绑定强化
+- `scripts/project_artifact_gate.py`：`check_module_verification_evidence()` waiver 统一 + `check_verification_matrix_evidence()` PASS 证据绑定
+- `scripts/workflow_gate.py`：`phase_fail_guidance()` 新函数 + main() FAIL 路径集成
+
+---
+
 ## 2026-06-08 - Lightweight Workflow Cursor + Contract Hash Freshness
 
 ### 背景
