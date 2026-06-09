@@ -1318,7 +1318,7 @@ def _check_leaf_tb_contract(lines, code_text):
     # when the TB instantiates a FIFO-style DUT.
     has_fifo_data = bool(re.search(
         r'\b(fifo_wdata_o|fifo_rdata_o|dfifo_data_o|fifo_data_o|'
-        r'rdata_o|wdata_o)\b',
+        r'rd_data_o|rdata_o|wdata_o)\b',
         code_text, re.IGNORECASE))
     if has_fifo_data:
         has_data_check = re.search(
@@ -1406,6 +1406,53 @@ def check_tb_completion_only(lines):
                  f"Leaf per-module TB output contract gap: {finding}. "
                  f"Add contract-to-test checks for module output signals.")
         return
+
+
+def check_tb_pass_nocomp(lines):
+    """TB_PASS_NOCOMP1 (W-level): detect TBs that report TEST_PASS but have
+    zero value comparisons anywhere in the file.
+
+    A TB that only checks flags (full_o, empty_o, done_o) without comparing
+    any signal value against an expected value is a false-pass risk.  This
+    checker is a simple gut-check: if there is NO ==, !==, expected_*,
+    mismatch, scoreboard, or assert anywhere in the file, and yet the file
+    prints TEST_PASS, flag it.
+
+    Does NOT replace tb_data_integrity_gate.py which checks specific data
+    signals; this is a coarse "no comparison at all" baseline.
+    """
+    code_text = '\n'.join(strip_comments(lines))
+    if not _looks_like_testbench(code_text):
+        return
+
+    # Only trigger if TB reports tests passing
+    has_test_pass = re.search(
+        r'\bTEST_PASS\b|\bTEST_.*PASS\b|\bT\d+\s*PASS\b', code_text)
+    if not has_test_pass:
+        return
+
+    # Check for any value comparison mechanism
+    has_comparison = bool(re.search(
+        r'(?:==|===|!=|!==)',
+        code_text))
+    has_expected = bool(re.search(
+        r'\b(?:expected|exp)_\w+|\w+_(?:expected|exp)\b',
+        code_text))
+    has_mismatch = bool(re.search(
+        r'\b(?:mismatch|error)_cnt\b|\bdata_mismatch\b|\bfield_mismatch\b',
+        code_text))
+    has_scoreboard = bool(re.search(r'\bscoreboard\b', code_text))
+    has_check_task = bool(re.search(r'\bcheck_\w+\s*\(', code_text))
+    has_assert = bool(re.search(r'\bassert\b', code_text))
+
+    if not (has_comparison or has_expected or has_mismatch
+            or has_scoreboard or has_check_task or has_assert):
+        warn('W', 'TB_PASS_NOCOMP1', 1,
+             "TB reports TEST_PASS but has zero value comparisons "
+             "(no ==, !==, expected_*, mismatch_cnt, scoreboard, check_, "
+             "or assert anywhere in the file). Tests that only check flags "
+             "can false-pass with corrupted data. Add at least one value "
+             "comparison for a data-bearing signal.")
 
 
 def check_tb_burst_planner(lines):
@@ -2098,6 +2145,7 @@ def check_file(filepath):
         check_fsm_seq_has_datapath(lines)
     check_tb_unbounded_wait(lines)
     check_tb_timeout_finish_only(lines)
+    check_tb_pass_nocomp(lines)
     check_tb_completion_only(lines)
     check_tb_burst_planner(lines)
     check_tb_cpl_bytes(lines)

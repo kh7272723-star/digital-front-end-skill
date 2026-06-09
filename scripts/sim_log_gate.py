@@ -140,6 +140,7 @@ def check_log(text: str) -> list[str]:
 
     findings.extend(check_semantic_contradictions(text))
     findings.extend(check_cpl_zero_byte_success(text))
+    findings.extend(check_skipped_tests(text))
 
     return findings
 
@@ -197,6 +198,41 @@ def check_cpl_zero_byte_success(text: str) -> list[str]:
         "is not checking completion bytes. "
         "Either: fix cpl_bytes RTL wiring, add cpl_bytes comparison in TB, "
         "or declare an explicit zero-byte transfer test if intentional.")
+    return findings
+
+
+def check_skipped_tests(text: str) -> list[str]:
+    """SIM_SKIPPED1: flag ALL_TESTS_PASS logs with skipped tests.
+
+    A PASS log that contains SKIPPED tests means the test suite is incomplete.
+    Agent may have marked tests as skipped due to design limitations without
+    addressing them.  This is a W-level warning (E-level if P0 tests skipped).
+    """
+    findings = []
+
+    has_pass = bool(re.search(r'ALL_TESTS_PASS', text, re.IGNORECASE))
+    if not has_pass:
+        return findings
+
+    # Find all skipped test lines
+    skipped_lines = re.findall(
+        r'(?:SKIPPED|SKIP)\s*[-:]\s*(.+)', text, re.IGNORECASE)
+
+    if not skipped_lines:
+        # Also check for "SKIPPED" in general context
+        if not re.search(r'\bSKIPPED\b|\bSKIP\b', text, re.IGNORECASE):
+            return findings
+        skipped_lines = ["(details unclear)"]
+
+    severity = 'E' if len(skipped_lines) >= 2 else 'W'
+    reason_list = '; '.join(s[:60] for s in skipped_lines[:3])
+    findings.append(
+        f"SIM_SKIPPED1[{severity}]: ALL_TESTS_PASS but {len(skipped_lines)} "
+        f"test(s) were SKIPPED: {reason_list}. "
+        f"Skipped tests in a PASS log mean the design may have unverified "
+        f"gaps. Either fix the design to pass these tests, or document them "
+        f"as Accepted Limitations with evidence binding.")
+
     return findings
 
 

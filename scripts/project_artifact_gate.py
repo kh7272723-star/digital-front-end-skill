@@ -918,33 +918,67 @@ def check_scoreboard_substance(proj_dir: str) -> list[str]:
                      tb_content, re.IGNORECASE):
         return findings
 
-    # Check for transaction-shape signals mentioned but not compared
-    shape_signals = {
-        'AWADDR': r'\b(?:m_axi_awaddr|awaddr|aw_addr)\b',
-        'AWLEN': r'\b(?:m_axi_awlen|awlen|aw_len)\b',
-        'WSTRB': r'\b(?:m_axi_wstrb|wstrb)\b',
-        'WLAST': r'\b(?:m_axi_wlast|wlast)\b',
-        'BRESP': r'\b(?:m_axi_bresp|bresp)\b',
-    }
+    # Check for transaction-shape signals mentioned but not compared.
+    # Each entry: (display_name, base_pattern, expected_keyword)
+    # - base_pattern: detects any mention of the signal family in TB
+    # - expected_keyword: the stem used in expected_xxx variable names
+    shape_signals = [
+        ('AWADDR', r'\b(?:m_axi_awaddr|awaddr|aw_addr)\b', 'awaddr'),
+        ('AWLEN',  r'\b(?:m_axi_awlen|awlen|aw_len)\b',    'awlen'),
+        ('WSTRB',  r'\b(?:m_axi_wstrb|wstrb)\b',           'wstrb'),
+        ('WLAST',  r'\b(?:m_axi_wlast|wlast)\b',           'wlast'),
+        ('BRESP',  r'\b(?:m_axi_bresp|bresp)\b',           'bresp'),
+        ('RRESP',  r'\b(?:m_axi_rresp|rresp)\b',           'rresp'),
+        ('CPL_BYTES', r'\b(?:cpl_bytes_xfr_o|cpl_bytes_o|cpl_byte)\b', 'cpl_bytes'),
+        ('CPL_STATUS', r'\b(?:cpl_status_o|completion_status_o)\b', 'cpl_status'),
+    ]
 
-    for sig_name, sig_pattern in shape_signals.items():
+    for sig_name, sig_pattern, exp_keyword in shape_signals:
         if not re.search(sig_pattern, tb_content, re.IGNORECASE):
             continue
-        # Signal is mentioned -- check for real comparison logic
-        has_comparison = re.search(
+
+        # Check 1: direct comparison on raw signal or its variant
+        has_direct = re.search(
             sig_pattern + r'\s*(?:==|===|!=|!==)', tb_content, re.IGNORECASE)
+
+        # Check 2: array-indexed reference plus comparison
+        # e.g. aw_addr[0] == expected_awaddr
+        base = sig_pattern.replace(r'\b(?:', '').split('|')[0].replace(')', '')
+        base_clean = re.sub(r'[^a-zA-Z0-9_]', '', base)
+        has_array_cmp = bool(base_clean) and re.search(
+            r'\b' + re.escape(base_clean) + r'\[\d+\]\s*(?:==|===|!=|!==)',
+            tb_content, re.IGNORECASE)
+
+        # Check 3: any variable containing the base name compared
+        # e.g. awlen_actual == expected_awlen
+        has_alias_cmp = bool(base_clean) and re.search(
+            r'\b\w*' + re.escape(base_clean) + r'\w*\s*(?:==|===|!=|!==)',
+            tb_content, re.IGNORECASE)
+
+        # Check 4: expected_<keyword> variable is compared against anything
+        has_exp_var = re.search(
+            r'(?:expected|exp)_' + re.escape(exp_keyword) + r'\w*',
+            tb_content, re.IGNORECASE)
+        has_exp_compared = has_exp_var and re.search(
+            r'(?:expected|exp)_' + re.escape(exp_keyword) + r'\w*\s*(?:==|===|!=|!==)|'
+            r'(?:==|===|!=|!==)\s*(?:expected|exp)_' + re.escape(exp_keyword) + r'\w*',
+            tb_content, re.IGNORECASE)
+
+        # Check 5: check_task references
         has_check_task = re.search(
             r'check_\w+[^;]*' + sig_pattern, tb_content, re.IGNORECASE)
-        has_expected = re.search(
-            r'(?:expected|exp)_\w*' + sig_pattern, tb_content, re.IGNORECASE)
+
+        # Check 6: assertion
         has_assertion = re.search(
             r'\bassert\b[^;]*' + sig_pattern, tb_content, re.IGNORECASE)
 
-        if not (has_comparison or has_check_task or has_expected or has_assertion):
+        if not (has_direct or has_array_cmp or has_alias_cmp
+                or has_exp_compared or has_check_task or has_assertion):
             findings.append(
                 f"Scoreboard substance: {sig_name} appears in TB but has no "
-                f"comparison against expected value (no ==, check_task, expected_*, "
-                f"or assert). Signal mention alone is not scoreboard evidence.")
+                f"comparison against expected value (no == on raw/alias/array, "
+                f"no expected_* variable, no check_task, no assert). "
+                f"Signal mention alone is not scoreboard evidence.")
 
     return findings
 
@@ -1123,7 +1157,7 @@ def check_storage_mover_evidence(proj_dir: str) -> list[str]:
     if rtl_has_wstrb or doc_claims_unaligned:
         tb_has_wstrb_check = bool(re.search(
             r'\b(?:expected_wstrb|exp_wstrb|wstrb_check|check.*wstrb|'
-            r'wstrb\s*(?:===|==|!==|!=))\b',
+            r'wstrb\s*(?:===|==|!==|!=))',
             combined_content, re.IGNORECASE))
         if not tb_has_wstrb_check:
             findings.append(
@@ -1141,7 +1175,7 @@ def check_storage_mover_evidence(proj_dir: str) -> list[str]:
     if rtl_has_rresp and doc_claims_rd_error:
         tb_has_rresp_check = bool(re.search(
             r'\b(?:rresp\s*(?:===|==|!==|!=)|check.*rresp|rresp.*error|'
-            r'expected_rresp|exp_rresp)\b',
+            r'expected_rresp|exp_rresp)',
             combined_content, re.IGNORECASE))
         if not tb_has_rresp_check:
             findings.append(
@@ -1159,8 +1193,9 @@ def check_storage_mover_evidence(proj_dir: str) -> list[str]:
 
     if rtl_has_cpl_bytes or doc_claims_cpl_bytes:
         tb_has_cpl_check = bool(re.search(
-            r'\b(?:cpl_bytes\s*(?:===|==|!==|!=)|check.*cpl_bytes|'
-            r'expected_cpl|exp_cpl|cpl_bytes.*expected)\b',
+            r'\b(?:cpl_bytes(?:_\w+)?\s*(?:===|==|!==|!=)|'
+            r'check.*cpl_bytes|'
+            r'expected_cpl|exp_cpl|cpl_bytes.*expected)',
             combined_content, re.IGNORECASE))
         if not tb_has_cpl_check:
             findings.append(
