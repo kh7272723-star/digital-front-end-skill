@@ -118,7 +118,7 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 **Phase Exit Gates:** `scripts/workflow_gate.py` only. Each run writes `docs/workflow_cursor.md`; each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases and final detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
-**Step boundaries:** 1-6 planning -> 7 RTL-only (no TB) -> 7b post-rtl gate (COMPILE_RTL_ONLY) -> 8 self-review -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
+**Step boundaries:** 1-6 planning -> 7 RTL-only (no TB) -> 8 self-review + fix bugs -> 7b post-rtl gate (COMPILE_RTL_ONLY, on cleaned RTL) -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
 
 | Phase | Command | Scope |
 |-------|---------|-------|
@@ -330,7 +330,7 @@ A module that fails standalone compilation has undeclared dependencies, missing 
 
 Fix hazards per `nba-ordering-guide.md` Layer 3 before writing another line.
 
-### 7b. RTL phase exit -- post-rtl gate (mandatory for L1/L2)
+### 7b. RTL phase exit -- post-rtl gate (mandatory for L1/L2, AFTER self-review)
 
 Ran by: `python scripts/workflow_gate.py --phase post-rtl <project_dir>`. Validates RTL-only: runs `rtl_style_check.py` on `rtl/*.v` files (NOT tb/ or sim/), checks an RTL-only compile log with `# COMPILE_RTL_ONLY` or `# COMPILE_STANDALONE` plus explicit compile-success evidence, and stamps post-rtl PASS. Integration compile logs (with TB) are rejected. Before the first post-rtl PASS, any TB or non-compile simulation artifact is a phase-order violation. After a prior post-rtl PASS, re-running post-rtl is allowed for RTL debug and still checks RTL-only evidence; later phases use snapshots to detect stale downstream evidence.
 
@@ -338,11 +338,13 @@ Optional debug tools (`pre_sim_check.sh`, direct `rtl_style_check.py`, direct `c
 
 ### 7b-EXIT. RTL Phase Gate (stop-go before self-review)
 
-Do NOT proceed to Step 8 until `workflow_gate.py --phase post-rtl` exits 0. Inside: `rtl_style_check.py` on rtl/*.v only (no E-level), RTL-only compile log with `# COMPILE_RTL_ONLY`, L2 RSP1-RSP4 hard gates. Compile logs with TB files violate the RTL-only boundary.
+Step 8 (self-review) must complete and any RTL fixes applied BEFORE running this gate. Do NOT proceed to Step 8c until `workflow_gate.py --phase post-rtl` exits 0. Inside: `rtl_style_check.py` on rtl/*.v only (no E-level), RTL-only compile log with `# COMPILE_RTL_ONLY`, L2 RSP1-RSP4 hard gates. Compile logs with TB files violate the RTL-only boundary.
 
 If any FAIL: fix RTL, re-run Step 7 standalone compile, re-check this gate. Only clean exit proceeds to Step 8.
 
-### 8. RTL self-review against skill constraints
+### 8. RTL self-review against skill constraints (BEFORE post-rtl gate)
+
+Self-review runs BEFORE Step 7b (post-rtl gate). Review the generated RTL, find and fix bugs first, then run the gate on the cleaned RTL. This prevents gate stamps from going stale after review fixes.
 
 Before simulation, review the generated RTL against the full self-review checklist in `references/verification/self-review-checklist.md`. Each item must be explicitly checked and marked pass/fail. For each FAIL item, fix before proceeding and state what was changed. For each [PASS] item, cite the specific line numbers or signal names that satisfy the check -- do not mark items as passed without evidence.
 
