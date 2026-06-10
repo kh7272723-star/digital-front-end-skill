@@ -336,11 +336,11 @@ Ran by: `python scripts/workflow_gate.py --phase post-rtl <project_dir>`. Valida
 
 Optional debug tools (`pre_sim_check.sh`, direct `rtl_style_check.py`, direct `compile_log_gate.py`, yosys, standalone `iverilog`) may be used while fixing failures but do not replace the phase stamp.
 
-### 7b-EXIT. RTL Phase Gate (stop-go before self-review)
+### 7b-EXIT. RTL Phase Gate (stop-go AFTER self-review)
 
 Step 8 (self-review) must complete and any RTL fixes applied BEFORE running this gate. Do NOT proceed to Step 8c until `workflow_gate.py --phase post-rtl` exits 0. Inside: `rtl_style_check.py` on rtl/*.v only (no E-level), RTL-only compile log with `# COMPILE_RTL_ONLY`, L2 RSP1-RSP4 hard gates. Compile logs with TB files violate the RTL-only boundary.
 
-If any FAIL: fix RTL, re-run Step 7 standalone compile, re-check this gate. Only clean exit proceeds to Step 8.
+If any FAIL: fix RTL, re-run Step 7 standalone compile, re-check this gate. Only clean exit proceeds to Step 8c.
 
 ### 8. RTL self-review against skill constraints (BEFORE post-rtl gate)
 
