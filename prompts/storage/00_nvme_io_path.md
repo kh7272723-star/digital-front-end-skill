@@ -1,6 +1,6 @@
 # Prompt: NVMe I/O Read Path
 
-请使用 `digital-front-end-skill`，从 0 开始设计一个符合协议的 NVMe I/O read path 子系统。
+请使用 `digital-front-end-skill`，严格遵循skill的工作流，从 0 开始设计一个符合协议的 NVMe I/O read path 子系统。
 
 我没有提供额外项目 SPEC。请你自行根据需求形成合理的设计假设、接口合约、验证计划和可交付 RTL 工程。如果存在会阻塞正确设计的关键信息，可以先提出；否则请记录假设后继续完成设计。
 
@@ -10,7 +10,6 @@
 
 目标不是实现完整 NVMe controller、PCIe controller 或完整 Admin/I/O queue 系统，而是实现 read command 进入数据路径后的核心搬运逻辑。
 
-复杂子系统请合理使用sub-agent，提高开发效率。
 
 ## 功能
 

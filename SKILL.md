@@ -61,7 +61,7 @@ Read `references/reference-index.md` for a task-to-reference mapping. Key direct
 - **Verification**: `references/verification/` -- verification guidance, TB examples, assertion examples, coverage models, formal properties, UVM templates, AXI verification (BFM, scoreboard, coverage), simulation loop (lint->compile->simulate->fix), engineering review checklist
 - **Debug**: `references/debug/` -- debug cases, bug pattern library
 - **Existing project**: `references/project/` -- project adaptation, brownfield guidance, large module guidance
-- **CDC/synthesis**: `references/synthesis/` + `references/cdc-asymmetric.md` -- CDC guidelines, asymmetric Gray-code CDC, constraint guidance, synthesis guidance, toolchain closure, formal verification
+- **CDC/Synthesis**: `references/synthesis/` + `references/cdc-asymmetric.md` -- constraint guidance, synthesis guidance, toolchain closure
 - **Advanced**: `references/advanced/` -- low-power, DFT, UVM, physical awareness
 - **Design intuition**: `references/design/` -- design heuristics, tool-driven workflow, power/timing/area rules (low-power RTL, timing closure, resource optimization)
 
@@ -120,15 +120,14 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 **Phase Exit Gates:** `scripts/workflow_gate.py` only. Each run writes `docs/workflow_cursor.md`; each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases and final detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
 **Step boundaries (execution order):**
-L2: 1-6 planning -> 3a func-dict -> 7/7a per-module RTL+verify -> 7b cdc analysis -> 8 self-review -> 8a principle -> 8-EXIT post-rtl gate -> 8b verification PLAN -> 9 per-module TB+sim -> 9-EXIT pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim gate -> 11 final.
+L2: 1-6 planning -> 3a func-dict -> 7/7a per-module RTL+verify -> 8 self-review -> 8a principle -> 8-EXIT post-rtl gate -> 8b verification PLAN -> 9 per-module TB+sim -> 9-EXIT pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim gate -> 11 final.
 L1: skips 3a/7a/9/9-EXIT.
-L0: additionally skips 2a/5a/7b/8-EXIT (only P3 at 8a).
+L0: additionally skips 2a/5a/8-EXIT (only P3 at 8a).
 
 | Phase | Command | Scope |
 |-------|---------|-------|
 | Pre-RTL | `workflow_gate.py --phase pre-rtl <dir>` | Contract docs non-empty (blocks RTL) |
 | Post-RTL (8-EXIT) | `workflow_gate.py --phase post-rtl <dir>` | RTL-only: style + compile. TB out of scope. |
-| CDC Check (L1/L2) | `workflow_gate.py --phase cdc <dir>` | CDC report exists. All cross-domain signals have explicit CDC primitives. No manual 2-FF synchronizers. |
 | Pre-integration (9-EXIT, L2) | `workflow_gate.py --phase pre-integration <dir>` | L2 per-module evidence; no integration TB before this |
 | Post-sim (10-EXIT) | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
 | Final (11) | `workflow_gate.py --phase final <dir>` | Artifacts, budget, gates, freshness (blocks PASS claim) |
@@ -343,39 +342,12 @@ Fix hazards per `nba-ordering-guide.md` Layer 3 before writing another line.
 
 ### 7a. Per-Module Coder+Verifier Loop (mandatory for L2)
 
-
 For L2 multi-module projects: do NOT generate all RTL at once. Follow the
 per-module coder+verifier loop defined in `references/verification/per-module-coder-verifier.md`. Each sub-module must
 pass standalone compile + style check before the next sub-module is written.
 
 After ALL sub-modules pass, proceed to Step 8 (RTL self-review). For L0/L1
 (single-module), skip 7a and proceed directly to Step 8.
-
-### 7b. CDC Analysis (mandatory for L1/L2, skip for L0)
-
-For any design with more than one clock domain, produce `docs/cdc_report.md` before
-Step 8. Read `references/synthesis/cdc-guidelines.md` and `references/cdc-asymmetric.md`
-before writing the report.
-**CDC report must contain:**
-- List all clock domains with source and nominal frequency
-- For every signal crossing clock domains:
-  - Source domain -> destination domain
-  - Data width and coherence requirement
-  - Chosen CDC primitive (`xpm_cdc_pulse`, `xpm_fifo_async`, etc.)
-  - Justification
-
-**Hard rules:**
-
-| Signal type | Required CDC method | Forbidden |
-|-------------|-------------------|-----------|
-| Single-bit control crossing | `xpm_cdc_pulse` (or equivalent vendor primitive) | Manual 2-FF without ASYNC_REG |
-| Multi-bit data stream crossing | `xpm_fifo_async` (or equivalent async FIFO) | Independently synchronized multi-bit buses |
-| Reset deassertion | Reset synchronizer per destination domain | Single global async reset deassertion |
-
-**CDC Phase Gate (mandatory for L1/L2):** Before proceeding to Step 8, run
-`python scripts/workflow_gate.py --phase cdc <project_dir>`. This gate
-checks that `docs/cdc_report.md` exists, all clock domains are listed,
-and every cross-domain signal has an explicit CDC primitive.
 
 ### 8. RTL self-review against skill constraints
 

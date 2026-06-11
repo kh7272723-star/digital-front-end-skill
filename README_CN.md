@@ -8,7 +8,6 @@
 
 **FSM 拆分强制化（C8 R→M + C8a 阈值）：** ≥4 状态且 ≥6 控制输出 → 必须独立 `_fsm.v` 文件，主模块禁 `case(cstate)`，FSM 文件禁实例化 IP。
 
-**CDC 分析强制门禁（Step 7b）：** L1/L2 设计必须在 RTL 自审前产出 `cdc_report.md`。新增 `--phase cdc` gate。硬规则：跨域控制→`xpm_cdc_pulse`，跨域数据→`xpm_fifo_async`，禁止手动 2-FF 同步器。
 
 **AXI 通道分离模板：** 通用五模块 AW/W/B/AR/R 独立通道分离模式，纯结构封装，零逻辑。
 

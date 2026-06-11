@@ -46,7 +46,7 @@ except (AttributeError, io.UnsupportedOperation):
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PHASE_ORDER = ["pre-rtl", "post-rtl", "cdc", "pre-integration", "post-sim", "final"]
+PHASE_ORDER = ["pre-rtl", "post-rtl", "pre-integration", "post-sim", "final"]
 PHASE_ALIASES = {"module-sim": "pre-integration"}
 CLI_PHASE_CHOICES = PHASE_ORDER + sorted(PHASE_ALIASES)
 SCHEMA_VERSION = 1
@@ -210,13 +210,6 @@ def compute_phase_snapshot(project: Path, phase: str, level: str) -> dict:
                 if info:
                     snapshot[rel] = info
 
-
-    elif phase == "cdc":
-        # Snapshot CDC report
-        cdc_report = project / "docs" / "cdc_report.md"
-        info = _compute_file_snapshot(cdc_report)
-        if info:
-            snapshot["docs/cdc_report.md"] = info
     elif phase == "pre-integration":
         # Snapshot RTL files + module verification matrix + per-module TB/logs
         rtl_dir = project / "rtl"
@@ -512,14 +505,6 @@ def phase_pass_guidance(phase: str, level: str, project_dir: str) -> list[str]:
             "NEXT_REQUIRED_ACTION: complete review and verification plan before writing TB",
             f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-sim {project_dir}",
         ]
-
-    if phase == "cdc":
-        return [
-            "CURRENT_STEP_COMPLETED: Step 7b CDC analysis gate",
-            "NEXT_WORKFLOW_STEP: Step 8 RTL self-review",
-            "NEXT_REQUIRED_ACTION: proceed to RTL self-review (Step 8), then 8a, 8-EXIT, 8b verification plan",
-            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-rtl {project_dir}",
-        ]
     if phase == "pre-integration":
         return [
             "CURRENT_STEP_COMPLETED: Step 9-EXIT module-sim / pre-integration gate",
@@ -585,15 +570,6 @@ def phase_fail_guidance(phase: str, level: str, project_dir: str,
             "FORBIDDEN_NEXT_ACTION: do not proceed to self-review or TB generation "
             "until post-rtl gate PASS")
 
-
-    elif phase == "cdc":
-        guidance.extend([
-            "NEXT_REQUIRED_ACTION: create docs/cdc_report.md listing all clock domains",
-            "NEXT_REQUIRED_ACTION: document every cross-domain signal with its CDC primitive",
-            "NEXT_REQUIRED_ACTION: ensure no manual 2-FF synchronizers (use vendor primitives)",
-            f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase cdc {project_dir}",
-            "FORBIDDEN_NEXT_ACTION: do not proceed to RTL self-review until cdc gate PASS",
-        ])
     elif phase == "pre-integration":
         guidance.extend([
             "NEXT_REQUIRED_ACTION: complete per-module TB and simulation for every "
@@ -867,39 +843,6 @@ def gate_post_rtl(project: Path) -> list[str]:
     return findings
 
 
-def gate_cdc(project: Path) -> list[str]:
-    """CDC gate: checks docs/cdc_report.md exists and is non-trivial."""
-    findings: list[str] = []
-    level = detect_level(project)
-    
-    # Skip for L0 (single-module, single-clock designs)
-    if level == "L0":
-        return findings
-    
-    cdc_report = project / "docs" / "cdc_report.md"
-    if not cdc_report.exists():
-        findings.append(
-            "docs/cdc_report.md not found. Create a CDC report listing all clock "
-            "domains and cross-domain signals with their CDC primitives. "
-            "See references/synthesis/cdc-guidelines.md.")
-        return findings
-    
-    content = cdc_report.read_text(encoding="utf-8", errors="replace")
-    if len(content.strip()) < 50:
-        findings.append("docs/cdc_report.md exists but appears empty or trivial (<50 chars)")
-    
-    # Check for required sections
-    has_clock_list = bool(re.search(r'(clock|Clock|CLOCK).*(domain|Domain|DOMAIN)', content))
-    has_cdc_method = bool(re.search(r'(xpm_cdc|async_fifo|cdc_pulse|fifo_async|sync_stages)', content, re.IGNORECASE))
-    
-    if not has_clock_list:
-        findings.append("cdc_report.md must list all clock domains")
-    if not has_cdc_method:
-        findings.append("cdc_report.md must document CDC methods (xpm_cdc_pulse, xpm_fifo_async, etc.)")
-    
-    return findings
-
-
 def gate_pre_integration(project: Path) -> list[str]:
     rc, out = run_script("pre_integration_gate.py", [str(project)])
     print_block("pre_integration_gate", rc, out)
@@ -946,7 +889,6 @@ def gate_final(project: Path) -> list[str]:
 PHASE_GATE_MAP = {
     "pre-rtl": gate_pre_rtl,
     "post-rtl": gate_post_rtl,
-    "cdc": gate_cdc,
     "pre-integration": gate_pre_integration,
     "post-sim": gate_post_sim,
     "final": gate_final,

@@ -8,7 +8,6 @@ A domain-specific AI Agent Skill that turns a general-purpose LLM into a discipl
 
 **FSM Split Mandatory (C8 R->M + C8a threshold):** >=4 states AND >=6 control outputs must use separate `_fsm.v` file. Main module must not contain `case(cstate)`. FSM file must not instantiate IP.
 
-**CDC Analysis Gate (Step 7b):** L1/L2 designs must produce `cdc_report.md` before RTL self-review. New `--phase cdc` gate. Hard rules: cross-domain control -> `xpm_cdc_pulse`, cross-domain data -> `xpm_fifo_async`, no manual 2-FF synchronizers.
 
 **AXI Channel Split Template:** Generic five-module AW/W/B/AR/R independent channel separation pattern. Pure structural wrapper, zero logic.
 

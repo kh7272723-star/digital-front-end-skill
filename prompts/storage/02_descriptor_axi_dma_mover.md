@@ -1,6 +1,6 @@
 # Prompt: Descriptor-Based AXI DMA Mover
 
-请使用 `digital-front-end-skill`，从 0 开始设计一个面向存储系统的数据搬运引擎：descriptor-based AXI DMA mover。
+严格遵循 `digital-front-end-skill`的工作流，从 0 开始设计一个面向存储系统的数据搬运引擎：descriptor-based AXI DMA mover。工作流的每一个步骤都是有意义的，严禁跳过任何一个步骤，严禁跳过任何一个门禁，严禁为了通过门禁产生无意义的、形式化的内容或代码，严禁绕过当前步骤而事后补充内容来敷衍应付、通过门禁，确保工作流按顺序执行，每一段代码都能发挥对应的功能，每一个验证都能够有意义地验证功能正确性。
 
 我没有提供额外项目 SPEC。请你自行形成设计假设、接口合约、验证计划和可交付 RTL 工程。不要只交付单个 RTL 文件；如果这是多模块系统，请按合理层级拆分并说明集成关系。
 
@@ -8,7 +8,7 @@
 
 设计一个 DMA mover，用于根据上层 descriptor 在 AXI4 memory space 内搬运数据。该模块可用于存储控制器的 host buffer、internal buffer、metadata buffer 之间的数据搬运。
 
-请合理使用sub-agent，提高开发效率。
+
 
 ## 功能
 
