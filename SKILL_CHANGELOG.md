@@ -1,33 +1,5 @@
 ﻿# Skill 迭代日志
-## 2026-06-11 - 真实FPGA项目经验注入 (Real-FPGA-Project-Informed)
 
-### 背景
-
-深度分析了 `D:\科研\毕业论文撰写\终稿\项目源码\sources_1` 中的真实上板 FPGA 项目——一个基于 Xilinx UltraScale+ 的多 SSD NVMe 存储加速系统（connector.v 顶层，270+ 模块，包含 PCIe/DDR4/Aurora/EMIO 接口）。从中提炼了可工程化的 RTL 设计模式并注入 Skill。
-
-### 改动
-
-| 优先级 | 改动 | 说明 |
-|:---:|------|------|
-| **P0** | FSM 拆分强制化 (C8 R→M) | 新增 C8a 阈值规则：≥4 状态 + ≥6 控制输出 → 必须独立 `_fsm.v` 文件。主模块禁止含 `case(cstate)`，FSM 文件禁止实例化 IP/XPM |
-| **P0** | CDC 分析强制门禁 (Step 7b) | L1/L2 设计必须在 Step 8 前产出 `docs/cdc_report.md`。新增 `workflow_gate.py --phase cdc` gate。硬规则：跨域控制→`xpm_cdc_pulse`，跨域数据→`xpm_fifo_async`，禁止手动 2-FF 同步器 |
-| **P1** | 新增强化命名规则 (N14) | 多实例数字前缀 |
-| **P1** | AXI 通道分离模板 | 新建 `references/axi-dma/axi-channel-split-template.md`——通用五模块 AW/W/B/AR/R 分离模板（不含项目特定命名） |
-
-### 验收
-
-| 命令 | 预期 |
-|------|------|
-| `python scripts/skill_static_check.py` | PASS |
-
-### 经验来源
-
-- 真实项目中的 `xxx.v` + `xxx_fsm.v` 分离模式（nvme_ctrl + nvme_ctrl_fsm, cdma_ctrl + cdma_ctrl_fsm 等）
-- CDC 处理：`xpm_cdc_pulse` 用于控制脉冲，`xpm_fifo_async` 用于数据流
-- AXI 通道五拆分：`ssd_ddr_translator_axi` → AW/W/B/AR/R 五个独立子模块
-- Debug ILA 探针：`generate if(DEBUG)` 包围，FSM `cstate` 直接挂 probe
-
-# Skill 迭代日志
 ## 2026-06-11 - 工作流结构大修 (Workflow Restructuring)
 
 ### 背景

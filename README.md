@@ -4,13 +4,13 @@ A domain-specific AI Agent Skill that turns a general-purpose LLM into a discipl
 
 ## Latest release: v2026.06.11-r3
 
-**r3 — Real FPGA project experience injection:** Extracted engineering design patterns from a production 270+ module NVMe storage acceleration system (connector.v top-level, PCIe/DDR4/Aurora interfaces) running on Xilinx UltraScale+ hardware:
+**r3 — Engineering design pattern hardening:**
 
-**FSM Split Mandatory (C8 R->M + C8a threshold):** >=4 states AND >=6 control outputs must use separate `_fsm.v` file. Main module must not contain `case(cstate)`. FSM file must not instantiate IP. Derived from the consistent `xxx.v` + `xxx_fsm.v` separation pattern found in the real project.
+**FSM Split Mandatory (C8 R->M + C8a threshold):** >=4 states AND >=6 control outputs must use separate `_fsm.v` file. Main module must not contain `case(cstate)`. FSM file must not instantiate IP.
 
-**CDC Analysis Gate (Step 7b):** L1/L2 designs must produce `cdc_report.md` before RTL self-review. New `--phase cdc` gate. Hard rules: cross-domain control -> `xpm_cdc_pulse`, cross-domain data -> `xpm_fifo_async`, no manual 2-FF synchronizers. Derived from real-project CDC primitive practice.
+**CDC Analysis Gate (Step 7b):** L1/L2 designs must produce `cdc_report.md` before RTL self-review. New `--phase cdc` gate. Hard rules: cross-domain control -> `xpm_cdc_pulse`, cross-domain data -> `xpm_fifo_async`, no manual 2-FF synchronizers.
 
-**AXI Channel Split Template:** Generic five-module AW/W/B/AR/R independent channel separation pattern. Derived from the `axi_channel_split` architecture in the real project.
+**AXI Channel Split Template:** Generic five-module AW/W/B/AR/R independent channel separation pattern. Pure structural wrapper, zero logic.
 
 **Naming Convention (N14):** Multi-instance numeric prefix (`ch0_`, `ch1_`).
 ## Why this exists

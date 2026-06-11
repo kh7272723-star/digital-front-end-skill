@@ -4,13 +4,13 @@
 
 ## 最新版本：v2026.06.11-r3
 
-**r3 — 真实 FPGA 项目经验注入：** 从实际在 Xilinx UltraScale+ 板卡上运行的 270+ 模块 NVMe 存储加速系统（connector.v 顶层，PCIe/DDR4/Aurora 接口）中提炼工程化设计模式并注入 Skill：
+**r3 — 工程化设计模式强化：**
 
-**FSM 拆分强制化（C8 R→M + C8a 阈值）：** ≥4 状态且 ≥6 控制输出 → 必须独立 `_fsm.v` 文件，主模块禁 `case(cstate)`，FSM 文件禁实例化 IP。来源于真实项目中 `nvme_ctrl.v` + `nvme_ctrl_fsm.v` 等一致的分离模式。
+**FSM 拆分强制化（C8 R→M + C8a 阈值）：** ≥4 状态且 ≥6 控制输出 → 必须独立 `_fsm.v` 文件，主模块禁 `case(cstate)`，FSM 文件禁实例化 IP。
 
-**CDC 分析强制门禁（Step 7b）：** L1/L2 设计必须在 RTL 自审前产出 `cdc_report.md`。新增 `--phase cdc` gate。硬规则：跨域控制→`xpm_cdc_pulse`，跨域数据→`xpm_fifo_async`，禁止手动 2-FF 同步器。来源于真实项目中的 CDC 原语实践。
+**CDC 分析强制门禁（Step 7b）：** L1/L2 设计必须在 RTL 自审前产出 `cdc_report.md`。新增 `--phase cdc` gate。硬规则：跨域控制→`xpm_cdc_pulse`，跨域数据→`xpm_fifo_async`，禁止手动 2-FF 同步器。
 
-**AXI 通道分离模板：** 通用五模块 AW/W/B/AR/R 独立通道分离模式。来源于真实项目中的 `ssd_ddr_translator_axi` 架构。
+**AXI 通道分离模板：** 通用五模块 AW/W/B/AR/R 独立通道分离模式，纯结构封装，零逻辑。
 
 **命名约定强化（N14）：** 多实例数字前缀（`ch0_`, `ch1_`）。
 ## 为什么需要这个 Skill
