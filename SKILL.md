@@ -54,7 +54,7 @@ Read `references/reference-index.md` for a task-to-reference mapping. Key direct
 
 - **Timing/protocol**: `references/timing/` -- timing semantics, contracts, naming, protocol rules, cycle traces, clock/reset
 - **Architecture**: `references/architecture/` -- hierarchy, system contracts, integration invariants, tradeoffs, staged bring-up, pipeline design patterns, memory hierarchy & buffer strategy, performance analysis
-- **AXI/DMA**: `references/axi-dma/` -- AXI full/Lite/Stream, DMA channel guidelines, CDMA examples, outstanding rules
+- **AXI/DMA**: `references/axi-dma/` -- AXI full/Lite/Stream, DMA channel guidelines, CDMA examples, outstanding rules; `axi-channel-split-template.md` -- five-module AW/W/B/AR/R channel split pattern
 - **Bus protocols**: `references/bus/` -- APB, AHB-Lite
 - **RTL patterns**: `references/rtl/` -- coding guidelines, FSM examples, FIFO examples, handshake examples, pipeline examples, naming conventions, correctness rules (multi-driven, latch, width, blocking/nonblocking, reset, loops, implicit wires)
 - **Specialized patterns**: `references/patterns/` -- arbiters, credit-based, rate-limiter, retry buffer, CRC, ECC, width converter, frame assembler, multi-bank memory, CAM
@@ -72,8 +72,9 @@ Read `references/reference-index.md` for a task-to-reference mapping. Key direct
 Hard rules summary (full list in `rtl-coding-standards.md`):
 
 - **Naming**: all lowercase for signals/modules, all UPPERCASE for parameters. Port suffix `_i`/`_o`. Active-low adds `_n`. Pipeline delay uses `_r`/`_r0`/`_r1`. Instance names get `inst_` prefix.
-- **FSM**: two-process style, `cstate`/`nstate`, state names `S_` UPPERCASE prefix. FSM outputs single-bit enables only (M); multi-bit arithmetic stays in datapath. (C5/C6/C9/C10)
+- **FSM**: two-process style, `cstate`/`nstate`, state names `S_` UPPERCASE prefix. FSM outputs single-bit enables only (M); multi-bit arithmetic stays in datapath. (C5/C6/C9/C10). **FSM split mandatory (C8->M, C8a):** >=4 states AND >=6 control outputs -> separate `_fsm.v` file.
 - **Datapath vs FSM separation**: no datapath inside FSM blocks; no `case(state)` inside datapath blocks. (C5/C6/C7)
+- **FSM split mandatory (C8->M, C8a):** >=4 states AND >=6 scalar control outputs => FSM MUST be in separate `_fsm.v`. Main module MUST NOT contain `case(cstate)`. FSM file MUST NOT instantiate IP/XPM/other modules.
 - **No array encoding**: `reg [W] arr[N]` is forbidden. Use BRAM primitives for deep storage. (C17)
 - **Control symmetry**: if reset controls some registers in an `always` block, all registers on the same timing chain must be equally controlled. (C14)
 - **Code quality**: `` `default_nettype none`` (C3), explicit bit widths (C16), check latches (C15), FSM defaults first (C10).
@@ -119,14 +120,15 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 **Phase Exit Gates:** `scripts/workflow_gate.py` only. Each run writes `docs/workflow_cursor.md`; each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases and final detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
 **Step boundaries (execution order):**
-L2: 1-6 planning -> 3a func-dict -> 7/7a per-module RTL+verify -> 8 self-review -> 8a principle -> 8-EXIT post-rtl gate -> 8b verification PLAN -> 9 per-module TB+sim -> 9-EXIT pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim gate -> 11 final.
+L2: 1-6 planning -> 3a func-dict -> 7/7a per-module RTL+verify -> 7b cdc analysis -> 8 self-review -> 8a principle -> 8-EXIT post-rtl gate -> 8b verification PLAN -> 9 per-module TB+sim -> 9-EXIT pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim gate -> 11 final.
 L1: skips 3a/7a/9/9-EXIT.
-L0: additionally skips 2a/5a/8-EXIT (only P3 at 8a).
+L0: additionally skips 2a/5a/7b/8-EXIT (only P3 at 8a).
 
 | Phase | Command | Scope |
 |-------|---------|-------|
 | Pre-RTL | `workflow_gate.py --phase pre-rtl <dir>` | Contract docs non-empty (blocks RTL) |
 | Post-RTL (8-EXIT) | `workflow_gate.py --phase post-rtl <dir>` | RTL-only: style + compile. TB out of scope. |
+| CDC Check (L1/L2) | `workflow_gate.py --phase cdc <dir>` | CDC report exists. All cross-domain signals have explicit CDC primitives. No manual 2-FF synchronizers. |
 | Pre-integration (9-EXIT, L2) | `workflow_gate.py --phase pre-integration <dir>` | L2 per-module evidence; no integration TB before this |
 | Post-sim (10-EXIT) | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
 | Final (11) | `workflow_gate.py --phase final <dir>` | Artifacts, budget, gates, freshness (blocks PASS claim) |
@@ -348,6 +350,32 @@ pass standalone compile + style check before the next sub-module is written.
 
 After ALL sub-modules pass, proceed to Step 8 (RTL self-review). For L0/L1
 (single-module), skip 7a and proceed directly to Step 8.
+
+### 7b. CDC Analysis (mandatory for L1/L2, skip for L0)
+
+For any design with more than one clock domain, produce `docs/cdc_report.md` before
+Step 8. Read `references/synthesis/cdc-guidelines.md` and `references/cdc-asymmetric.md`
+before writing the report.
+**CDC report must contain:**
+- List all clock domains with source and nominal frequency
+- For every signal crossing clock domains:
+  - Source domain -> destination domain
+  - Data width and coherence requirement
+  - Chosen CDC primitive (`xpm_cdc_pulse`, `xpm_fifo_async`, etc.)
+  - Justification
+
+**Hard rules:**
+
+| Signal type | Required CDC method | Forbidden |
+|-------------|-------------------|-----------|
+| Single-bit control crossing | `xpm_cdc_pulse` (or equivalent vendor primitive) | Manual 2-FF without ASYNC_REG |
+| Multi-bit data stream crossing | `xpm_fifo_async` (or equivalent async FIFO) | Independently synchronized multi-bit buses |
+| Reset deassertion | Reset synchronizer per destination domain | Single global async reset deassertion |
+
+**CDC Phase Gate (mandatory for L1/L2):** Before proceeding to Step 8, run
+`python scripts/workflow_gate.py --phase cdc <project_dir>`. This gate
+checks that `docs/cdc_report.md` exists, all clock domains are listed,
+and every cross-domain signal has an explicit CDC primitive.
 
 ### 8. RTL self-review against skill constraints
 

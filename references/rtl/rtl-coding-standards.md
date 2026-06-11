@@ -1,4 +1,4 @@
-# RTL Coding Standards
+﻿# RTL Coding Standards
 
 This document integrates project coding conventions with digital-front-end-skill best practices. All rules are graded M (Mandatory), S (Strongly Recommended), or R (Recommended).
 
@@ -46,6 +46,7 @@ This document integrates project coding conventions with digital-front-end-skill
 |---|:---:|------|
 | N12 | S | Single-clock module: clock named `clk_i`. |
 | N13 | S | Single-reset module: reset named `rst_i` (sync active-high) or `rst_ni` (async active-low), clarified in the contract. |
+| N14 | S | Multi-instance signals: use numeric prefix for per-instance differentiation. E.g., `ch0_axis_tdata`, `ch1_axis_tdata`. For identical module instances, the instance name carries the index (`inst_0`, `inst_1`). |
 
 ### 1.5 Skill-Specific Naming (supplementary, no conflict)
 
@@ -74,8 +75,9 @@ This document integrates project coding conventions with digital-front-end-skill
 | C5 | M | Be explicitly clear whether a module is **datapath** or **state machine** — no ambiguous third category. |
 | C6 | M | **No datapath inside a state machine** (multi-bit arithmetic, complex assignments). FSM outputs declared scalar controls only, using suffixes such as `_en`, `_we`, `_re`, `_load`, `_clr`, `_push`, `_pop`, `_fire`, `_accept`, `_incr`, `_done`. |
 | C7 | M | **No FSM-like code inside a datapath** module. Datapath modules contain no `case(cstate)` structures. |
-| C8 | R | State machine in a separate file `xxx_fsm.v`, instantiated in the datapath file `xxx.v`. |
+| C8 | M | State machine in a separate file `xxx_fsm.v`, instantiated in the datapath file `xxx.v`. |
 | C9 | M | State machine uses **two-process** style: combinational (`always @(*)`) + sequential (`always @(posedge clk_i)`). |
+| C8a | M | **FSM split threshold:** when a module has >=4 FSM states AND >=6 scalar control outputs, the FSM MUST be a separate `_fsm.v` file. The main module MUST NOT contain `case(cstate)` logic. FSM file MUST NOT instantiate IP/XPM/other modules. |
 | C10 | M | Combinational process: **default assignments first**, before the `case(cstate)` — prevents latch inference. |
 
 ### 2.3 Reset and Initialization

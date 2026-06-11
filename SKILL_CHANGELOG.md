@@ -1,3 +1,32 @@
+﻿# Skill 迭代日志
+## 2026-06-11 - 真实FPGA项目经验注入 (Real-FPGA-Project-Informed)
+
+### 背景
+
+深度分析了 `D:\科研\毕业论文撰写\终稿\项目源码\sources_1` 中的真实上板 FPGA 项目——一个基于 Xilinx UltraScale+ 的多 SSD NVMe 存储加速系统（connector.v 顶层，270+ 模块，包含 PCIe/DDR4/Aurora/EMIO 接口）。从中提炼了可工程化的 RTL 设计模式并注入 Skill。
+
+### 改动
+
+| 优先级 | 改动 | 说明 |
+|:---:|------|------|
+| **P0** | FSM 拆分强制化 (C8 R→M) | 新增 C8a 阈值规则：≥4 状态 + ≥6 控制输出 → 必须独立 `_fsm.v` 文件。主模块禁止含 `case(cstate)`，FSM 文件禁止实例化 IP/XPM |
+| **P0** | CDC 分析强制门禁 (Step 7b) | L1/L2 设计必须在 Step 8 前产出 `docs/cdc_report.md`。新增 `workflow_gate.py --phase cdc` gate。硬规则：跨域控制→`xpm_cdc_pulse`，跨域数据→`xpm_fifo_async`，禁止手动 2-FF 同步器 |
+| **P1** | 新增强化命名规则 (N14) | 多实例数字前缀 |
+| **P1** | AXI 通道分离模板 | 新建 `references/axi-dma/axi-channel-split-template.md`——通用五模块 AW/W/B/AR/R 分离模板（不含项目特定命名） |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| `python scripts/skill_static_check.py` | PASS |
+
+### 经验来源
+
+- 真实项目中的 `xxx.v` + `xxx_fsm.v` 分离模式（nvme_ctrl + nvme_ctrl_fsm, cdma_ctrl + cdma_ctrl_fsm 等）
+- CDC 处理：`xpm_cdc_pulse` 用于控制脉冲，`xpm_fifo_async` 用于数据流
+- AXI 通道五拆分：`ssd_ddr_translator_axi` → AW/W/B/AR/R 五个独立子模块
+- Debug ILA 探针：`generate if(DEBUG)` 包围，FSM `cstate` 直接挂 probe
+
 # Skill 迭代日志
 ## 2026-06-11 - 工作流结构大修 (Workflow Restructuring)
 
@@ -45,10 +74,14 @@ Coder+Verifier 成对循环、结构化 Spec 分解字典、四路错误溯源�
 
 | 优先级 | 改动 | 位置 | 说明 |
 |:---:|------|------|------|
-| **P0** | Per-Module Coder+Verifier 循环 | eferences/verification/per-module-coder-verifier.md (新增) + SKILL.md Step 7a | L2 项目每个子模块 RTL 写完后立即 standalone compile + style check，通过才进入下一模块。防止上游 bug 向下游传播。 |
-| **P1** | 结构化 Module Function Dictionary | eferences/architecture/module-function-dict-template.md (新增) + SKILL.md Step 3a | 每个子模块产出标准化 func-dict（inputs/outputs/functionality/error-conditions），作为 RTL 生成时的 spec 参考。防止 spec 信息在阅读-编码间丢失。 |
-| **P2** | 四路错误溯源决策树 | eferences/debug/error-source-tracing.md (新增) + simulation-loop.md + SKILL.md Step 10 | 错误分为四类：spec 理解错误→回规划、上游模块错误→修根因、当前模块错误→本地修、原因不明→escalate。替代盲目试错。 |
-| **P3** | Human Escalation 协议 | eferences/workflow/human-escalation-protocol.md (新增) + SKILL.md 多处 | 统一 escalation 触发条件和报告模板（Trigger/Attempted/Classification/State/Question 五字段）。 |
+| **P0** | Per-Module Coder+Verifier 循环 | 
+eferences/verification/per-module-coder-verifier.md (新增) + SKILL.md Step 7a | L2 项目每个子模块 RTL 写完后立即 standalone compile + style check，通过才进入下一模块。防止上游 bug 向下游传播。 |
+| **P1** | 结构化 Module Function Dictionary | 
+eferences/architecture/module-function-dict-template.md (新增) + SKILL.md Step 3a | 每个子模块产出标准化 func-dict（inputs/outputs/functionality/error-conditions），作为 RTL 生成时的 spec 参考。防止 spec 信息在阅读-编码间丢失。 |
+| **P2** | 四路错误溯源决策树 | 
+eferences/debug/error-source-tracing.md (新增) + simulation-loop.md + SKILL.md Step 10 | 错误分为四类：spec 理解错误→回规划、上游模块错误→修根因、当前模块错误→本地修、原因不明→escalate。替代盲目试错。 |
+| **P3** | Human Escalation 协议 | 
+eferences/workflow/human-escalation-protocol.md (新增) + SKILL.md 多处 | 统一 escalation 触发条件和报告模板（Trigger/Attempted/Classification/State/Question 五字段）。 |
 
 ### 验收
 
@@ -60,12 +93,17 @@ Coder+Verifier 成对循环、结构化 Spec 分解字典、四路错误溯源�
 
 ### 文件变更
 
-- 新增: eferences/verification/per-module-coder-verifier.md
-- 新增: eferences/architecture/module-function-dict-template.md
-- 新增: eferences/debug/error-source-tracing.md
-- 新增: eferences/workflow/human-escalation-protocol.md
+- 新增: 
+eferences/verification/per-module-coder-verifier.md
+- 新增: 
+eferences/architecture/module-function-dict-template.md
+- 新增: 
+eferences/debug/error-source-tracing.md
+- 新增: 
+eferences/workflow/human-escalation-protocol.md
 - 修改: SKILL.md (新增 Step 3a, 7a, 更新 pipeline summary, Step 10 错误溯源引用, escalation 引用)
-- 修改: eferences/verification/simulation-loop.md (Phase 4 开头插入错误溯源)
+- 修改: 
+eferences/verification/simulation-loop.md (Phase 4 开头插入错误溯源)
 
 ---
 

@@ -2,19 +2,17 @@
 
 一个面向数字前端 RTL 设计的领域专用 AI Agent Skill。它将通用 LLM 转变为严格遵循工程规范的数字前端设计助手，把权威工程知识（IEEE 标准、Arm AMBA 规范、综合/CDC 方法论）提炼为紧凑、可机器执行的规则，并强制执行「合同优先」工作流：先写时序合同，再写周期迹线，最后才写 RTL。
 
-## 最新版本：v2026.06.11-r2
+## 最新版本：v2026.06.11-r3
 
-本版本借鉴 NVIDIA/Cadence/Georgia Tech 的 Spec2RTL-Agent 论文，新增四项机制强化 agent 工程纪律：
+**r3 — 真实 FPGA 项目经验注入：** 从实际在 Xilinx UltraScale+ 板卡上运行的 270+ 模块 NVMe 存储加速系统（connector.v 顶层，PCIe/DDR4/Aurora 接口）中提炼工程化设计模式并注入 Skill：
 
-**逐模块 Coder+Verifier 循环（Step 7a）：** L2 多模块项目必须在写完每个子模块 RTL 后立即进行 standalone compile + style check，通过后才进入下一模块。防止上游 bug 向下游传播。
+**FSM 拆分强制化（C8 R→M + C8a 阈值）：** ≥4 状态且 ≥6 控制输出 → 必须独立 `_fsm.v` 文件，主模块禁 `case(cstate)`，FSM 文件禁实例化 IP。来源于真实项目中 `nvme_ctrl.v` + `nvme_ctrl_fsm.v` 等一致的分离模式。
 
-**结构化模块功能字典（Step 3a）：** 每个 L2 子模块在编写 RTL 之前，先产出标准化 func-dict（inputs/outputs/functionality/error-conditions）。防止 spec 信息在阅读与编码之间丢失。
+**CDC 分析强制门禁（Step 7b）：** L1/L2 设计必须在 RTL 自审前产出 `cdc_report.md`。新增 `--phase cdc` gate。硬规则：跨域控制→`xpm_cdc_pulse`，跨域数据→`xpm_fifo_async`，禁止手动 2-FF 同步器。来源于真实项目中的 CDC 原语实践。
 
-**四路错误溯源决策树：** 每次失败先分类再修：（1）spec 理解错误→回规划、（2）上游模块错误→修根因、（3）当前模块错误→本地修、（4）原因不明→escalate。替代盲目试错。
+**AXI 通道分离模板：** 通用五模块 AW/W/B/AR/R 独立通道分离模式。来源于真实项目中的 `ssd_ddr_translator_axi` 架构。
 
-**Human Escalation 协议：** 统一 escalation 模板，五字段必填（Trigger/Attempted/Classification/State/Question），标准化所有人机交接点。
-
-**r2 修复：** 文档-脚本闭环修复 — workflow_gate.py 残留步骤号已更新，孤儿脚本（tb_data_integrity_gate、rtl_complexity_check）已接入工作流，NEXT_WORKFLOW_STEP 语义已明确，Step 7 冗余 standalone-compile 块已移除。
+**命名约定强化（N14）：** 多实例数字前缀（`ch0_`, `ch1_`）。
 ## 为什么需要这个 Skill
 
 通用 LLM 能生成语法正确的 Verilog，但经常：

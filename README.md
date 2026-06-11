@@ -2,19 +2,17 @@
 
 A domain-specific AI Agent Skill that turns a general-purpose LLM into a disciplined digital front-end RTL design assistant. It distills authoritative engineering knowledge (IEEE standards, Arm AMBA specifications, synthesis/CDC methodology) into compact, machine-enforceable rules, and enforces a contract-first workflow: timing contract before cycle trace, cycle trace before RTL.
 
-## Latest release: v2026.06.11-r2
+## Latest release: v2026.06.11-r3
 
-This release draws on the NVIDIA/Cadence/Georgia Tech Spec2RTL-Agent paper to add four new mechanisms that tighten agent engineering discipline:
+**r3 — Real FPGA project experience injection:** Extracted engineering design patterns from a production 270+ module NVMe storage acceleration system (connector.v top-level, PCIe/DDR4/Aurora interfaces) running on Xilinx UltraScale+ hardware:
 
-**Per-Module Coder+Verifier Loop (Step 7a):** L2 multi-module projects must verify each sub-module standalone (compile + style check) before writing the next module. Prevents upstream bugs from propagating to downstream modules.
+**FSM Split Mandatory (C8 R->M + C8a threshold):** >=4 states AND >=6 control outputs must use separate `_fsm.v` file. Main module must not contain `case(cstate)`. FSM file must not instantiate IP. Derived from the consistent `xxx.v` + `xxx_fsm.v` separation pattern found in the real project.
 
-**Structured Module Function Dictionary (Step 3a):** Each L2 sub-module gets a standardized func-dict (inputs/outputs/functionality/error-conditions) extracted from the spec before RTL is written. Prevents information loss between spec reading and code generation.
+**CDC Analysis Gate (Step 7b):** L1/L2 designs must produce `cdc_report.md` before RTL self-review. New `--phase cdc` gate. Hard rules: cross-domain control -> `xpm_cdc_pulse`, cross-domain data -> `xpm_fifo_async`, no manual 2-FF synchronizers. Derived from real-project CDC primitive practice.
 
-**Four-Way Error Source Tracing:** A decision tree classifies every failure as (1) wrong spec understanding, (2) upstream module error, (3) current module error, or (4) unclear 鈥?with prescribed actions per category. Replaces ad-hoc trial-and-error debugging.
+**AXI Channel Split Template:** Generic five-module AW/W/B/AR/R independent channel separation pattern. Derived from the `axi_channel_split` architecture in the real project.
 
-**Human Escalation Protocol:** A structured escalation template with five required fields (Trigger, Attempted, Classification, State, Question) standardizes all human handoff points.
-
-**r2 bugfix:** Closed doc-script gaps — workflow_gate.py stale step references corrected, orphaned scripts (tb_data_integrity_gate, rtl_complexity_check) wired into workflow, NEXT_WORKFLOW_STEP semantics clarified, redundant standalone-compile block removed from Step 7.
+**Naming Convention (N14):** Multi-instance numeric prefix (`ch0_`, `ch1_`).
 ## Why this exists
 
 General-purpose LLMs can generate syntactically valid Verilog, but they routinely:
