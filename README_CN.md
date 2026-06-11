@@ -2,7 +2,7 @@
 
 一个面向数字前端 RTL 设计的领域专用 AI Agent Skill。它将通用 LLM 转变为严格遵循工程规范的数字前端设计助手，把权威工程知识（IEEE 标准、Arm AMBA 规范、综合/CDC 方法论）提炼为紧凑、可机器执行的规则，并强制执行「合同优先」工作流：先写时序合同，再写周期迹线，最后才写 RTL。
 
-## 最新版本：v2026.06.11
+## 最新版本：v2026.06.11-r2
 
 本版本借鉴 NVIDIA/Cadence/Georgia Tech 的 Spec2RTL-Agent 论文，新增四项机制强化 agent 工程纪律：
 
@@ -13,6 +13,8 @@
 **四路错误溯源决策树：** 每次失败先分类再修：（1）spec 理解错误→回规划、（2）上游模块错误→修根因、（3）当前模块错误→本地修、（4）原因不明→escalate。替代盲目试错。
 
 **Human Escalation 协议：** 统一 escalation 模板，五字段必填（Trigger/Attempted/Classification/State/Question），标准化所有人机交接点。
+
+**r2 修复：** 文档-脚本闭环修复 — workflow_gate.py 残留步骤号已更新，孤儿脚本（tb_data_integrity_gate、rtl_complexity_check）已接入工作流，NEXT_WORKFLOW_STEP 语义已明确，Step 7 冗余 standalone-compile 块已移除。
 ## 为什么需要这个 Skill
 
 通用 LLM 能生成语法正确的 Verilog，但经常：

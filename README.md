@@ -2,7 +2,7 @@
 
 A domain-specific AI Agent Skill that turns a general-purpose LLM into a disciplined digital front-end RTL design assistant. It distills authoritative engineering knowledge (IEEE standards, Arm AMBA specifications, synthesis/CDC methodology) into compact, machine-enforceable rules, and enforces a contract-first workflow: timing contract before cycle trace, cycle trace before RTL.
 
-## Latest release: v2026.06.11
+## Latest release: v2026.06.11-r2
 
 This release draws on the NVIDIA/Cadence/Georgia Tech Spec2RTL-Agent paper to add four new mechanisms that tighten agent engineering discipline:
 
@@ -13,6 +13,8 @@ This release draws on the NVIDIA/Cadence/Georgia Tech Spec2RTL-Agent paper to ad
 **Four-Way Error Source Tracing:** A decision tree classifies every failure as (1) wrong spec understanding, (2) upstream module error, (3) current module error, or (4) unclear 鈥?with prescribed actions per category. Replaces ad-hoc trial-and-error debugging.
 
 **Human Escalation Protocol:** A structured escalation template with five required fields (Trigger, Attempted, Classification, State, Question) standardizes all human handoff points.
+
+**r2 bugfix:** Closed doc-script gaps — workflow_gate.py stale step references corrected, orphaned scripts (tb_data_integrity_gate, rtl_complexity_check) wired into workflow, NEXT_WORKFLOW_STEP semantics clarified, redundant standalone-compile block removed from Step 7.
 ## Why this exists
 
 General-purpose LLMs can generate syntactically valid Verilog, but they routinely:

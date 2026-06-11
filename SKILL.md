@@ -131,7 +131,7 @@ L0: additionally skips 2a/5a/8-EXIT (only P3 at 8a).
 | Post-sim (10-EXIT) | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
 | Final (11) | `workflow_gate.py --phase final <dir>` | Artifacts, budget, gates, freshness (blocks PASS claim) |
 
-If a gate fails: stop, fix, rerun. If a gate passes: read the `NEXT_WORKFLOW_STEP`, `NEXT_REQUIRED_ACTION`, and any `FORBIDDEN_NEXT_ACTION` lines before doing more work.
+If a gate fails: stop, fix, rerun. If a gate passes: `NEXT_WORKFLOW_STEP` tells you which step of this document to continue from. `NEXT_REQUIRED_COMMAND` is the next phase gate command -- run it only when you reach that gate, not immediately. Between gates, follow the step sequence in this document. Also read `NEXT_REQUIRED_ACTION` and any `FORBIDDEN_NEXT_ACTION` lines.
 
 ### 1. Parse the request
 
@@ -326,15 +326,7 @@ Write synthesizable code following `references/rtl/rtl-coding-standards.md` and 
 
 Apply power/timing/area rules from `references/design/power-timing-area.md`: clock-enable over gating (P1), memory access qualification (P5), bit-width discipline (A3), balanced operator trees (A1). For FPGA targets: DSP/BRAM/SRL inference patterns (A4, A5, P6).
 
-**Per-module standalone compile check (mandatory for L2):** Before integrating modules, each .v file must compile standalone as a top-level module:
-
-```bash
-for f in <module1>.v <module2>.v ...; do
-    iverilog -g2012 -o /dev/null $f || echo "FAIL: $f"
-done
-```
-
-A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to Step 8-EXIT.
+**L2 per-module verification:** For L2 multi-module projects, standalone compile + style check per module is handled by the Step 7a coder+verifier loop. See `references/verification/per-module-coder-verifier.md`.
 
 **Module boundary discipline (PH1):** Prefer registered outputs at module boundaries. Combinational outputs cause glitches during FSM transitions and complicate TB sampling. See `references/advanced/physical-awareness-guidelines.md` PH1.
 
@@ -389,6 +381,8 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 **Signal type cross-check (L1/L2):** Cross-check timing contract signal types (pulse/level/registered) against RTL implementation. Mismatch -> fix trace or RTL before simulation.
 
 **NBA ordering hazard check (L1/L2):** Read `references/timing/nba-ordering-guide.md`. Audit: same-block old-value reads, cross-block sequential dependencies, counter-driven registered outputs, pointer-indexed memory reads, counter advances not gated by valid+ready. Fix hazards -> re-run Step 8.
+
+Optional: run `python scripts/rtl_complexity_check.py rtl/*.v` for code-size/nesting/depth red flags. Informational only; does not block workflow.
 
 **Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8a, Step 8-EXIT, Step 8b, and Step 9/10 as applicable.
 
@@ -469,6 +463,7 @@ For each RTL submodule (not top/wrapper):
 3. Run `scripts/run_sim_guarded.py` on the per-module TB.
 4. Run `scripts/sim_log_gate.py` on the per-module sim log.
 5. Run `scripts/rtl_style_check.py` on both RTL and TB files.
+6. Run `scripts/tb_data_integrity_gate.py` on the per-module TB (W-level; warns if data signals are connected but never compared).
 6. Record evidence in `docs/module_verification_matrix.md` and `docs/dev_log.md`.
 
 Only after ALL sub-modules pass, proceed to the module-sim/pre-integration gate.
@@ -490,6 +485,8 @@ For L2: only after Step 9-EXIT passes. For L0/L1: proceed directly from Step 8b.
 - Compile fail -> fix Verilog syntax/connectivity -> re-run Step 8 (self-review) -> re-run Step 8-EXIT -> return to Step 10.
 - Sim fail -> Read `references/debug/error-source-tracing.md` FIRST. Classify error source (wrong spec / upstream module / current module / unclear). Then follow the prescribed action per classification. For Category 3 (current module error), use Phase 4 principle-driven debug: map symptom to P1-P5a, match bug pattern, minimal fix -> re-run Step 8 on changed code -> re-run 8-EXIT -> return.
 - Max 3 iterations. 4th failure -> escalate per `references/workflow/human-escalation-protocol.md`.
+
+Run `scripts/tb_data_integrity_gate.py` on integration TB (W-level).
 
 **3. Execute false-pass audit before claiming PASS.** `ALL_TESTS_PASS` present -> do NOT accept. Run Step 8b audit: scan entire log for undetected `exp`/`mismatch`/`xxxx` without `error_cnt++`. If found -> classify as FALSE_PASS, fix TB, re-sim. Only report PASS after audit confirms no hidden evidence. See simulation-loop.md false-pass detection.
 

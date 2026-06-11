@@ -493,15 +493,15 @@ def phase_pass_guidance(phase: str, level: str, project_dir: str) -> list[str]:
     if phase == "post-rtl":
         if is_l2:
             return [
-                "CURRENT_STEP_COMPLETED: Step 7b post-rtl RTL-only gate",
-                "NEXT_WORKFLOW_STEP: Step 8 no-TB review, then Step 9 L2 per-module verification",
-                "NEXT_REQUIRED_ACTION: complete Step 8/8c/8b without TB; first TB-producing step is Step 9 per-module TB + sim",
+                "CURRENT_STEP_COMPLETED: Step 8-EXIT post-rtl gate",
+                "NEXT_WORKFLOW_STEP: 8b (functional verification plan, then Step 9 per-module TB+sim)",
+                "NEXT_REQUIRED_ACTION: complete Step 8a/8b without TB; first TB-producing step is Step 9 per-module TB + sim",
                 "FORBIDDEN_NEXT_ACTION: do not create or run integration TB before pre-integration/module-sim gate PASS",
                 f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase pre-integration {project_dir}",
             ]
         return [
-            "CURRENT_STEP_COMPLETED: Step 7b post-rtl RTL-only gate",
-            "NEXT_WORKFLOW_STEP: Step 8 no-TB review, then Step 10 functional/integration verification as applicable",
+            "CURRENT_STEP_COMPLETED: Step 8-EXIT post-rtl gate",
+            "NEXT_WORKFLOW_STEP: 8b (functional verification plan, then Step 10 integration TB+sim)",
             "NEXT_REQUIRED_ACTION: complete review and verification plan before writing TB",
             f"NEXT_REQUIRED_COMMAND: python scripts/workflow_gate.py --phase post-sim {project_dir}",
         ]
