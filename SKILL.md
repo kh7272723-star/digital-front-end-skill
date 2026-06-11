@@ -105,7 +105,7 @@ Not every request goes through the full RTL design pipeline. Route first, then e
 
 | Mode | Trigger | Entry point | Mandatory gates |
 |------|---------|-------------|-----------------|
-| **design** | "write/implement/generate RTL" | Step 1 -> full pipeline | All level-appropriate gates |
+| **design** | "write/implement/generate RTL" | Step 1 -> full pipeline | pre-rtl, 8-EXIT(L1/L2), 9-EXIT(L2), post-sim, final |
 | **review** | "review/audit/check RTL" | Gate-first: rtl_style -> manual review | RSP1-RSP7, claim ledger, false-pass |
 | **debug** | "fix/debug sim failure" | simulation-loop.md Phase 4 | Principle diagnosis, bug pattern, fix discipline |
 | **protocol-audit** | "audit protocol claims" | protocol-claim-ledger.md | Label must/shall; verify against source |
@@ -118,29 +118,34 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 **Phase Exit Gates:** `scripts/workflow_gate.py` only. Each run writes `docs/workflow_cursor.md`; each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases and final detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
-**Step boundaries:** 1-6 planning -> 3a module func-dict (L2) -> 7 RTL-only (no TB, per 7a coder+verifier for L2) -> 8 self-review + fix bugs -> 7b post-rtl gate (COMPILE_RTL_ONLY, on cleaned RTL) -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
+**Step boundaries (execution order):**
+L2: 1-6 planning -> 3a func-dict -> 7/7a per-module RTL+verify -> 8 self-review -> 8a principle -> 8-EXIT post-rtl gate -> 8b verification PLAN -> 9 per-module TB+sim -> 9-EXIT pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim gate -> 11 final.
+L1: skips 3a/7a/9/9-EXIT.
+L0: additionally skips 2a/5a/8-EXIT (only P3 at 8a).
 
 | Phase | Command | Scope |
 |-------|---------|-------|
 | Pre-RTL | `workflow_gate.py --phase pre-rtl <dir>` | Contract docs non-empty (blocks RTL) |
-| Post-RTL | `workflow_gate.py --phase post-rtl <dir>` | RTL-only: style + compile. TB out of scope. |
-| Module-sim / Pre-integration | `workflow_gate.py --phase pre-integration <dir>` | L2 per-module evidence; no integration TB before this |
-| Post-sim | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
-| Final | `workflow_gate.py --phase final <dir>` | Artifacts, budget, gates, freshness (blocks PASS claim) |
+| Post-RTL (8-EXIT) | `workflow_gate.py --phase post-rtl <dir>` | RTL-only: style + compile. TB out of scope. |
+| Pre-integration (9-EXIT, L2) | `workflow_gate.py --phase pre-integration <dir>` | L2 per-module evidence; no integration TB before this |
+| Post-sim (10-EXIT) | `workflow_gate.py --phase post-sim <dir>` | Sim logs pass; L2 pre-integration re-confirmed |
+| Final (11) | `workflow_gate.py --phase final <dir>` | Artifacts, budget, gates, freshness (blocks PASS claim) |
 
 If a gate fails: stop, fix, rerun. If a gate passes: read the `NEXT_WORKFLOW_STEP`, `NEXT_REQUIRED_ACTION`, and any `FORBIDDEN_NEXT_ACTION` lines before doing more work.
 
 ### 1. Parse the request
 
-Summarize the requested block and list open questions. Classify the design:
+Summarize the requested block and list open questions. For underspecified requests, use `references/architecture/requirement-extraction-template.md`: classify dimensions as Required/Implied/Assumed/Unknown. Ask only questions that block correct RTL.
+
+Classify the design:
 
 | Level | Criteria | Principle review | Agent strategy |
 |:-----:|----------|:----------------:|----------------|
-| **L0: Trivial** | <=200 lines, <=8 FSM states, linear flow (no branches other than counter completion), single protocol | **Skip 2a/5a. Only P3 at 8c** (register audit). Inline in dev log. | **No delegation.** Single executor unless user explicitly requests parallel review. |
-| **L1: Leaf** | 200-500 lines, or nonlinear FSM, or dual protocol (e.g. APB + UART) | **FAST: 1-2 questions/principle** at 2a/5a/8c. Separate .md files. | **Single executor** unless TB/review lane is fully independent or user explicitly requests parallel. |
-| **L2: Subsystem** | >500 lines, or multi-module, or multi-clock, or 3+ protocols | **FULL: 3-5 questions/principle** at 2a/5a/8c. Signal tracing required. | **Mandatory delegation decision** -> Step 1.1 gate. Delegate or write waiver. |
+| **L0: Trivial** | <=200 lines, <=8 FSM states, linear flow (no branches other than counter completion), single protocol | **Skip 2a/5a. Only P3 at 8a** (register audit). Inline in dev log. | **No delegation.** Single executor unless user explicitly requests parallel review. |
+| **L1: Leaf** | 200-500 lines, or nonlinear FSM, or dual protocol (e.g. APB + UART) | **FAST: 1-2 questions/principle** at 2a/5a/8a. Separate .md files. | **Single executor** unless TB/review lane is fully independent or user explicitly requests parallel. |
+| **L2: Subsystem** | >500 lines, or multi-module, or multi-clock, or 3+ protocols | **FULL: 3-5 questions/principle** at 2a/5a/8a. Signal tracing required. | **Mandatory delegation decision** -> Step 1.1 gate. Delegate or write waiver. |
 
-**L0 note:** R5-R8: modules <=200 lines with linear FSMs had ZERO bugs found at distributed checkpoints (2a/5a). Separate review docs are wasted effort at L0. Keep P3 register audit at 8c -- catches naming/init gaps even in simple modules.
+**L0 note:** R5-R8: modules <=200 lines with linear FSMs had ZERO bugs found at distributed checkpoints (2a/5a). Separate review docs are wasted effort at L0. Keep P3 register audit at 8a -- catches naming/init gaps even in simple modules.
 
 **L2 note:** R8b: projects >500 lines / >10 FSM states exceed single-agent completion window (~600s).
 
@@ -309,6 +314,8 @@ missing contracts, re-run. Do not write RTL until this gate passes.
 **This step produces RTL code only. Do NOT generate testbench files here.**
 TB generation belongs to Step 9 (per-module, L2) and Step 10 (integration).
 
+**Routing:** L2 projects follow the per-module coder+verifier loop in Step 7a. L0/L1 projects generate the full module RTL here and proceed directly to Step 8.
+
 **Before writing ANY code, read `references/rtl/rtl-coding-standards.md` and `references/rtl/rtl-structural-purity.md`.** This is a hard requirement (not optional). Pay particular attention to M-graded rules: C3 (`default_nettype none`), C5/C6/C7 (FSM/datapath separation), C9/C10 (two-process FSM), C14 (control symmetry), C16 (explicit bit widths), C19 (explicit else), C20 (group registers), and RSP1-RSP7 (structural purity).
 
 Before writing code, read the relevant pattern reference: FSM -> `fsm-examples.md`, FIFO -> `fifo-examples.md` (FWFT for data-path), Pipeline -> `pipeline-examples.md`, Handshake -> `handshake-examples.md`, AXI -> `axi-dma-channel-guidelines.md`, DMA -> `dma-cdma-examples.md`. All under `references/rtl/` or `references/axi-dma/`. Do not rely on memory or training data. If a protocol reference uses "must"/"shall"/"violation", verify whether it is **Normative** or **Conservative pattern** before turning it into RTL.
@@ -327,7 +334,7 @@ for f in <module1>.v <module2>.v ...; do
 done
 ```
 
-A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to Step 7b.
+A module that fails standalone compilation has undeclared dependencies, missing signal definitions, or incomplete logic (NVMe Phase 3 B14: FSM states declared but no state register). Fix before integration. Only after ALL modules pass standalone compilation, proceed to Step 8-EXIT.
 
 **Module boundary discipline (PH1):** Prefer registered outputs at module boundaries. Combinational outputs cause glitches during FSM transitions and complicate TB sampling. See `references/advanced/physical-awareness-guidelines.md` PH1.
 
@@ -350,21 +357,9 @@ pass standalone compile + style check before the next sub-module is written.
 After ALL sub-modules pass, proceed to Step 8 (RTL self-review). For L0/L1
 (single-module), skip 7a and proceed directly to Step 8.
 
-### 7b. RTL phase exit -- post-rtl gate (mandatory for L1/L2, AFTER self-review)
+### 8. RTL self-review against skill constraints
 
-Ran by: `python scripts/workflow_gate.py --phase post-rtl <project_dir>`. Validates RTL-only: runs `rtl_style_check.py` on `rtl/*.v` files (NOT tb/ or sim/), checks an RTL-only compile log with `# COMPILE_RTL_ONLY` or `# COMPILE_STANDALONE` plus explicit compile-success evidence, and stamps post-rtl PASS. Integration compile logs (with TB) are rejected. Before the first post-rtl PASS, any TB or non-compile simulation artifact is a phase-order violation. After a prior post-rtl PASS, re-running post-rtl is allowed for RTL debug and still checks RTL-only evidence; later phases use snapshots to detect stale downstream evidence.
-
-Optional debug tools (`pre_sim_check.sh`, direct `rtl_style_check.py`, direct `compile_log_gate.py`, yosys, standalone `iverilog`) may be used while fixing failures but do not replace the phase stamp.
-
-### 7b-EXIT. RTL Phase Gate (stop-go AFTER self-review)
-
-Step 8 (self-review) must complete and any RTL fixes applied BEFORE running this gate. Do NOT proceed to Step 8c until `workflow_gate.py --phase post-rtl` exits 0. Inside: `rtl_style_check.py` on rtl/*.v only (no E-level), RTL-only compile log with `# COMPILE_RTL_ONLY`, L2 RSP1-RSP4 hard gates. Compile logs with TB files violate the RTL-only boundary.
-
-If any FAIL: fix RTL, re-run Step 7 standalone compile, re-check this gate. Only clean exit proceeds to Step 8c.
-
-### 8. RTL self-review against skill constraints (BEFORE post-rtl gate)
-
-Self-review runs BEFORE Step 7b (post-rtl gate). Review the generated RTL, find and fix bugs first, then run the gate on the cleaned RTL. This prevents gate stamps from going stale after review fixes.
+Self-review runs BEFORE Step 8-EXIT. Review the generated RTL, find and fix bugs first, then run the gate on the cleaned RTL. This prevents gate stamps from going stale after review fixes.
 
 Before simulation, review the generated RTL against the full self-review checklist in `references/verification/self-review-checklist.md`. Each item must be explicitly checked and marked pass/fail. For each FAIL item, fix before proceeding and state what was changed. For each [PASS] item, cite the specific line numbers or signal names that satisfy the check -- do not mark items as passed without evidence.
 
@@ -395,11 +390,11 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 
 **NBA ordering hazard check (L1/L2):** Read `references/timing/nba-ordering-guide.md`. Audit: same-block old-value reads, cross-block sequential dependencies, counter-driven registered outputs, pointer-indexed memory reads, counter advances not gated by valid+ready. Fix hazards -> re-run Step 8.
 
-**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8c, 8b, and Step 9/10 as applicable.
+**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8a, 8b, and Step 9/10 as applicable.
 
-### 8c. Principle check -- Known Values and Output Discipline (P3, P5a, P5b)
+### 8a. Principle check -- Known Values and Output Discipline (P3, P5a, P5b)
 
-**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8c covers the principles that require actual RTL code to review. Run this BEFORE the verification plan (8b) so findings can inform test priorities.
+**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8a covers the principles that require actual RTL code to review. Run this BEFORE the verification plan (8b) so findings can inform test priorities.
 
 Read `references/design/design-principles.md` P3, P5a, P5b.
 
@@ -408,8 +403,8 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 | Level | Review scope | Format |
 |:-----:|-------------|--------|
 | **L0: Trivial** | **P3 only** (register audit). Skip P5a/P5b. | 1 paragraph in dev log, no separate file |
-| **L1: Leaf** | P3 + **P5a** (Output Discipline). Skip P5b. | 1-2 questions each. `principle_review_8c.md` |
-| **L2: Subsystem** | P3 + P5a + **P5b** (Physical Implementation). | 3-5 questions each. Signal tracing required. `principle_review_8c.md` |
+| **L1: Leaf** | P3 + **P5a** (Output Discipline). Skip P5b. | 1-2 questions each. `principle_review_8a.md` |
+| **L2: Subsystem** | P3 + P5a + **P5b** (Physical Implementation). | 3-5 questions each. Signal tracing required. `principle_review_8a.md` |
 
 **Why P5 was split:** R5-R8 found ZERO P5 issues -- the principle mixed output discipline (always applicable) with physical implementation (ASIC-only). Agents marked NA. Split ensures every module gets the applicable part.
 
@@ -434,9 +429,23 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 | **3** | **Constrain** | FSM guard (`!busy`, gating), enable qualification |
 | **4** | **Add** | Hardware as last resort -- document why 1-3 don't work |
 
+### 8-EXIT. Post-RTL Phase Gate (mandatory for L1/L2)
+
+Run AFTER Step 8 (self-review) and Step 8a (principle check) are complete.
+Do NOT proceed to Step 8b until `python scripts/workflow_gate.py --phase post-rtl <project_dir>` exits 0.
+Validates RTL-only: `rtl_style_check.py` on `rtl/*.v` only (no E-level), RTL-only compile log with `# COMPILE_RTL_ONLY`, L2 RSP1-RSP4 hard gates.
+Compile logs with TB files violate the RTL-only boundary.
+
+L0 projects: skip this gate (post-rtl is L1/L2 only).
+
+Optional debug tools (`pre_sim_check.sh`, direct `rtl_style_check.py`, direct `compile_log_gate.py`, yosys, standalone `iverilog`) may be used while fixing failures but do not replace the phase stamp.
+
+If FAIL: fix RTL, re-run Steps 8+8a (self-review+principle), re-run standalone compile, re-check this gate.
+Only clean exit proceeds to Step 8b.
+
 ### 8b. Functional verification plan (plan only, no TB generation)
 
-**This step produces the verification PLAN, not TB files.** TB is written in Step 9 (per-module, L2) and Step 10 (integration). Steps 8 and 8c do NOT guarantee functional correctness. Produce the verification PLAN here -- Step 8c findings should inform test priorities.
+**This step produces the verification PLAN, not TB files.** TB is written in Step 9 (per-module, L2) and Step 10 (integration). Steps 8 and 8a do NOT guarantee functional correctness. Produce the verification PLAN here -- Step 8a findings should inform test priorities.
 
 **Golden reference strategy** (see `references/verification/golden-reference-guide.md`): Computation -> known I/O pairs. Algorithm -> software reference model. Register block -> write-readback. Data movement -> end-to-end scoreboard. Control -> invariant checking. Pipeline -> latency verification.
 
@@ -447,11 +456,6 @@ Read `references/design/design-principles.md` P3, P5a, P5b.
 - **False-pass audit plan**: define what evidence in the sim log would reclassify PASS as FAIL (see `references/verification/simulation-loop.md` false-pass detection).
 
 **Minimum test plan:** (1) golden reference per module type, (2) one complete protocol transaction, (3) boundary conditions (empty/full/zero/max), (4) at least one stall test (WREADY=0 >=2 cycles), (5) NVMe/DMA: multi-page transfer with non-uniform data.
-
-**If functional tests fail after structural PASS:**
-- Do NOT claim the design is correct
-- Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
-- Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
 
 ### 9. L2 per-module verification -- write module TB + run module sim
 
@@ -467,23 +471,30 @@ For each RTL submodule (not top/wrapper):
 
 Only after ALL sub-modules pass, proceed to the module-sim/pre-integration gate.
 
-### 9-EXIT. Module-sim / Pre-integration Phase Gate (L2 stop-go before integration TB)
+### 9-EXIT. Module-sim / Pre-integration Phase Gate (L2 only)
 
 Do NOT write or run integration TB until `workflow_gate.py --phase pre-integration <project_dir>` exits 0. `--phase module-sim` is an accepted alias for the same gate. Requires: `docs/module_verification_matrix.md` covers every non-top sub-module with PASS evidence or Accepted Limitation; no integration TB/sim artifacts before per-module evidence. If FAIL: complete missing per-module verification, re-run.
 
+**L0/L1 projects:** Skip both Step 9 and Step 9-EXIT. Proceed directly to Step 10.
+
 ### 10. Integration verification -- write integration TB + run sim
 
-Only after module-sim/pre-integration gate (Step 9-EXIT) passes. **Includes writing integration testbench and running integration simulation.** If Step 9-EXIT has not passed, return to Step 9; do not generate integration TB yet.
+For L2: only after Step 9-EXIT passes. For L0/L1: proceed directly from Step 8b. **Includes writing integration testbench and running integration simulation.**
 
 **1. Generate testbench and assertions.** Provide: testbench skeleton, directed test list, assertions, waveform checkpoints. For AXI: use `references/verification/axi-verification.md`. Before writing TB: read `references/verification/icarus-common-pitfalls.md` (15 Icarus-specific pitfalls) and use `references/verification/tb-examples.md` standard skeleton. TB must follow output protocol: `RESET_RELEASED`, `TEST_START/PASS/FAIL <id>`, `ALL_TESTS_PASS`, `SIMULATION_DONE`.
 
 **2. Run simulation loop.** Use `scripts/run_sim_guarded.py` as the recommended vvp wrapper (timeout, VCD/log size limits, UTF-8-safe output). Follow `references/verification/simulation-loop.md`: compile -> simulate -> analyze -> fix -> re-sim, max 3 iterations. Do NOT run bare `vvp` -- use the guarded wrapper.
 
-- Compile fail -> fix Verilog syntax/connectivity -> re-run Step 7b -> return to Step 10.
-- Sim fail -> Read `references/debug/error-source-tracing.md` FIRST. Classify error source (wrong spec / upstream module / current module / unclear). Then follow the prescribed action per classification. For Category 3 (current module error), use Phase 4 principle-driven debug: map symptom to P1-P5a, match bug pattern, minimal fix -> re-run Step 8 on changed code -> re-run 7b -> return.
+- Compile fail -> fix Verilog syntax/connectivity -> re-run Step 8 (self-review) -> re-run Step 8-EXIT -> return to Step 10.
+- Sim fail -> Read `references/debug/error-source-tracing.md` FIRST. Classify error source (wrong spec / upstream module / current module / unclear). Then follow the prescribed action per classification. For Category 3 (current module error), use Phase 4 principle-driven debug: map symptom to P1-P5a, match bug pattern, minimal fix -> re-run Step 8 on changed code -> re-run 8-EXIT -> return.
 - Max 3 iterations. 4th failure -> escalate per `references/workflow/human-escalation-protocol.md`.
 
 **3. Execute false-pass audit before claiming PASS.** `ALL_TESTS_PASS` present -> do NOT accept. Run Step 8b audit: scan entire log for undetected `exp`/`mismatch`/`xxxx` without `error_cnt++`. If found -> classify as FALSE_PASS, fix TB, re-sim. Only report PASS after audit confirms no hidden evidence. See simulation-loop.md false-pass detection.
+
+**If functional tests fail after structural PASS:**
+- Do NOT claim the design is correct
+- Debug using golden reference comparison (golden-reference-guide.md) then first-divergent-cycle reasoning (simulation-loop.md Phase 4)
+- Re-run Step 8 self-review after each fix (debug-driven fixes often introduce new structural violations)
 
 **Phase 4 -- Principle-driven debug:** Categorize failure (compile/infrastructure/functional). Map to principle: P1 (timing), P2 (FSM), P3 (register), P4 (independence), P5a (output). Match `references/debug/bug-pattern-library.md`. Apply fix discipline: Delete -> Retime -> Constrain -> Add. Re-run Step 8 on changed code.
 
@@ -491,7 +502,7 @@ Only after module-sim/pre-integration gate (Step 9-EXIT) passes. **Includes writ
 
 Do NOT proceed to Step 11 until `workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside: sim logs pass `sim_log_gate.py`; L2 module-sim/pre-integration evidence re-confirmed. Final-delivery checks (contract/test matrix, scoreboard substance, delegation provenance, residual-risk) run in Step 11.
 
-If any FAIL: fix, re-run Steps 7b-10, re-check this gate.
+If any FAIL: fix, re-run Steps 8-EXIT through 10, re-check this gate.
 
 ### 11. Finalize (delivery gate)
 
@@ -503,17 +514,9 @@ Additional checks: delegation provenance, verification matrix, claim ledger, sto
 
 Protocol claims must remain labeled Normative / Project policy / Conservative pattern / Heuristic / Unverified. Hard gates enforce generic RTL/verif/delivery evidence.
 
-## Debugging rules
-
-Failure -> match against `references/debug/bug-pattern-library.md` patterns first. Cite pattern ID + root cause + minimal fix. No match -> first-divergent-cycle reasoning.
-
 ## Testbench guidance
 
 Generate small but targeted TB: reset, one normal transaction, one backpressure, one boundary, one corner case. Prefer `$fatal`/error counters over waveform-only stimulus. Combinational outputs (PSLVERR, HRDATA, PREADY) valid only DURING transaction -- check with `#delay` after enabling signal, not after completion. See `references/bus/apb-guidelines.md`.
-
-## Underspecified requests
-
-Use `references/architecture/requirement-extraction-template.md`. Classify dimensions as Required/Implied/Assumed/Unknown. Ask only questions that block correct RTL. No full design from guesswork for complex protocols.
 
 ## Skill success
 

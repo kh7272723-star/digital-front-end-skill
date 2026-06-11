@@ -1,4 +1,39 @@
 # Skill 迭代日志
+## 2026-06-11 - 工作流结构大修 (Workflow Restructuring)
+
+### 背景
+
+全工作流逐行审查发现 13 项问题：L0/L1 路径在 9-EXIT 处断裂、编号倒序（8c 在 8b 前执行、7b 在 8 后执行）、7b/7b-EXIT 重复、回退路径绕过自审、指令错位等。按 Karpathy 原则进行精准手术式修复。
+
+### 改动
+
+| 优先级 | 改动 | 说明 |
+|:---:|------|------|
+| **P0** | 合并 7b+7b-EXIT 为 8-EXIT，移至 8a/8b 之间 | 消除重复描述，章节顺序=执行顺序 |
+| **P0** | 8c 重命名为 8a | 现在 8→8a→8-EXIT→8b，数字单调递增 |
+| **P0** | L0/L1 路径修复 | 9-EXIT 增加 L0/L1 显式豁免；Step 10 入口增加 L0/L1 直达 8b 路径 |
+| **P0** | Step 10 compile fail 回退路径补 Step 8 自审 | 修 RTL 后必须自审再过 gate |
+| **P1** | "If functional tests fail" 从 8b 迁移至 Step 10 | 8b 是计划步骤，测试失败处理应在测试步骤 |
+| **P1** | Step 7/7a 路由关系明确化 | Step 7 增加 L2→7a / L0/L1→Step 8 的显式路由 |
+| **P2** | Pipeline summary 分 L2/L1/L0 三线表达 | 取代过度压缩的 "1-6 planning" |
+| **P2** | 移除独立 Debugging rules / Underspecified requests 节 | 内容迁移至 Step 10 / Step 1 |
+| **P2** | Step 0 routing table mandatory gates 列修复 | 从循环引用改为具体 gate 列表 |
+| **P2** | Phase gate table 增加步骤号标注 | Pre-RTL/Post-RTL(8-EXIT)/Pre-integration(9-EXIT,L2)/Post-sim(10-EXIT)/Final(11) |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| python scripts/skill_static_check.py --root . | PASS |
+| 全文中搜索 "Step 7b" | 0 处残留 |
+| 全文中搜索 "Step 8c" (非 "8c[^o]") | 0 处残留 |
+| 章节编号按执行顺序单调递增 | 7→7a→8→8a→8-EXIT→8b→9→9-EXIT→10→10-EXIT→11 |
+
+### 文件变更
+
+- 修改: SKILL.md (17 项结构修复，520→523 行)
+
+---
 ## 2026-06-11 - Spec2RTL 论文借鉴迭代 (P0/P1/P2/P3)
 
 ### 背景
