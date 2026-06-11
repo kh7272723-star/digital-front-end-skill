@@ -2,34 +2,17 @@
 
 一个面向数字前端 RTL 设计的领域专用 AI Agent Skill。它将通用 LLM 转变为严格遵循工程规范的数字前端设计助手，把权威工程知识（IEEE 标准、Arm AMBA 规范、综合/CDC 方法论）提炼为紧凑、可机器执行的规则，并强制执行「合同优先」工作流：先写时序合同，再写周期迹线，最后才写 RTL。
 
-## 最新版本：v2026.06.08
+## 最新版本：v2026.06.11
 
-本版本在阶段化工作流之上继续加强「交付物预算」和「假证据」门禁：最终交付会拒绝膨胀、重复、含糊的非代码副产物；仿真和 testbench 证据不再只看 PASS 标记，也会检查日志内部是否自相矛盾。
+本版本借鉴 NVIDIA/Cadence/Georgia Tech 的 Spec2RTL-Agent 论文，新增四项机制强化 agent 工程纪律：
 
-主要更新：
+**逐模块 Coder+Verifier 循环（Step 7a）：** L2 多模块项目必须在写完每个子模块 RTL 后立即进行 standalone compile + style check，通过后才进入下一模块。防止上游 bug 向下游传播。
 
-- `workflow_gate.py` 每次阶段门禁都会写入精简的 `docs/workflow_cursor.md`，记录当前阶段、下一条必跑命令、禁止动作；借鉴文件化 planning，但不引入通用三件套负担。
-- final workflow-state freshness 现在复核 sha256 内容哈希，而不只看 mtime/size；合同或验证证据被改动后，必须回到对应前置阶段重跑门禁。
-- 新增 `scripts/artifact_budget_gate.py`：拒绝 `tb_archive/`、最终交付中的 `.vvp` 构建产物、重复仿真日志、项目局部 `scripts/run_sim.py`；除非明确写为带原因/风险的 Accepted Limitation。
-- `final_delivery_gate.py` 已接入 artifact-budget 门禁，因此正常执行 `workflow_gate.py --phase final <dir>` 时会自动检查交付物是否足够精简、可审计。
-- `sim_log_gate.py` 会拒绝自相矛盾的 PASS 日志，例如 transaction-shape 摘要里 `WLAST=0`，或未声明 expected multi-completion 却出现 `CPL[2]`。
-- `rtl_style_check.py` 会拒绝装饰性 TB 比较：空语句 `if (...) ;`、只检查 WLAST 是否为 0/1 而不检查期望 final beat、只用 `< 1` 判断 completion count。
-- 工作流门禁前移到具体阶段出口：`pre-rtl`、`post-rtl`、`pre-integration`、`post-sim`、`final`。
-- 新增 `scripts/workflow_gate.py`，让 agent 每个阶段只需执行一个 wrapper 命令，降低长上下文 L2 项目漏跑脚本的概率。**状态锁：** 每次 PASS 写入 `docs/workflow_state.json`；后续阶段要求前置阶段 PASS 验签。`--force` 仅用于人工指示的恢复场景，不是 waiver。
-- `workflow_gate.py` 现在是 Design Mode 唯一正常门禁入口；其他 gate 脚本是 wrapper 内部实现或 debug 工具，直接输出不算阶段证据。
-- **工作流导航强化：** 逐模块验证升级为独立 Step 9，不再是 9A 子步骤。Step 10 是集成验证，Step 11 是最终交付。门禁 PASS 输出会打印 `NEXT_WORKFLOW_STEP`、`NEXT_REQUIRED_ACTION`，以及 L2 场景下的 `FORBIDDEN_NEXT_ACTION`。
-- **module-sim/pre-integration 门禁语义明确：** L2 项目只有在 `workflow_gate.py --phase pre-integration <dir>` PASS 后才允许写集成 TB；`--phase module-sim` 可作为同一门禁的语义化别名。
-- 新增/强化 L1/L2 fail-closed 门禁：`project_preflight_gate.py`、`project_artifact_gate.py`、`pre_integration_gate.py`、`final_delivery_gate.py`。
-- `final_delivery_gate.py` 也会复核 workflow state chain；直接绕过 `workflow_gate.py` 跑 final gate 会被拒绝。
-- `final_delivery_gate.py` 失败时禁止普通 `Status: PASS`；只能写 `BLOCKED`、`FAIL` 或带证据的 `BLOCKED_BY_GATE_DISPUTE`。
-- L2 项目必须通过 `docs/module_verification_matrix.md` 提供逐模块验证证据；顶层集成仿真不能替代叶子模块验证。
-- RSP1-RSP4 是 L2 硬结构门禁；“仿真通过”不能作为 FSM/datapath 边界违规的 waiver。
-- 委派证据门禁：`Delegate: yes` 必须提供 `docs/delegation_plan.md` 以及 `docs/subagents/` 下的角色报告。
-- 协议声明账本证据门禁：项目声明 PASS 时，`protocol_claim_ledger.md` 中 Evidence 为空或 TBD 的条目会被拒绝。
-- 存储 mover 专项证据门禁：检查 WSTRB/非对齐传输、RRESP/RD error 传播、`cpl_bytes`、PRP list 公共接口 exercise、invalid-command completion。
-- 强化 testbench false-pass 检测：包括 TIMEOUT + `$finish`、缺少 X/Z 检查、completion-only DMA/NVMe 测试、transaction-shape scoreboard 过弱等。
-- Windows 下 `run_sim_guarded.py` 会自动用 `vvp <file>` 运行 `.vvp` 文件。
+**结构化模块功能字典（Step 3a）：** 每个 L2 子模块在编写 RTL 之前，先产出标准化 func-dict（inputs/outputs/functionality/error-conditions）。防止 spec 信息在阅读与编码之间丢失。
 
+**四路错误溯源决策树：** 每次失败先分类再修：（1）spec 理解错误→回规划、（2）上游模块错误→修根因、（3）当前模块错误→本地修、（4）原因不明→escalate。替代盲目试错。
+
+**Human Escalation 协议：** 统一 escalation 模板，五字段必填（Trigger/Attempted/Classification/State/Question），标准化所有人机交接点。
 ## 为什么需要这个 Skill
 
 通用 LLM 能生成语法正确的 Verilog，但经常：

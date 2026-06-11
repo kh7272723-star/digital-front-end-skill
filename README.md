@@ -2,60 +2,17 @@
 
 A domain-specific AI Agent Skill that turns a general-purpose LLM into a disciplined digital front-end RTL design assistant. It distills authoritative engineering knowledge (IEEE standards, Arm AMBA specifications, synthesis/CDC methodology) into compact, machine-enforceable rules, and enforces a contract-first workflow: timing contract before cycle trace, cycle trace before RTL.
 
-## Latest release: v2026.06.08
+## Latest release: v2026.06.11
 
-This release adds artifact-budget and false-evidence hardening on top of the phase workflow. Final delivery now rejects bloated or ambiguous non-code artifacts, and simulation/testbench evidence is checked for semantic contradictions instead of only PASS markers.
+This release draws on the NVIDIA/Cadence/Georgia Tech Spec2RTL-Agent paper to add four new mechanisms that tighten agent engineering discipline:
 
-Key updates:
+**Per-Module Coder+Verifier Loop (Step 7a):** L2 multi-module projects must verify each sub-module standalone (compile + style check) before writing the next module. Prevents upstream bugs from propagating to downstream modules.
 
-- `workflow_gate.py` now writes a compact `docs/workflow_cursor.md` on every
-  phase run, giving the agent a persistent current phase, next required command,
-  and forbidden next action without adding generic planning-file overhead.
-- Final workflow-state freshness now checks sha256 content hashes, not only
-  mtime/size, so contract or verification edits force the relevant predecessor
-  gate to be re-run.
-- New `scripts/artifact_budget_gate.py` rejects `tb_archive/`, final `.vvp`
-  build products, duplicate simulation logs, and project-local
-  `scripts/run_sim.py` unless explicitly waived as an Accepted Limitation.
-- `final_delivery_gate.py` now includes the artifact-budget gate, so the
-  normal `workflow_gate.py --phase final <dir>` path automatically enforces
-  compact deliverables.
-- `sim_log_gate.py` now rejects contradictory PASS logs such as
-  transaction-shape summaries with `WLAST=0` and unexplained duplicate
-  completions like `CPL[2]`.
-- `rtl_style_check.py` now rejects cosmetic TB comparisons: empty
-  `if (...) ;` scoreboards, WLAST checks that only reject X/Z, and completion
-  counters checked only as `< 1`.
-- Phase-local workflow gates now appear at the point where they matter:
-  `pre-rtl`, `post-rtl`, `pre-integration`, `post-sim`, and `final`.
-- New `scripts/workflow_gate.py` wrapper gives agents one command per phase,
-  reducing skipped gate scripts in long L2 projects. **State lock:**
-  each PASS writes `docs/workflow_state.json`; later phases require
-  predecessor PASS stamps. `--force` is human-directed recovery only, not a waiver.
-- `workflow_gate.py` is now the only normal Design Mode gate entry. Sibling
-  gate scripts are wrapper internals or debug tools; direct outputs from them
-  do not count as phase evidence.
-- **Workflow navigation hardened:** per-module verification is now Step 9
-  rather than a 9A sub-step. Step 10 is integration verification, and Step 11
-  is final delivery. Gate PASS output prints `NEXT_WORKFLOW_STEP`,
-  `NEXT_REQUIRED_ACTION`, and L2 `FORBIDDEN_NEXT_ACTION` hints.
-- **Module-sim/pre-integration gate clarified:** L2 integration TB is only
-  allowed after `workflow_gate.py --phase pre-integration <dir>` passes
-  (`--phase module-sim` is accepted as an alias).
-- Fail-closed project gates for L1/L2 deliverables: `project_preflight_gate.py`, `project_artifact_gate.py`, `pre_integration_gate.py`, and `final_delivery_gate.py`.
-- `final_delivery_gate.py` now checks the workflow state chain too, so direct
-  final-gate bypasses of `workflow_gate.py` are rejected.
-- `final_delivery_gate.py` failure now blocks any plain `Status: PASS`; use
-  `BLOCKED`, `FAIL`, or `BLOCKED_BY_GATE_DISPUTE` with evidence.
-- Mandatory L2 per-module verification evidence through `docs/module_verification_matrix.md`; integration simulation no longer substitutes for leaf-module evidence.
-- RSP1-RSP4 are L2 hard structural gates. Passing simulation is not a valid
-  waiver for FSM/datapath boundary violations.
-- Delegation provenance checks: `Delegate: yes` requires `docs/delegation_plan.md` and role reports under `docs/subagents/`.
-- Protocol claim ledger evidence checks: `protocol_claim_ledger.md` rows with blank/TBD Evidence are rejected when a project claims PASS.
-- Storage mover evidence checks for WSTRB/unaligned transfers, RRESP/RD error propagation, `cpl_bytes`, PRP list public-interface exercise, and invalid-command completion.
-- Stronger testbench false-pass detection, including timeout-plus-`$finish`, missing X/Z checks, completion-only DMA/NVMe benches, and weak transaction-shape scoreboards.
-- Windows-safe simulation wrapper behavior: `.vvp` files are invoked through `vvp <file>` by `run_sim_guarded.py`.
+**Structured Module Function Dictionary (Step 3a):** Each L2 sub-module gets a standardized func-dict (inputs/outputs/functionality/error-conditions) extracted from the spec before RTL is written. Prevents information loss between spec reading and code generation.
 
+**Four-Way Error Source Tracing:** A decision tree classifies every failure as (1) wrong spec understanding, (2) upstream module error, (3) current module error, or (4) unclear 鈥?with prescribed actions per category. Replaces ad-hoc trial-and-error debugging.
+
+**Human Escalation Protocol:** A structured escalation template with five required fields (Trigger, Attempted, Classification, State, Question) standardizes all human handoff points.
 ## Why this exists
 
 General-purpose LLMs can generate syntactically valid Verilog, but they routinely:
