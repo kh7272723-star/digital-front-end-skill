@@ -195,13 +195,13 @@ phase gate** (after Steps 2-6) requires contracts to be non-empty.
 3. **Per-module contract freeze before RTL.** Every submodule's interface contract must be frozen before ANY module's RTL is generated. Prevents the NVMe Phase 1 bug: interfaces matched, data-path routing undefined.
 
 ```
-L0/L1: Step 1 -> Step 2 -> Step 3 -> ... -> Step 11
-L2:    Step 1 -> 1.1 -> 1.5 (decompose + contracts frozen)
-              -> 1.6 (release gate, if delegated)
-              -> Steps 2-8 per module -> Step 9 module sim -> Step 10 integration -> Step 11
+L0: Step 1 -> 1.1 -> 1.7 -> 2-6 -> 6a(pre-rtl) -> 7 -> 8 -> 8a(P3) -> 8b -> 10 -> 10-EXIT -> 11
+L1: Step 1 -> 1.1 -> 1.2* -> 1.7 -> 2-6 -> 6a(pre-rtl) -> 7 -> 8 -> 8a -> 8-EXIT -> 8b -> 10 -> 10-EXIT -> 11
+L2: Step 1 -> 1.1 -> 1.2* -> 1.5 -> 1.6 -> 1.7 -> 2-6 -> 6a(pre-rtl) -> 7/7a -> 8 -> 8a -> 8-EXIT -> 8b -> 9 -> 9-EXIT -> 10 -> 10-EXIT -> 11
+(*=No-SPEC only)
 ```
 
-### 1.6 L2 Sub-Agent Release Gate (mandatory before starting sub-agents)
+### 1.6 L2 Sub-Agent Release Gate (mandatory for L2, skip for L0/L1)
 
 If Step 1.1 decided yes (delegate), do NOT start sub-agents until EVERY item is checked:
 
@@ -220,7 +220,7 @@ If underspecified, run `references/architecture/requirement-extraction-template.
 
 For NVMe/DMA: global source byte cursor (never per-page reset), separate PRP cursors, non-uniform multi-page continuity test. See `references/bus/nvme-guidelines.md` section 14. Full systems (>3 sub-modules): system contract + decomposition + integration invariants before RTL.
 
-### 1.7 SPEC Consistency Gate (mandatory for L1/L2, before Step 2)
+### 1.7 SPEC Consistency Gate (mandatory for L1/L2, skip for L0)
 
 Read `references/workflow/spec-consistency-gate.md`. Before any timing contract, verify the spec is internally self-consistent. For NVMe/DMA, hard-check at minimum: `transfer_bytes = (NLB+1)*LBA_SIZE`, PRP1 offset + first-page capacity, PRP2 page/list boundary, PRP list entries/chaining, AWLEN=beats-1, BRESP/RRESP propagation, expected beat count. If the spec contradicts a formula or protocol claim, fix the SPEC first -- do not write RTL against a self-contradictory spec.
 
@@ -291,7 +291,7 @@ Pick the safest known template from `references/rtl/` or `references/patterns/`.
 
 For L2 subsystems: each submodule selects its own pattern. Document which pattern each module uses, and verify that the patterns are compatible at integration boundaries (e.g., one module's FWFT FIFO output feeding another's registered input -- the latency contract must match).
 
-### 6a. RTL Structural Purity Gate (mandatory for ALL levels, before Step 7)
+### 6a. Pre-RTL Review + Phase Gate (mandatory for ALL levels, before Step 7)
 
 Read `references/rtl/rtl-structural-purity.md` before writing RTL. Hard design-plan gates (RSP1-RSP7):
 
@@ -390,11 +390,11 @@ State the review result: PASS (all items checked) or FAIL (list items fixed).
 
 **NBA ordering hazard check (L1/L2):** Read `references/timing/nba-ordering-guide.md`. Audit: same-block old-value reads, cross-block sequential dependencies, counter-driven registered outputs, pointer-indexed memory reads, counter advances not gated by valid+ready. Fix hazards -> re-run Step 8.
 
-**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8a, 8b, and Step 9/10 as applicable.
+**Critical limitation:** This checklist verifies STRUCTURAL correctness only. It does NOT verify FUNCTIONAL correctness. Always follow with Step 8a, Step 8-EXIT, Step 8b, and Step 9/10 as applicable.
 
 ### 8a. Principle check -- Known Values and Output Discipline (P3, P5a, P5b)
 
-**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8a covers the principles that require actual RTL code to review. Run this BEFORE the verification plan (8b) so findings can inform test priorities.
+**Note:** P1/P2 were reviewed at Step 5a. P4/P6 were reviewed at Step 2a. Step 8a covers the principles that require actual RTL code to review. Run this BEFORE Step 8-EXIT and the verification plan (8b) so findings can inform test priorities.
 
 Read `references/design/design-principles.md` P3, P5a, P5b.
 
@@ -457,6 +457,8 @@ Only clean exit proceeds to Step 8b.
 
 **Minimum test plan:** (1) golden reference per module type, (2) one complete protocol transaction, (3) boundary conditions (empty/full/zero/max), (4) at least one stall test (WREADY=0 >=2 cycles), (5) NVMe/DMA: multi-page transfer with non-uniform data.
 
+**L1 shortcut:** L1 projects skip Steps 9 and 9-EXIT. Proceed directly to Step 10.
+
 ### 9. L2 per-module verification -- write module TB + run module sim
 
 L2 subsystems MUST verify each submodule independently before integration. **This is the first TB-producing step for L2 projects. It includes writing per-module TB files and running per-module simulation only.** L0/L1 skip this step unless the design naturally has independently testable submodules.
@@ -500,7 +502,7 @@ For L2: only after Step 9-EXIT passes. For L0/L1: proceed directly from Step 8b.
 
 ### 10-EXIT. Simulation Phase Gate (stop-go before finalization)
 
-Do NOT proceed to Step 11 until `workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside: sim logs pass `sim_log_gate.py`; L2 module-sim/pre-integration evidence re-confirmed. Final-delivery checks (contract/test matrix, scoreboard substance, delegation provenance, residual-risk) run in Step 11.
+Do NOT proceed to Step 11 until `workflow_gate.py --phase post-sim <project_dir>` exits 0. Inside: sim logs pass `sim_log_gate.py`; L2 module-sim/pre-integration evidence re-confirmed (L0/L1: this check is skipped automatically). Final-delivery checks (contract/test matrix, scoreboard substance, delegation provenance, residual-risk) run in Step 11.
 
 If any FAIL: fix, re-run Steps 8-EXIT through 10, re-check this gate.
 
