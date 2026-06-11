@@ -237,6 +237,15 @@ tb.v:488: $finish called at ... → $finish without ALL_TESTS_PASS, but preceded
 
 When a test fails, follow this procedure:
 
+**Before debugging, classify the error source.** Read `references/debug/error-source-tracing.md`.
+Follow the 4-way decision tree:
+1. Wrong spec understanding? -> return to planning
+2. Upstream module error? -> fix root cause first
+3. Current module error? -> fix locally
+4. Unclear? -> escalate to human with structured report
+
+Do NOT start fixing until the error is classified. Misclassification wastes iterations.
+
 ### Step 0: Classify the failure type
 
 Before pattern matching, classify the failure to choose the right debug approach:

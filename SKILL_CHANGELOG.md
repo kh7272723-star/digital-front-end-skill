@@ -1,4 +1,38 @@
 # Skill 迭代日志
+## 2026-06-11 - Spec2RTL 论文借鉴迭代 (P0/P1/P2/P3)
+
+### 背景
+
+研读 NVIDIA/Cadence/Georgia Tech 的 Spec2RTL-Agent 论文后，提取 4 项可借鉴设计模式：
+Coder+Verifier 成对循环、结构化 Spec 分解字典、四路错误溯源决策树、Human Escalation 协议。
+
+### 改动
+
+| 优先级 | 改动 | 位置 | 说明 |
+|:---:|------|------|------|
+| **P0** | Per-Module Coder+Verifier 循环 | eferences/verification/per-module-coder-verifier.md (新增) + SKILL.md Step 7a | L2 项目每个子模块 RTL 写完后立即 standalone compile + style check，通过才进入下一模块。防止上游 bug 向下游传播。 |
+| **P1** | 结构化 Module Function Dictionary | eferences/architecture/module-function-dict-template.md (新增) + SKILL.md Step 3a | 每个子模块产出标准化 func-dict（inputs/outputs/functionality/error-conditions），作为 RTL 生成时的 spec 参考。防止 spec 信息在阅读-编码间丢失。 |
+| **P2** | 四路错误溯源决策树 | eferences/debug/error-source-tracing.md (新增) + simulation-loop.md + SKILL.md Step 10 | 错误分为四类：spec 理解错误→回规划、上游模块错误→修根因、当前模块错误→本地修、原因不明→escalate。替代盲目试错。 |
+| **P3** | Human Escalation 协议 | eferences/workflow/human-escalation-protocol.md (新增) + SKILL.md 多处 | 统一 escalation 触发条件和报告模板（Trigger/Attempted/Classification/State/Question 五字段）。 |
+
+### 验收
+
+| 命令 | 预期 |
+|------|------|
+| python scripts/skill_static_check.py --root . | PASS |
+| python -m py_compile on new references | N/A (纯文档) |
+| SKILL.md Step 3a/7a 路径引用完整 | 两处均含 backtick 包裹的完整路径 |
+
+### 文件变更
+
+- 新增: eferences/verification/per-module-coder-verifier.md
+- 新增: eferences/architecture/module-function-dict-template.md
+- 新增: eferences/debug/error-source-tracing.md
+- 新增: eferences/workflow/human-escalation-protocol.md
+- 修改: SKILL.md (新增 Step 3a, 7a, 更新 pipeline summary, Step 10 错误溯源引用, escalation 引用)
+- 修改: eferences/verification/simulation-loop.md (Phase 4 开头插入错误溯源)
+
+---
 
 ## 2026-06-08 - Gate Semantic Precision: 门禁语义精准化 (P0/P1/P2)
 

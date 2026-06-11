@@ -61,7 +61,7 @@ Read `references/reference-index.md` for a task-to-reference mapping. Key direct
 - **Verification**: `references/verification/` -- verification guidance, TB examples, assertion examples, coverage models, formal properties, UVM templates, AXI verification (BFM, scoreboard, coverage), simulation loop (lint->compile->simulate->fix), engineering review checklist
 - **Debug**: `references/debug/` -- debug cases, bug pattern library
 - **Existing project**: `references/project/` -- project adaptation, brownfield guidance, large module guidance
-- **CDC/synthesis**: `references/synthesis/` -- CDC guidelines, constraint guidance, synthesis guidance, toolchain closure, formal verification
+- **CDC/synthesis**: `references/synthesis/` + `references/cdc-asymmetric.md` -- CDC guidelines, asymmetric Gray-code CDC, constraint guidance, synthesis guidance, toolchain closure, formal verification
 - **Advanced**: `references/advanced/` -- low-power, DFT, UVM, physical awareness
 - **Design intuition**: `references/design/` -- design heuristics, tool-driven workflow, power/timing/area rules (low-power RTL, timing closure, resource optimization)
 
@@ -118,7 +118,7 @@ Full details: `references/workflow/task-mode-routing.md`. Design Mode follows th
 
 **Phase Exit Gates:** `scripts/workflow_gate.py` only. Each run writes `docs/workflow_cursor.md`; each PASS writes `docs/workflow_state.json` with artifact snapshot (sha256+mtime+size); later phases and final detect stale snapshots. Sibling scripts are debug tools, not phase evidence. `--force` is human recovery only.
 
-**Step boundaries:** 1-6 planning -> 7 RTL-only (no TB) -> 8 self-review + fix bugs -> 7b post-rtl gate (COMPILE_RTL_ONLY, on cleaned RTL) -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
+**Step boundaries:** 1-6 planning -> 3a module func-dict (L2) -> 7 RTL-only (no TB, per 7a coder+verifier for L2) -> 8 self-review + fix bugs -> 7b post-rtl gate (COMPILE_RTL_ONLY, on cleaned RTL) -> 8c principle -> 8b verification PLAN (no TB) -> 9 L2 per-module TB+sim -> 9-EXIT module-sim/pre-integration gate -> 10 integration TB+sim -> 10-EXIT post-sim -> 11 final.
 
 | Phase | Command | Scope |
 |-------|---------|-------|
@@ -246,6 +246,16 @@ Read `references/design/design-principles.md` P4 and P6. Before asking questions
 
 Turn the timing contract into a short design spec with: ports and signal widths, naming conventions, reset and idle behavior, handshake or protocol rules, corner cases. **Also create `docs/contract_implementation_matrix.md` skeleton now** -- list every contract item with blank producer/consumer/TB evidence/waiver columns. Fill progressively during RTL/TB development; do not reconstruct at finalization.
 
+### 3a. Module Function Dictionary (mandatory for L2)
+
+For L2 multi-module projects: produce a structured function dictionary for
+EACH sub-module using the template at `references/architecture/module-function-dict-template.md`. Save each as `docs/module-<name>-func-dict.md`. This dictionary:
+- Extracts inputs/outputs/functionality/error-conditions from the spec
+- Serves as the canonical spec reference during RTL generation (Step 7/7a)
+- Prevents information loss between spec reading and RTL writing
+- Each func-dict must cite specific source lines from the project spec
+For L0/L1 (single-module): optional but recommended; skip if the request is trivial.
+
 ### 4. Identify state elements
 
 List registers or memories that carry state: state registers, FIFO storage, accepted-operation conditions, data/control fields that must move together.
@@ -329,6 +339,16 @@ A module that fails standalone compilation has undeclared dependencies, missing 
 3. **Who consumes this combinationally?** `assign`/`always @(*)` readers see pre-NBA value (IEEE 1364 section 5.3).
 
 Fix hazards per `nba-ordering-guide.md` Layer 3 before writing another line.
+
+### 7a. Per-Module Coder+Verifier Loop (mandatory for L2)
+
+
+For L2 multi-module projects: do NOT generate all RTL at once. Follow the
+per-module coder+verifier loop defined in `references/verification/per-module-coder-verifier.md`. Each sub-module must
+pass standalone compile + style check before the next sub-module is written.
+
+After ALL sub-modules pass, proceed to Step 8 (RTL self-review). For L0/L1
+(single-module), skip 7a and proceed directly to Step 8.
 
 ### 7b. RTL phase exit -- post-rtl gate (mandatory for L1/L2, AFTER self-review)
 
@@ -460,8 +480,8 @@ Only after module-sim/pre-integration gate (Step 9-EXIT) passes. **Includes writ
 **2. Run simulation loop.** Use `scripts/run_sim_guarded.py` as the recommended vvp wrapper (timeout, VCD/log size limits, UTF-8-safe output). Follow `references/verification/simulation-loop.md`: compile -> simulate -> analyze -> fix -> re-sim, max 3 iterations. Do NOT run bare `vvp` -- use the guarded wrapper.
 
 - Compile fail -> fix Verilog syntax/connectivity -> re-run Step 7b -> return to Step 10.
-- Sim fail -> Phase 4 (principle-driven debug): categorize failure, map symptom to P1-P5a, match bug pattern, minimal fix -> re-run Step 8 on changed code -> re-run 7b -> return.
-- Max 3 iterations. 4th failure -> stop and request human review.
+- Sim fail -> Read `references/debug/error-source-tracing.md` FIRST. Classify error source (wrong spec / upstream module / current module / unclear). Then follow the prescribed action per classification. For Category 3 (current module error), use Phase 4 principle-driven debug: map symptom to P1-P5a, match bug pattern, minimal fix -> re-run Step 8 on changed code -> re-run 7b -> return.
+- Max 3 iterations. 4th failure -> escalate per `references/workflow/human-escalation-protocol.md`.
 
 **3. Execute false-pass audit before claiming PASS.** `ALL_TESTS_PASS` present -> do NOT accept. Run Step 8b audit: scan entire log for undetected `exp`/`mismatch`/`xxxx` without `error_cnt++`. If found -> classify as FALSE_PASS, fix TB, re-sim. Only report PASS after audit confirms no hidden evidence. See simulation-loop.md false-pass detection.
 

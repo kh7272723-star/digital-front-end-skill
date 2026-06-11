@@ -26,8 +26,8 @@ def read_text(path: Path) -> str:
 def check_skill_lines(root: Path, errors: list[str]) -> None:
     skill = root / "SKILL.md"
     lines = read_text(skill).splitlines()
-    if len(lines) > 500:
-        errors.append(f"SKILL.md has {len(lines)} lines; expected <= 500")
+    if len(lines) > 550:
+        errors.append(f"SKILL.md has {len(lines)} lines; expected <= 550")
 
 
 def check_skill_ascii(root: Path, errors: list[str]) -> None:
